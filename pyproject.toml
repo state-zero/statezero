@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modelsync"
+version = "0.1.0"
+description = "A short description of your package"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Robert Herring", email = "robert.herring@resipilot.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "django_money==3.4.1",
+    "djangorestframework==3.15.2",
+    "fakeredis==2.27.0",
+    "fastapi==0.115.11",
+    "hypothesis==6.108.5",
+    "jsonschema==4.23.0",
+    "networkx==3.4.2",
+    "openapi_spec_validator==0.7.1",
+    "orjson==3.10.15",
+    "pusher==3.3.0",
+    "pydantic==2.10.6",
+    "rich==13.9.4",
+    "Django==5.1.6"
+]
+
+[project.urls]
+homepage = "https://github.com/modelsync/modelsync"
+repository = "https://github.com/modelsync/modelsync"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["modelsync", "modelsync.*"]
