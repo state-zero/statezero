@@ -11,7 +11,7 @@ __pycache__/
 db.sqlite3
 
 # Hypothesis
-*hypothesis/
+.hypothesis/
 
 # If you have a local SQLite DB file, ignore it:
 *.sqlite3

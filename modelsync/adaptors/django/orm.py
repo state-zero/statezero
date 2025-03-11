@@ -694,21 +694,39 @@ class DjangoORMAdapter(AbstractORMProvider):
     def build_model_graph(
         self, model: Type[models.Model], model_graph: nx.DiGraph = None
     ) -> nx.DiGraph:
+        """
+        Build a directed graph of models and their fields, focusing on direct relationships.
+        
+        Args:
+            model: The Django model to build the graph for
+            model_graph: An existing graph to add to (optional)
+            
+        Returns:
+            nx.DiGraph: The model graph
+        """
+        from django.db.models.fields.related import RelatedField, ForeignObjectRel
+        
         if model_graph is None:
             model_graph = nx.DiGraph()
-
+            
         # Use the adapter's get_model_name method.
         model_name = self.get_model_name(model)
-
+        
         # Add the model node if it doesn't exist.
         if not model_graph.has_node(model_name):
             model_graph.add_node(
                 model_name, data=ModelNode(model_name=model_name, model=model)
             )
-
+        
         # Iterate over all fields in the model.
         for field in model._meta.get_fields():
             field_name = field.name
+            
+            # Skip reverse relations for validation purposes
+            # These are relationships defined on other models pointing to this model
+            if isinstance(field, ForeignObjectRel):
+                continue
+                
             field_node = f"{model_name}::{field_name}"
             field_node_data = FieldNode(
                 model_name=model_name,
@@ -722,17 +740,18 @@ class DjangoORMAdapter(AbstractORMProvider):
             )
             model_graph.add_node(field_node, data=field_node_data)
             model_graph.add_edge(model_name, field_node)
+            
             if field.is_relation and field.related_model:
                 related_model = field.related_model
                 related_model_name = self.get_model_name(related_model)
                 if not model_graph.has_node(related_model_name):
                     self.build_model_graph(related_model, model_graph)
                 model_graph.add_edge(field_node, related_model_name)
-
+        
         # Add additional (computed) fields from the model's configuration.
         try:
             from modelsync.adaptors.django.config import registry
-
+            
             config = registry.get_config(model)
             for additional_field in config.additional_fields:
                 add_field_name = additional_field.name
@@ -757,7 +776,7 @@ class DjangoORMAdapter(AbstractORMProvider):
                 model_graph.add_edge(model_name, add_field_node)
         except ValueError:
             pass
-
+        
         return model_graph
 
     def register_event_signals(self, event_bus: EventBus) -> None:

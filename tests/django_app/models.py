@@ -2,7 +2,9 @@ from django.contrib.postgres.fields import JSONField
 from django.db import models
 from django.utils import timezone
 from djmoney.models.fields import MoneyField
+from django.contrib.auth import get_user_model
 
+User = get_user_model()
 
 class DummyRelatedModel(models.Model):
     name = models.CharField(max_length=50)

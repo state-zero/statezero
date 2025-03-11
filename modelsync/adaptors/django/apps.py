@@ -36,6 +36,7 @@ class ModelSyncDjangoConfig(DjangoAppConfig):
 
         # Once all the apps are imported, initialize ModelSync and provide the registry to the event bus.
         config.initialize()
+        config.validate_exposed_models(registry) # Raises an exception if a non ModelSync model is implicitly exposed
         config.event_bus.set_registry(registry)
 
         # Print the list of published models (from registry) to confirm ModelSync is running.
@@ -50,7 +51,7 @@ class ModelSyncDjangoConfig(DjangoAppConfig):
                 base_message = (
                     "[bold green]ModelSync is exposing models:[/bold green] [bold yellow]"
                     + ", ".join(published_models)
-                    + "[/bold yellow]"
+                    + "[/bold yellow]"  
                 )
             else:
                 base_message = "[bold yellow]ModelSync is running but no models are registered.[/bold yellow]"

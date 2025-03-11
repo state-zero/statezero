@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+import networkx as nx
 
 from modelsync.core.classes import AdditionalField
 from modelsync.core.event_bus import EventBus
@@ -68,6 +69,84 @@ class AppConfig(ABC):
             NotImplementedError: If the method is not implemented in a subclass.
         """
         pass
+
+    def validate_exposed_models(self, registry: Registry) -> bool:
+        """
+        Validate that all registered models only expose fields 
+        that reference other registered models.
+        
+        This implementation is ORM-agnostic, using the configured orm_provider
+        to access model relationships.
+        
+        Args:
+            registry: The global registry containing registered models
+            
+        Returns:
+            bool: True if validation passes
+            
+        Raises:
+            ValueError: If a registered model exposes an unregistered model
+        """
+        if not self.orm_provider:
+            raise ValueError("ORM provider must be initialized before validation")
+            
+        # Build complete model graph for all registered models
+        model_graph = nx.DiGraph()
+        for model in registry._models_config.keys():
+            model_graph = self.orm_provider.build_model_graph(model, model_graph)
+        
+        # Check each registered model
+        for model, config in registry._models_config.items():
+            # Get model name for error messages and graph lookup
+            model_name = self.orm_provider.get_model_name(model)
+            
+            # Check all three field permission types
+            field_types = [
+                ("visible_fields", "visible"),
+                ("editable_fields", "editable"),
+                ("create_fields", "createable")
+            ]
+            
+            for method_name, description in field_types:
+                # Get the set of fields from all permissions (union)
+                allowed_fields = set()
+                for perm_class in config.permissions:
+                    perm = perm_class()
+                    method = getattr(perm, method_name)
+                    fields = method(None, model)  # No request needed for validation
+                    
+                    from modelsync.core.constants import ALL_FIELDS
+                    if ALL_FIELDS in fields:
+                        # If ALL_FIELDS is used, get all field nodes from the graph
+                        for _, field_node in model_graph.out_edges(model_name):
+                            if "::" in field_node:
+                                field_name = field_node.split("::")[-1]
+                                allowed_fields.add(field_name)
+                        break
+                    allowed_fields.update(fields)
+                
+                # Check each field to see if it's a relation to an unregistered model
+                for field_name in allowed_fields:
+                    field_node = f"{model_name}::{field_name}"
+                    
+                    if model_graph.has_node(field_node):
+                        node_data = model_graph.nodes[field_node].get("data")
+                        if node_data and node_data.is_relation:
+                            related_model_name = node_data.related_model
+                            if related_model_name:
+                                # Get the related model from its name
+                                related_model = self.orm_provider.get_model_by_name(related_model_name)
+                                
+                                # Check if related model is registered
+                                if related_model not in registry._models_config:
+                                    raise ValueError(
+                                        f"Model '{model_name}' exposes relation '{field_name}' "
+                                        f"to unregistered model '{related_model_name}' through {description} fields. "
+                                        f"Please register '{related_model_name}' with ModelSync "
+                                        f"or restrict access to this field."
+                                    )
+        
+        return True
 
 
 class ModelConfig:
@@ -168,10 +247,6 @@ class ModelConfig:
             else:
                 resolved[key] = queryset
         return resolved
-
-
-        
-
 
 class Registry:
     """
