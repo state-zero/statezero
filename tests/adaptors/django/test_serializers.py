@@ -21,8 +21,6 @@ from modelsync.adaptors.django.serializers import (DRFDynamicSerializer,
                                                    DynamicModelSerializer,
                                                    RelatedFieldWithRepr,
                                                    get_custom_serializer)
-from modelsync.core.classes import ModelSummaryRepresentation
-from modelsync.core.interfaces import AbstractDataSerializer
 from tests.django_app.models import (ComprehensiveModel, DeepModelLevel1,
                                      DeepModelLevel2, DeepModelLevel3,
                                      DummyModel, DummyRelatedModel)
@@ -253,7 +251,7 @@ class DynamicModelSerializerTests(TestCase):
                 self.custom_querysets = {}
 
         additional_field = DummyAdditionalField(
-            "computed", serializers.CharField(max_length=255), title="Computed Field"
+            "computed", models.CharField(max_length=255), title="Computed Field"
         )
         dummy_config = DummyModelConfig([additional_field])
         original_get_config = registry.get_config

@@ -5,7 +5,7 @@ from django.test import TestCase
 
 from modelsync.adaptors.django.config import registry
 from modelsync.adaptors.django.orm import DjangoORMAdapter
-from modelsync.core.ast_parser import ASTValidator
+from modelsync.core.ast_validator import ASTValidator
 from modelsync.core.config import ModelConfig
 from modelsync.core.exceptions import PermissionDenied
 from modelsync.core.interfaces import AbstractPermission
@@ -47,6 +47,9 @@ class DummyPermission(AbstractPermission):
 
     def editable_fields(self, request, model):
         return self.visible_fields(request, model)
+    
+    def create_fields(self, request, model):
+        return self.editable_fields(request, model)
 
 
 # -------------------------------------------------------------------------
@@ -71,6 +74,9 @@ class DenyReadPermission(AbstractPermission):
 
     def editable_fields(self, request, model):
         return self.visible_fields(request, model)
+    
+    def create_fields(self, request, model):
+        return self.editable_fields(request, model)
 
 
 # -------------------------------------------------------------------------
@@ -100,6 +106,9 @@ class MixedPermission(AbstractPermission):
 
     def editable_fields(self, request, model):
         return self.visible_fields(request, model)
+    
+    def create_fields(self, request, model):
+        return self.editable_fields(request, model)
 
 
 # -------------------------------------------------------------------------
@@ -125,6 +134,9 @@ class PartialPermission(AbstractPermission):
 
     def editable_fields(self, request, model):
         return self.visible_fields(request, model)
+    
+    def create_fields(self, request, model):
+        return self.editable_fields(request, model)
 
 
 # -------------------------------------------------------------------------

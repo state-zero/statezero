@@ -174,8 +174,8 @@ class PermissionsTest(APITestCase):
         from modelsync.adaptors.django.config import registry
 
         original_config = registry.get_config(DummyModel)
-        original_permissions = original_config.permissions
-        original_config.permissions = [ActionTypeTestPermission]
+        original_permissions = original_config._permissions
+        original_config._permissions = [ActionTypeTestPermission]
 
         try:
             url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
@@ -204,7 +204,7 @@ class PermissionsTest(APITestCase):
 
         finally:
             # Restore original permissions
-            original_config.permissions = original_permissions
+            original_config._permissions = original_permissions
 
     def test_editable_fields_enforced(self):
         """Test that the editable_fields from permissions are properly enforced."""
@@ -232,8 +232,8 @@ class PermissionsTest(APITestCase):
 
         # Override permissions temporarily using the class
         original_config = registry.get_config(DummyModel)
-        original_permissions = original_config.permissions
-        original_config.permissions = [EditableFieldsTestPermission]
+        original_permissions = original_config._permissions
+        original_config._permissions = [EditableFieldsTestPermission]
 
         try:
             url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
@@ -292,4 +292,4 @@ class PermissionsTest(APITestCase):
 
         finally:
             # Restore original permissions
-            original_config.permissions = original_permissions
+            original_config._permissions = original_permissions

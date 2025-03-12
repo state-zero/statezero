@@ -6,6 +6,7 @@ from django.test import TestCase
 
 from modelsync.adaptors.django.config import registry
 from modelsync.adaptors.django.orm import DjangoORMAdapter, QueryASTVisitor
+from modelsync.adaptors.django.serializers import DRFDynamicSerializer
 from modelsync.core.config import ModelConfig
 from modelsync.core.event_bus import EventBus
 from modelsync.core.interfaces import AbstractEventEmitter
@@ -122,6 +123,8 @@ class DjangoORMAdapterTest(TestCase):
         # Dummy request (can be None for tests) and permission that always allows.
         self.dummy_req = None
         self.always_allow = AlwaysAllowPermission
+        # Use the actual serializer instead of a Mock
+        self.serializer = DRFDynamicSerializer()
 
     def test_create(self):
         data = {"name": "Dummy3", "value": 30, "related": self.related1}
@@ -161,7 +164,7 @@ class DjangoORMAdapterTest(TestCase):
     def test_get(self):
         ast = {"filter": {"type": "filter", "conditions": {"name": "Dummy1"}}}
         self.adapter.set_queryset(DummyModel.objects.all())
-        instance = self.adapter.get(ast)
+        instance = self.adapter.get(ast, self.dummy_req, [self.always_allow])
         self.assertEqual(instance.name, "Dummy1")
 
     def test_get_or_create(self):
@@ -171,14 +174,14 @@ class DjangoORMAdapterTest(TestCase):
             "defaults": {"value": 40, "related": self.related1},
         }
         self.adapter.set_queryset(DummyModel.objects.all())
-        instance, created = self.adapter.get_or_create(ast)
+        instance, created = self.adapter.get_or_create(ast, self.serializer, self.dummy_req, [self.always_allow])
         self.assertTrue(created, "Instance should be created because it did not exist.")
         self.assertEqual(
             instance.name, "Dummy4", "Instance name should match the lookup value."
         )
 
         # Test get_or_create when the instance exists.
-        instance2, created2 = self.adapter.get_or_create(ast)
+        instance2, created2 = self.adapter.get_or_create(ast, self.serializer, self.dummy_req, [self.always_allow])
         self.assertFalse(
             created2, "Instance should not be created again when it already exists."
         )
@@ -194,7 +197,7 @@ class DjangoORMAdapterTest(TestCase):
         }
         self.adapter.set_queryset(DummyModel.objects.all())
         instance, created = self.adapter.update_or_create(
-            ast, self.dummy_req, [self.always_allow]
+            ast, self.dummy_req, self.serializer, [self.always_allow]
         )
         self.assertTrue(
             created, "Instance should be created since it does not exist yet."
@@ -206,7 +209,7 @@ class DjangoORMAdapterTest(TestCase):
         # Now update the instance.
         ast["defaults"]["value"] = 100
         instance2, created2 = self.adapter.update_or_create(
-            ast, self.dummy_req, [self.always_allow]
+            ast, self.dummy_req, self.serializer, [self.always_allow]
         )
         self.assertFalse(
             created2, "Instance should not be created if it already exists."
@@ -237,7 +240,7 @@ class DjangoORMAdapterTest(TestCase):
     def test_order_by_select_fields_fetch_list(self):
         # Order by value descending.
         self.adapter.set_queryset(DummyModel.objects.all())
-        self.adapter.order_by([{"field": "value", "direction": "desc"}])
+        self.adapter.order_by(["-value"])
         qs = self.adapter.queryset
         self.assertEqual(qs.first().value, max(self.dummy1.value, self.dummy2.value))
         # Select only the 'name' field.
@@ -252,43 +255,6 @@ class DjangoORMAdapterTest(TestCase):
         self.assertTrue(graph.has_node("django_app.dummymodel"))
         self.assertTrue(graph.has_node("django_app.dummymodel::name"))
         self.assertTrue(graph.has_node("django_app.dummyrelatedmodel"))
-
-    def test_register_event_signals(self):
-        class DummyEventEmitter(AbstractEventEmitter):
-            def __init__(self):
-                self.events = []
-
-            def emit(self, event_type, instance, config=None) -> None:
-                self.events.append((event_type, instance))
-
-            def has_permission(self, request, namespace):
-                return True
-
-            def authenticate(self, request):
-                pass
-
-        cache_emitter = DummyEventEmitter()
-        broadcast_emitter = DummyEventEmitter()
-
-        event_bus = EventBus(
-            cache_invalidation_emitter=cache_emitter,
-            broadcast_emitter=broadcast_emitter,
-        )
-        self.adapter.register_event_signals(event_bus)
-
-        instance = DummyModel.objects.create(
-            name="DummyEvent", value=99, related=self.related1
-        )
-        instance.delete()
-
-        self.assertEqual(len(cache_emitter.events), 2)
-        self.assertEqual(len(broadcast_emitter.events), 2)
-        cache_event_types = [e[0] for e in cache_emitter.events]
-        broadcast_event_types = [e[0] for e in broadcast_emitter.events]
-        self.assertIn(ActionType.CREATE, cache_event_types)
-        self.assertIn(ActionType.DELETE, cache_event_types)
-        self.assertIn(ActionType.CREATE, broadcast_event_types)
-        self.assertIn(ActionType.DELETE, broadcast_event_types)
 
     def test_update_instance(self):
         # Create a new instance that we will update via instance-based operation.

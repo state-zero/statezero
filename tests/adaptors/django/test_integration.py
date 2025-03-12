@@ -309,7 +309,8 @@ class ModelSyncE2ETest(APITestCase):
         payload = {"channel_name": "private-django_app", "socket_id": "123.456"}
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
-        self.assertIsNone(response.data)
+        self.assertIn("auth", response.data)
+        self.assertEqual(1, len(response.data))
 
     def test_deep_model_schema(self):
         url = reverse("modelsync:schema_view", args=["django_app.DeepModelLevel1"])

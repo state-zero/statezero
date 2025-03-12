@@ -173,7 +173,8 @@ class TestAdditionalFields(unittest.TestCase):
             additional_fields = [
                 AdditionalField(
                     name="extra_field",
-                    field=models.CharField(max_length=20, verbose_name="Extra"),
+                    field=models.CharField(max_length=20),
+                    title="Extra"
                 )
             ]
             filterable_fields = ALL_FIELDS
