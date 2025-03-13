@@ -5,8 +5,8 @@
 Connect your Django backend to React/Vue frontends with 90% less code.  
 No repetitive serializers, views or tight coupling.
 
-[Get Started](https://ormbridge.dev/getting-started/) | 
-[Documentation](https://ormbridge.dev/advanced/query-syntax) | 
+[Get Started](https://ormbridge.com/getting-started/) | 
+[Documentation](https://ormbridge.com/advanced/query-syntax) | 
 [Report Bug](https://github.com/yourusername/ormbridge/issues)
 
 ## The Python-JavaScript Disconnect
@@ -122,7 +122,7 @@ const featuredTechPosts = await Post.objects.filter({
 
 For complete setup instructions, advanced usage, and API references, visit:
 
-📖 [ormbridge.dev](https://ormbridge.dev)
+📖 [ormbridge.com](https://ormbridge.com)
 
 ## License
 
