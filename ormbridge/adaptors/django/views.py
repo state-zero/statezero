@@ -24,9 +24,8 @@ class EventsAuthView(APIView):
     It uses the broadcast emitter from the event bus to check access and then
     calls its authenticate method with the request.
     """
-
-    permission_classes = [ORMBridgeViewAccessGate]
-
+    permission_classes = ['rest_framework.permissions.AllowAny']
+    
     def post(self, request, *args, **kwargs):
         channel_name = request.data.get("channel_name")
         socket_id = request.data.get("socket_id")
@@ -83,7 +82,7 @@ class ModelListView(APIView):
 
 class ModelView(APIView):
 
-    permission_classes = [ORMBridgeViewAccessGate]
+    permission_classes = ['rest_framework.permissions.AllowAny']
 
     @transaction.atomic
     def post(self, request, model_name):
@@ -96,7 +95,6 @@ class ModelView(APIView):
 
 
 class SchemaView(APIView):
-    
     permission_classes = [ORMBridgeViewAccessGate]
 
     def get(self, request, model_name):
