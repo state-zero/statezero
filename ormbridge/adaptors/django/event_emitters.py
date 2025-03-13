@@ -1,13 +1,17 @@
 from typing import Optional, Type
 
+import logging
 import pusher
 from django.conf import settings
 from rest_framework.request import Request
+from django.utils.module_loading import import_string
 
 from ormbridge.adaptors.django.config import config
 from ormbridge.core.event_emitters import (ConsoleEventEmitter,
                                            PusherEventEmitter)
 from ormbridge.core.types import ActionType, ORMModel
+
+logger = logging.getLogger(__name__)
 
 
 class DjangoConsoleEventEmitter(ConsoleEventEmitter):
@@ -17,10 +21,27 @@ class DjangoConsoleEventEmitter(ConsoleEventEmitter):
         and get_namespace functions.
         """
         super().__init__(get_model_name=config.orm_provider.get_model_name)
+        
+        # Get permission class from settings with a default fallback
+        permission_class_path = getattr(
+            settings,
+            "ORMBRIDGE_EMITTER_PERMISSION_CLASS",
+            "rest_framework.permissions.IsAuthenticated",
+        )
+        try:
+            self.permission_class = import_string(permission_class_path)()
+            logger.debug("Using emitter permission class: %s", permission_class_path)
+        except Exception as e:
+            logger.error(
+                "Error importing emitter permission class '%s': %s", permission_class_path, str(e)
+            )
+            # Default to requiring authentication as a safe fallback
+            from rest_framework.permissions import IsAuthenticated
+            self.permission_class = IsAuthenticated()
 
     def has_permission(self, request: Request, namespace: str) -> bool:
-        # Use Django's user authentication system.
-        return request.user.is_authenticated
+        # Delegate to the configured permission class
+        return self.permission_class.has_permission(request, None)
 
 
 class DjangoPusherEventEmitter(PusherEventEmitter):
@@ -55,7 +76,24 @@ class DjangoPusherEventEmitter(PusherEventEmitter):
             pusher_client=pusher_client,
             get_model_name=config.orm_provider.get_model_name,
         )
+        
+        # Get permission class from settings with a default fallback
+        permission_class_path = getattr(
+            settings,
+            "ORMBRIDGE_EMITTER_PERMISSION_CLASS",
+            "rest_framework.permissions.IsAuthenticated",
+        )
+        try:
+            self.permission_class = import_string(permission_class_path)()
+            logger.debug("Using emitter permission class: %s", permission_class_path)
+        except Exception as e:
+            logger.error(
+                "Error importing emitter permission class '%s': %s", permission_class_path, str(e)
+            )
+            # Default to requiring authentication as a safe fallback
+            from rest_framework.permissions import IsAuthenticated
+            self.permission_class = IsAuthenticated()
 
     def has_permission(self, request: Request, namespace: str) -> bool:
-        # Use Django's user authentication system.
-        return request.user.is_authenticated
+        # Delegate to the configured permission class
+        return self.permission_class.has_permission(request, None)
