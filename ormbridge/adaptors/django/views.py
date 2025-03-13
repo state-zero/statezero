@@ -5,6 +5,7 @@ from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
 
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.adaptors.django.exception_handler import \
@@ -24,7 +25,7 @@ class EventsAuthView(APIView):
     It uses the broadcast emitter from the event bus to check access and then
     calls its authenticate method with the request.
     """
-    permission_classes = ['rest_framework.permissions.AllowAny']
+    permission_classes = [AllowAny]
     
     def post(self, request, *args, **kwargs):
         channel_name = request.data.get("channel_name")
@@ -82,7 +83,7 @@ class ModelListView(APIView):
 
 class ModelView(APIView):
 
-    permission_classes = ['rest_framework.permissions.AllowAny']
+    permission_classes = [AllowAny]
 
     @transaction.atomic
     def post(self, request, model_name):
