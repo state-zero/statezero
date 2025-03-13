@@ -139,7 +139,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
     def get_pk_schema(self, field: models.Field) -> SchemaFieldMetadata:
         title = self.get_field_title(field)
         description = (
-            field.help_text if hasattr(field, "help_text") and field.help_text else None
+            str(field.help_text) if hasattr(field, "help_text") and field.help_text else None
         )
 
         if isinstance(field, models.AutoField):
@@ -205,7 +205,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         max_digits = getattr(field, "max_digits", None)
         decimal_places = getattr(field, "decimal_places", None)
         description = (
-            field.help_text if hasattr(field, "help_text") and field.help_text else None
+            str(field.help_text) if hasattr(field, "help_text") and field.help_text else None
         )
 
         if isinstance(field, models.TextField):
