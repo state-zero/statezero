@@ -36,7 +36,7 @@ class AllowAllPermission(AbstractPermission):
         }
     
     def _get_user_fields(self) -> Set[str]:
-        return {"id", "username", "email", "first_name", "last_name"}
+        return {"id", "username"}
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
         if model is User:
@@ -90,7 +90,7 @@ class IsAuthenticatedPermission(AbstractPermission):
         }
     
     def _get_user_fields(self) -> Set[str]:
-        return {"id", "username", "email", "first_name", "last_name"}
+        return {"id", "username"}
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not request.user.is_authenticated:

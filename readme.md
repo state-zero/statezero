@@ -83,6 +83,14 @@ npm install https://github.com/ormbridge/ormbridge-client
 
 ### 3. Generate TypeScript Models
 
+Run your backend in development mode with:
+
+```bash
+python manage.py runserver
+```
+
+And run:
+
 ```bash
 npx ormbridge sync-models
 ```
