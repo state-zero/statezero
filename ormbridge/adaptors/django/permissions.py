@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Set, Type
 
+from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.utils.module_loading import import_string
@@ -12,6 +13,7 @@ from ormbridge.core.types import ActionType, ORMModel, RequestType
 
 logger = logging.getLogger(__name__)
 
+User = get_user_model()
 
 class AllowAllPermission(AbstractPermission):
     def filter_queryset(self, request: RequestType, queryset: Any) -> Any:
@@ -32,14 +34,23 @@ class AllowAllPermission(AbstractPermission):
             ActionType.READ,
             ActionType.UPDATE,
         }
+    
+    def _get_user_fields(self) -> Set[str]:
+        return {"id", "username", "email", "first_name", "last_name"}
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
+        if isinstance(model, User):
+            return self._get_user_fields()
         return {ALL_FIELDS}
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
+        if isinstance(model, User):
+            return self._get_user_fields()
         return {ALL_FIELDS}
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
+        if isinstance(model, User):
+            return self._get_user_fields()
         return {ALL_FIELDS}
 
 
@@ -77,20 +88,29 @@ class IsAuthenticatedPermission(AbstractPermission):
             ActionType.READ,
             ActionType.UPDATE,
         }
+    
+    def _get_user_fields(self) -> Set[str]:
+        return {"id", "username", "email", "first_name", "last_name"}
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not request.user.is_authenticated:
             return set()
+        if isinstance(model, User):
+            return self._get_user_fields()
         return {ALL_FIELDS}
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not request.user.is_authenticated:
             return set()
+        if isinstance(model, User):
+            return self._get_user_fields()
         return {ALL_FIELDS}
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not request.user.is_authenticated:
             return set()
+        if isinstance(model, User):
+            return self._get_user_fields()
         return {ALL_FIELDS}
 
 
@@ -128,20 +148,29 @@ class IsStaffPermission(AbstractPermission):
             ActionType.READ,
             ActionType.UPDATE,
         }
+    
+    def _get_user_fields(self) -> Set[str]:
+        return {"id", "username", "email", "first_name", "last_name"}
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not (request.user.is_authenticated and request.user.is_staff):
             return set()
+        if isinstance(model, User):
+            return self._get_user_fields()
         return {ALL_FIELDS}
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not (request.user.is_authenticated and request.user.is_staff):
             return set()
+        if isinstance(model, User):
+            return self._get_user_fields()
         return {ALL_FIELDS}
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not (request.user.is_authenticated and request.user.is_staff):
             return set()
+        if isinstance(model, User):
+            return self._get_user_fields()
         return {ALL_FIELDS}
 
 
