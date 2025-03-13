@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 import networkx as nx
 
+from ormbridge.core.constants import ALL_FIELDS
 from ormbridge.core.classes import AdditionalField
 from ormbridge.core.event_bus import EventBus
 from ormbridge.core.interfaces import (AbstractCustomQueryset,
@@ -94,58 +95,43 @@ class AppConfig(ABC):
         model_graph = nx.DiGraph()
         for model in registry._models_config.keys():
             model_graph = self.orm_provider.build_model_graph(model, model_graph)
-        
+            
         # Check each registered model
         for model, config in registry._models_config.items():
             # Get model name for error messages and graph lookup
             model_name = self.orm_provider.get_model_name(model)
             
-            # Check all three field permission types
-            field_types = [
-                ("visible_fields", "visible"),
-                ("editable_fields", "editable"),
-                ("create_fields", "createable")
-            ]
+            # Get all field nodes from the graph for this model
+            all_model_fields = set()
+            for _, field_node in model_graph.out_edges(model_name):
+                if "::" in field_node:
+                    field_name = field_node.split("::")[-1]
+                    all_model_fields.add(field_name)
+                    
+            # Determine which fields to check based on config.fields
+            fields_to_check = config.fields if config.fields != {ALL_FIELDS} else all_model_fields
             
-            for method_name, description in field_types:
-                # Get the set of fields from all permissions (union)
-                allowed_fields = set()
-                for perm_class in config.permissions:
-                    perm = perm_class()
-                    method = getattr(perm, method_name)
-                    fields = method(None, model)  # No request needed for validation
-                    
-                    from ormbridge.core.constants import ALL_FIELDS
-                    if ALL_FIELDS in fields:
-                        # If ALL_FIELDS is used, get all field nodes from the graph
-                        for _, field_node in model_graph.out_edges(model_name):
-                            if "::" in field_node:
-                                field_name = field_node.split("::")[-1]
-                                allowed_fields.add(field_name)
-                        break
-                    allowed_fields.update(fields)
+            # Check each field to see if it's a relation to an unregistered model
+            for field_name in fields_to_check:
+                field_node = f"{model_name}::{field_name}"
                 
-                # Check each field to see if it's a relation to an unregistered model
-                for field_name in allowed_fields:
-                    field_node = f"{model_name}::{field_name}"
-                    
-                    if model_graph.has_node(field_node):
-                        node_data = model_graph.nodes[field_node].get("data")
-                        if node_data and node_data.is_relation:
-                            related_model_name = node_data.related_model
-                            if related_model_name:
-                                # Get the related model from its name
-                                related_model = self.orm_provider.get_model_by_name(related_model_name)
+                if model_graph.has_node(field_node):
+                    node_data = model_graph.nodes[field_node].get("data")
+                    if node_data and node_data.is_relation:
+                        related_model_name = node_data.related_model
+                        if related_model_name:
+                            # Get the related model from its name
+                            related_model = self.orm_provider.get_model_by_name(related_model_name)
+                            
+                            # Check if related model is registered
+                            if related_model not in registry._models_config:
+                                raise ValueError(
+                                    f"Model '{model_name}' exposes relation '{field_name}' "
+                                    f"to unregistered model '{related_model_name}'. "
+                                    f"Please register '{related_model_name}' with ORMBridge "
+                                    f"or restrict access to this field by excluding it from the 'fields' parameter."
+                                )
                                 
-                                # Check if related model is registered
-                                if related_model not in registry._models_config:
-                                    raise ValueError(
-                                        f"Model '{model_name}' exposes relation '{field_name}' "
-                                        f"to unregistered model '{related_model_name}' through {description} fields. "
-                                        f"Please register '{related_model_name}' with ORMBridge "
-                                        f"or restrict access to this field."
-                                    )
-        
         return True
 
 
@@ -199,6 +185,7 @@ class ModelConfig:
         filterable_fields: Optional[Set[str]] = None,
         searchable_fields: Optional[Set[str]] = None,
         ordering_fields: Optional[Set[str]] = None,
+        fields: Optional[Set[str]] = None,
         additional_namespace_resolvers: NamespaceResolver = None,
         DEBUG: bool = False,
     ):
@@ -213,6 +200,7 @@ class ModelConfig:
         self.filterable_fields = filterable_fields or set()
         self.searchable_fields = searchable_fields or set()
         self.ordering_fields = ordering_fields or set()
+        self.fields = fields or {ALL_FIELDS}
         self.additional_namespace_resolvers = additional_namespace_resolvers or []
         self.DEBUG = DEBUG or False
 

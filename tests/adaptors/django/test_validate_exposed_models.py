@@ -153,19 +153,20 @@ class SimpleValidateExposedModelsTests(TestCase):
         # Create a fresh registry for this test
         registry._models_config.clear()
         
-        # Register model with relation but restrict field access
+        # Register model with relation but restrict field access using fields parameter
         registry.register(
             TestModelWithUnregisteredRelation,
             ModelConfig(
                 model=TestModelWithUnregisteredRelation,
-                permissions=[RestrictedFieldsPermission],  # Only exposes name field
+                permissions=[RestrictedFieldsPermission],  # This is now ignored for field validation
+                fields={"name"},  # Only expose name field, not the relation
             )
         )
         
         # Validation should pass since the relation field is not exposed
         result = config.validate_exposed_models(registry)
         self.assertTrue(result)
-        
+
     def test_m2m_relation_validation(self):
         """Test validation with many-to-many relationships"""
         # Create a fresh registry for this test
@@ -318,12 +319,13 @@ class SimpleValidateExposedModelsTests(TestCase):
                 app_label = "django_app"
                 managed = False
         
-        # Register only the ContentComment model (with all fields exposed)
+        # Register only the ContentComment model with all fields exposed
         registry.register(
             ContentComment,
             ModelConfig(
                 model=ContentComment,
-                permissions=[AllowAllPermission],  # This exposes all fields
+                permissions=[AllowAllPermission],
+                fields={"content", "text"},  # Explicitly include all fields
             )
         )
         
@@ -341,6 +343,7 @@ class SimpleValidateExposedModelsTests(TestCase):
             ModelConfig(
                 model=UserContent,
                 permissions=[AllowAllPermission],
+                fields={"profile", "title"},  # Explicitly include all fields
             )
         )
         
@@ -348,7 +351,8 @@ class SimpleValidateExposedModelsTests(TestCase):
             UserProfile,
             ModelConfig(
                 model=UserProfile,
-                permissions=[AllowAllPermission],  # This will expose the user relation
+                permissions=[AllowAllPermission],
+                fields={"user", "bio"},  # Explicitly include the user relation
             )
         )
         
@@ -361,26 +365,16 @@ class SimpleValidateExposedModelsTests(TestCase):
         self.assertIn("user", error_msg)  # The direct relation to User
         self.assertIn("auth.user", error_msg.lower())  # The User model identifier
         
-        # Finally, let's test with restricted permissions
+        # Finally, let's test with restricted fields
         registry._models_config.clear()
         
-        # Define a permission that only allows the text field on ContentComment
-        class RestrictedCommentPermission(AllowAllPermission):
-            def visible_fields(self, request, model):
-                return {"text"}
-            
-            def editable_fields(self, request, model):
-                return {"text"}
-            
-            def create_fields(self, request, model):
-                return {"text"}
-        
-        # Register with the restricted permission
+        # Register with only the text field exposed
         registry.register(
             ContentComment,
             ModelConfig(
                 model=ContentComment,
-                permissions=[RestrictedCommentPermission],
+                permissions=[AllowAllPermission],  # Permission doesn't matter for field validation now
+                fields={"text"},  # Only expose the text field, not the relation
             )
         )
         

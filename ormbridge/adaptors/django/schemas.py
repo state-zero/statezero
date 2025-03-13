@@ -36,6 +36,9 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         all_fields = list(model._meta.fields) + list(model._meta.many_to_many)
         all_field_names: Set[str] = set()
 
+        if model_config.fields != {ALL_FIELDS}:
+            all_fields = [field for field in all_fields if field.name in model_config.fields]
+
         for field in all_fields:
             # Skip auto-created reverse relations.
             if getattr(field, "auto_created", False) and not field.concrete:

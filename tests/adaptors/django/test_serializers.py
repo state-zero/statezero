@@ -16,6 +16,7 @@ from django.db import models
 from django.test import TestCase
 from rest_framework import serializers
 
+from ormbridge.core.constants import ALL_FIELDS
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.adaptors.django.serializers import (DRFDynamicSerializer,
                                                    DynamicModelSerializer,
@@ -249,6 +250,7 @@ class DynamicModelSerializerTests(TestCase):
                 self.pre_hooks = []
                 self.post_hooks = []
                 self.custom_querysets = {}
+                self.fields = {ALL_FIELDS}
 
         additional_field = DummyAdditionalField(
             "computed", models.CharField(max_length=255), title="Computed Field"
