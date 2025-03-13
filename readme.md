@@ -1,138 +1,129 @@
-# ModelSync (Preview Release)
+# ModelSync
 
-> Eliminate full-stack boilerplate by automatically generating type-safe frontend models from your backend.
+**The Real-Time Django to JavaScript Data Bridge**
 
-**⚠️ Note:** This is an early preview release intended for testing and feedback. The code should not be considered ready for production use at this time. We welcome your input to help shape the future of ModelSync!
+Connect your Django backend to React/Vue frontends with 90% less code.  
+No repetitive serializers, views or tight coupling.
 
-ModelSync connects your backend models directly to your frontend with zero boilerplate, enabling intuitive, type-safe data access that works with modern frontend frameworks like React, Vue, and Svelte.
+[Get Started](https://modelsync.dev/getting-started/) | 
+[Documentation](https://modelsync.dev/advanced/query-syntax) | 
+[Report Bug](https://github.com/yourusername/modelsync/issues)
 
-## Key Features
+## The Python-JavaScript Disconnect
 
-- 🚀 **90% Less Code**: No more repetitive API layers, serializers, or TypeScript interfaces
-- 🔒 **Type Safety**: End-to-end type safety from backend to frontend
-- ⚡ **Real-Time Ready**: Built-in support for live data synchronization
-- 🌐 **Framework Agnostic**: Works with React, Vue, Svelte and vanilla JavaScript
-- 🛡️ **Permissions Built-In**: Granular access control that works across the stack
+**Python** is great for backends. **JavaScript** is great for frontends. **Connecting them is a nightmare.**
+
+Developers know this painful truth:
+* **80%** of app complexity
+* **50%** of your total codebase
+* **Hundreds of hours** of your time
+
+**...is wasted writing code that shuttles data between your database and your users.**
+
+**ModelSync eliminates this entirely.**
+
+## Features at a Glance
+
+- **Django-like Query Syntax** in JavaScript
+- **Real-Time Updates** with one line of code
+- **Automatic TypeScript Generation** from Django models
+- **Granular Security Controls** using Django permissions
+- **Deep Relationship Traversal** for complex data needs
 
 ## How It Works
 
-### 1. Define your models (Django)
+### Backend: Connect your Django models in one line
 
 ```python
-# models.py
-from django.db import models
+# Register your existing Django models with ModelSync
+from modelsync.adaptors.django.config import registry
 
-class Post(models.Model):
-    title = models.CharField(max_length=200)
-    content = models.TextField()
-    author = models.ForeignKey('auth.User', on_delete=models.CASCADE)
-    published = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+registry.register(model=Post)
 ```
 
-### 2. Register with ModelSync
+### Frontend: Query your backend with familiar syntax
 
-```python
-# crud.py
-from modelsync.adaptors.django.config import registry
-from modelsync.adaptors.django.permissions import IsAuthenticatedPermission
-from .models import Post
+```typescript
+// Query your backend data with Django-like syntax
+const posts = await Post.objects
+  .filter({ is_published: true })
+  .orderBy('-created_at')
+  .fetch();
+```
 
-registry.register(
-    model=Post,
-    filterable_fields={'title', 'content', 'author', 'published', 'created_at'},
-    permissions=[IsAuthenticatedPermission]
-)
+### Real-Time in One Line
+
+```typescript
+// Vue component with real-time updates
+const posts = ref([]);
+createVueLiveView(Post.objects.filter({ is_published: true }), posts);
+
+// React component with real-time updates
+const [posts, query, loading] = useReactLiveView(
+  Post.objects.filter({ is_published: true })
+);
+```
+
+## Quick Setup
+
+### 1. Install Backend Dependencies
+
+```bash
+pip install django djangorestframework
+pip install git+https://github.com/modelsync/modelsync
+pip install django-cors-headers pusher
+```
+
+### 2. Install Frontend Package
+
+```bash
+# In your React/Vue project
+npm install https://github.com/modelsync/modelsync-client
 ```
 
 ### 3. Generate TypeScript Models
 
 ```bash
-# In your frontend project
 npx modelsync sync-models
 ```
 
-### 4. Use in your frontend
+## Why Choose ModelSync?
+
+### Over HTMX
+- **Modern JS Frontend:** Use modern JS frameworks (React, Vue) and UI libraries (Shadcn, Tailwind)
+- **Avoid Coupling:** Your frontend and backend codebases remain decoupled
+
+### Over Backend-for-Frontend (e.g., Supabase, Firebase)
+- **Keep Your Backend:** No need to adopt a new backend service
+- **Permissions As Code:** Django permissions directly on frontend
+
+### Over OpenAPI Schema and Client Generators
+- **Real-Time In One Line:** Your UI will automatically re-render when your backend data changes
+- **Advanced Querying:** Rich Django-style ORM queries, not just basic CRUD
+- **Integrated Permissions:** Directly leverage Django's permissions
+
+## Advanced Query Example
 
 ```typescript
-// React example
-import { Post } from './models';
-import { useEffect, useState } from 'react';
-
-function PostList() {
-  const [posts, setPosts] = useState([]);
-  
-  useEffect(() => {
-    // Fetches posts with Django-like query syntax
-    async function loadPosts() {
-      const data = await Post.objects
-        .filter({ published: true })
-        .orderBy('-created_at')
-        .fetch();
-      setPosts(data);
-    }
-    
-    loadPosts();
-  }, []);
-  
-  return (
-    <div>
-      <h1>Posts</h1>
-      {posts.map(post => (
-        <div key={post.id}>{post.title}</div>
-      ))}
-    </div>
-  );
-}
+// Complex queries that map directly to Django's ORM functionality
+const featuredTechPosts = await Post.objects.filter({
+  is_published: true,
+  author__department: 'Engineering',
+  Q: [
+    Q('OR', 
+      { is_featured: true }, 
+      { view_count__gt: 1000 }
+    )
+  ]
+}).fetch();
 ```
 
-## Real-time Data (Optional)
+## Full Documentation
 
-```typescript
-import { liveView } from '@modelsync/core';
+For complete setup instructions, advanced usage, and API references, visit:
 
-// Create a live connection to your data
-const postsLive = await liveView(
-  Post.objects.filter({ published: true })
-);
-
-// Data updates automatically when changes happen on the server
-const posts = await postsLive.fetch();
-
-// Create, update, and delete operations are automatically synced
-await postsLive.create({ 
-  title: 'New Post', 
-  content: 'Content'
-});
-```
-
-## Documentation
-
-For detailed documentation on setup, configuration, and usage:
-
-- [Getting Started](https://docs.modelsync.dev/getting-started)
-- [Backend Setup (Django)](https://docs.modelsync.dev/getting-started/backend-setup-django)
-- [Frontend Integration](https://docs.modelsync.dev/getting-started/frontend-config-common)
-- [Permissions](https://docs.modelsync.dev/advanced/permissions)
-- [Query Syntax](https://docs.modelsync.dev/advanced/query-syntax)
-
-## Current Status & Roadmap
-
-ModelSync currently supports Django for the backend, with support for FastAPI, Flask, and SQLAlchemy in active development. For the frontend, it works with React, Vue, and Svelte.
-
-### Coming Soon
-
-- **SQLAlchemy Support**: Expanded ORM compatibility for Python frameworks
-- **FastAPI & Flask Integration**: First-class support for modern Python API frameworks
-- **Auto-Generated UI Components**: CRUD data tables and forms that automatically sync with your models
+📖 [modelsync.dev](https://modelsync.dev)
 
 ## License
 
-ModelSync is provided under a **Placeholder License for 6-Month Trial**:
-
-- Free 6-month trial for all users
-- Free for organizations with annual revenue under $2.5 million
-- Commercial license required for organizations with annual revenue over $2.5 million after trial period
-- Contact robert.herring@resipilot.com for licensing questions
-
-See full license terms for details.
+ModelSync is available under a free commercial license. You can use it in both personal and commercial projects at no cost.
