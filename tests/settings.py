@@ -26,7 +26,7 @@ STATIC_URL = "/static/"
 SECRET_KEY = "fake-key"
 DEBUG = True
 
-MODELSYNC_E2E_TESTING = False
+ORMBRIDGE_E2E_TESTING = False
 
 TEST_DB_PATH = ""
 
@@ -40,7 +40,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "tests.django_app",
-    "modelsync.adaptors.django",
+    "ormbridge.adaptors.django",
     "corsheaders",
 ]
 
@@ -55,7 +55,7 @@ DATABASES = {
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',  # Fast in-memory cache
-        'LOCATION': 'modelsync-cache',
+        'LOCATION': 'ormbridge-cache',
     },
     # For production with Redis:
     'redis': {
@@ -73,13 +73,13 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-operation-id",
 ]
 
-# Then configure ModelSync to use one of these caches
-MODELSYNC_CACHE = {
+# Then configure ORMBridge to use one of these caches
+ORMBRIDGE_CACHE = {
     'NAME': 'default',
     'DEFAULT_TTL': 3600,
 }
 
-MODELSYNC_PUSHER = {
+ORMBRIDGE_PUSHER = {
     "APP_ID": os.getenv('PUSHER_APP_ID'),
     "KEY": os.getenv('PUSHER_KEY'),
     "SECRET": os.getenv('PUSHER_SECRET'),
@@ -88,15 +88,15 @@ MODELSYNC_PUSHER = {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-MODELSYNC_VIEW_ACCESS_CLASS = "rest_framework.permissions.IsAuthenticated"
-MODELSYNC_DEFAULT_USER_FUNC = "tests.django_app.test_user.get_or_create_test_user"
+ORMBRIDGE_VIEW_ACCESS_CLASS = "rest_framework.permissions.IsAuthenticated"
+ORMBRIDGE_DEFAULT_USER_FUNC = "tests.django_app.test_user.get_or_create_test_user"
 
 MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
-    "modelsync.adaptors.django.middleware.OperationIDMiddleware",
+    "ormbridge.adaptors.django.middleware.OperationIDMiddleware",
 ]
 
 REST_FRAMEWORK = {

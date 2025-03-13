@@ -29,7 +29,7 @@ class Command(BaseCommand):
             }
         )
 
-        settings.MODELSYNC_E2E_TESTING = True
+        settings.ORMBRIDGE_E2E_TESTING = True
 
         # Run migrations on clean database
         call_command("migrate")

@@ -3,7 +3,7 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "modelsync"
+name = "ormbridge"
 version = "0.1.0"
 description = "A short description of your package"
 readme = "README.md"
@@ -29,9 +29,9 @@ dependencies = [
 ]
 
 [project.urls]
-homepage = "https://github.com/modelsync/modelsync"
-repository = "https://github.com/modelsync/modelsync"
+homepage = "https://github.com/ormbridge/ormbridge"
+repository = "https://github.com/ormbridge/ormbridge"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["modelsync", "modelsync.*"]
+include = ["ormbridge", "ormbridge.*"]

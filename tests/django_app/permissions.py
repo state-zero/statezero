@@ -1,8 +1,8 @@
 from typing import Any, Set, Type
 
-from modelsync.core.constants import ALL_FIELDS
-from modelsync.core.interfaces import AbstractPermission
-from modelsync.core.types import ActionType, ORMModel, RequestType
+from ormbridge.core.constants import ALL_FIELDS
+from ormbridge.core.interfaces import AbstractPermission
+from ormbridge.core.types import ActionType, ORMModel, RequestType
 
 
 # A permission class that only allows read operations unless the user is an admin.

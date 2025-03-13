@@ -4,6 +4,6 @@ from django.urls import include, path
 urlpatterns = [
     path("admin/", admin.site.urls),
     path(
-        "modelsync/", include("modelsync.adaptors.django.urls", namespace="modelsync")
+        "ormbridge/", include("ormbridge.adaptors.django.urls", namespace="ormbridge")
     ),
 ]

@@ -3,13 +3,13 @@ import unittest
 import networkx as nx
 from django.test import TestCase
 
-from modelsync.adaptors.django.config import registry
-from modelsync.adaptors.django.orm import DjangoORMAdapter
-from modelsync.core.ast_validator import ASTValidator
-from modelsync.core.config import ModelConfig
-from modelsync.core.exceptions import PermissionDenied
-from modelsync.core.interfaces import AbstractPermission
-from modelsync.core.types import ActionType
+from ormbridge.adaptors.django.config import registry
+from ormbridge.adaptors.django.orm import DjangoORMAdapter
+from ormbridge.core.ast_validator import ASTValidator
+from ormbridge.core.config import ModelConfig
+from ormbridge.core.exceptions import PermissionDenied
+from ormbridge.core.interfaces import AbstractPermission
+from ormbridge.core.types import ActionType
 # Import your test models.
 from tests.django_app.models import (ComprehensiveModel, DeepModelLevel1,
                                      DeepModelLevel2, DeepModelLevel3,

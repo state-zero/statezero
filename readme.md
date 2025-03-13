@@ -1,13 +1,13 @@
-# ModelSync
+# ORMBridge
 
 **The Real-Time Django to JavaScript Data Bridge**
 
 Connect your Django backend to React/Vue frontends with 90% less code.  
 No repetitive serializers, views or tight coupling.
 
-[Get Started](https://modelsync.dev/getting-started/) | 
-[Documentation](https://modelsync.dev/advanced/query-syntax) | 
-[Report Bug](https://github.com/yourusername/modelsync/issues)
+[Get Started](https://ormbridge.dev/getting-started/) | 
+[Documentation](https://ormbridge.dev/advanced/query-syntax) | 
+[Report Bug](https://github.com/yourusername/ormbridge/issues)
 
 ## The Python-JavaScript Disconnect
 
@@ -20,7 +20,7 @@ Developers know this painful truth:
 
 **...is wasted writing code that shuttles data between your database and your users.**
 
-**ModelSync eliminates this entirely.**
+**ORMBridge eliminates this entirely.**
 
 ## Features at a Glance
 
@@ -35,8 +35,8 @@ Developers know this painful truth:
 ### Backend: Connect your Django models in one line
 
 ```python
-# Register your existing Django models with ModelSync
-from modelsync.adaptors.django.config import registry
+# Register your existing Django models with ORMBridge
+from ormbridge.adaptors.django.config import registry
 
 registry.register(model=Post)
 ```
@@ -70,7 +70,7 @@ const [posts, query, loading] = useReactLiveView(
 
 ```bash
 pip install django djangorestframework
-pip install git+https://github.com/modelsync/modelsync
+pip install git+https://github.com/ormbridge/ormbridge
 pip install django-cors-headers pusher
 ```
 
@@ -78,16 +78,16 @@ pip install django-cors-headers pusher
 
 ```bash
 # In your React/Vue project
-npm install https://github.com/modelsync/modelsync-client
+npm install https://github.com/ormbridge/ormbridge-client
 ```
 
 ### 3. Generate TypeScript Models
 
 ```bash
-npx modelsync sync-models
+npx ormbridge sync-models
 ```
 
-## Why Choose ModelSync?
+## Why Choose ORMBridge?
 
 ### Over HTMX
 - **Modern JS Frontend:** Use modern JS frameworks (React, Vue) and UI libraries (Shadcn, Tailwind)
@@ -122,8 +122,8 @@ const featuredTechPosts = await Post.objects.filter({
 
 For complete setup instructions, advanced usage, and API references, visit:
 
-📖 [modelsync.dev](https://modelsync.dev)
+📖 [ormbridge.dev](https://ormbridge.dev)
 
 ## License
 
-ModelSync is available under a free commercial license. You can use it in both personal and commercial projects at no cost.
+ORMBridge is available under a free commercial license. You can use it in both personal and commercial projects at no cost.

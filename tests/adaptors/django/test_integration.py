@@ -11,7 +11,7 @@ from tests.django_app.models import (ComprehensiveModel, DeepModelLevel1,
                                      DummyModel, DummyRelatedModel)
 
 
-class ModelSyncE2ETest(APITestCase):
+class ORMBridgeE2ETest(APITestCase):
     def setUp(self):
         # Create and log in a test user.
         self.user = User.objects.create_user(username="testuser", password="password")
@@ -70,7 +70,7 @@ class ModelSyncE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
 
@@ -136,7 +136,7 @@ class ModelSyncE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
         created_instance = create_response.data.get("data", {})
@@ -199,7 +199,7 @@ class ModelSyncE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
 
@@ -233,7 +233,7 @@ class ModelSyncE2ETest(APITestCase):
             DummyModel.objects.get(id=instance_id)
 
     def test_schema_endpoint_for_dummy_model(self):
-        url = reverse("modelsync:schema_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:schema_view", args=["django_app.DummyModel"])
         response = self.client.generic(
             "GET", url, data="{}", content_type="application/json"
         )
@@ -256,7 +256,7 @@ class ModelSyncE2ETest(APITestCase):
     def test_get_dummy_model(self):
         # Send a GET with an explicit AST for a read operation.
         payload = {"ast": {"query": {"type": "read"}}}
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         # Expect a dict with "data" and "metadata".
@@ -278,13 +278,13 @@ class ModelSyncE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(DummyModel.objects.filter(name="NewDummy").exists())
 
     def test_schema_endpoint_for_comprehensive_model(self):
-        url = reverse("modelsync:schema_view", args=["django_app.ComprehensiveModel"])
+        url = reverse("ormbridge:schema_view", args=["django_app.ComprehensiveModel"])
         response = self.client.generic(
             "GET", url, data="{}", content_type="application/json"
         )
@@ -305,7 +305,7 @@ class ModelSyncE2ETest(APITestCase):
         self.assertIn("json_field", properties)
 
     def test_events_auth(self):
-        url = reverse("modelsync:events_auth")
+        url = reverse("ormbridge:events_auth")
         payload = {"channel_name": "private-django_app", "socket_id": "123.456"}
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
@@ -313,7 +313,7 @@ class ModelSyncE2ETest(APITestCase):
         self.assertEqual(1, len(response.data))
 
     def test_deep_model_schema(self):
-        url = reverse("modelsync:schema_view", args=["django_app.DeepModelLevel1"])
+        url = reverse("ormbridge:schema_view", args=["django_app.DeepModelLevel1"])
         response = self.client.generic(
             "GET", url, data="{}", content_type="application/json"
         )
@@ -332,7 +332,7 @@ class ModelSyncE2ETest(APITestCase):
     def test_deep_model_get(self):
         # Send a GET with an explicit AST for a read operation.
         payload = {"ast": {"query": {"type": "read"}}}
-        url = reverse("modelsync:model_view", args=["django_app.DeepModelLevel1"])
+        url = reverse("ormbridge:model_view", args=["django_app.DeepModelLevel1"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", None)
@@ -371,7 +371,7 @@ class ModelSyncE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
 
@@ -456,7 +456,7 @@ class ModelSyncE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
 
@@ -525,7 +525,7 @@ class ModelSyncE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
 
@@ -609,7 +609,7 @@ class ModelSyncE2ETest(APITestCase):
             }
         }
 
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
         get_existing_response = self.client.post(
             url, data=get_existing_payload, format="json"
         )
@@ -773,7 +773,7 @@ class ModelSyncE2ETest(APITestCase):
             name=f"{unique_prefix}_ExistingTest", value=10, related=related
         )
 
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
 
         # 1. Test updating an existing instance.
         update_existing_payload = {
@@ -925,7 +925,7 @@ class ModelSyncE2ETest(APITestCase):
             }
         }
 
-        url = reverse("modelsync:model_view", args=["django_app.ComprehensiveModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.ComprehensiveModel"])
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -965,7 +965,7 @@ class ModelSyncE2ETest(APITestCase):
             }
         }
 
-        url = reverse("modelsync:model_view", args=["django_app.ComprehensiveModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.ComprehensiveModel"])
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -1004,7 +1004,7 @@ class ModelSyncE2ETest(APITestCase):
             }
         }
 
-        url = reverse("modelsync:model_view", args=["django_app.ComprehensiveModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.ComprehensiveModel"])
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -1043,7 +1043,7 @@ class ModelSyncE2ETest(APITestCase):
             }
         }
 
-        url = reverse("modelsync:model_view", args=["django_app.DummyModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -1079,7 +1079,7 @@ class ModelSyncE2ETest(APITestCase):
             }
         }
 
-        url = reverse("modelsync:model_view", args=["django_app.ComprehensiveModel"])
+        url = reverse("ormbridge:model_view", args=["django_app.ComprehensiveModel"])
         response = self.client.post(url, data=payload, format="json")
 
         # The behavior might vary - either return all fields or return an error

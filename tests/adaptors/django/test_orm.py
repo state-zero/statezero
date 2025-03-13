@@ -4,13 +4,13 @@ from typing import Any
 from django.db.models import Q
 from django.test import TestCase
 
-from modelsync.adaptors.django.config import registry
-from modelsync.adaptors.django.orm import DjangoORMAdapter, QueryASTVisitor
-from modelsync.adaptors.django.serializers import DRFDynamicSerializer
-from modelsync.core.config import ModelConfig
-from modelsync.core.event_bus import EventBus
-from modelsync.core.interfaces import AbstractEventEmitter
-from modelsync.core.types import ActionType
+from ormbridge.adaptors.django.config import registry
+from ormbridge.adaptors.django.orm import DjangoORMAdapter, QueryASTVisitor
+from ormbridge.adaptors.django.serializers import DRFDynamicSerializer
+from ormbridge.core.config import ModelConfig
+from ormbridge.core.event_bus import EventBus
+from ormbridge.core.interfaces import AbstractEventEmitter
+from ormbridge.core.types import ActionType
 from tests.django_app.models import DummyModel, DummyRelatedModel
 
 

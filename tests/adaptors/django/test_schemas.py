@@ -15,12 +15,12 @@ from hypothesis import HealthCheck, given
 from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
 
-from modelsync.adaptors.django.config import config, registry
+from ormbridge.adaptors.django.config import config, registry
 # Import the schema generator and necessary classes.
-from modelsync.adaptors.django.schemas import DjangoSchemaGenerator
-from modelsync.core.classes import (AdditionalField, FieldFormat, FieldType,
+from ormbridge.adaptors.django.schemas import DjangoSchemaGenerator
+from ormbridge.core.classes import (AdditionalField, FieldFormat, FieldType,
                                     ModelSchemaMetadata, SchemaFieldMetadata)
-from modelsync.core.constants import ALL_FIELDS
+from ormbridge.core.constants import ALL_FIELDS
 
 # No longer need the openapi_spec_validator
 # from openapi_spec_validator import validate

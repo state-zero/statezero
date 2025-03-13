@@ -2,14 +2,14 @@ from django.test import TestCase
 from django.db import models
 import uuid
 
-from modelsync.core.config import ModelConfig, Registry
-from modelsync.adaptors.django.config import config, registry
-from modelsync.adaptors.django.permissions import AllowAllPermission
+from ormbridge.core.config import ModelConfig, Registry
+from ormbridge.adaptors.django.config import config, registry
+from ormbridge.adaptors.django.permissions import AllowAllPermission
 
 
 # Test models with unique names to avoid conflicts
 class TestUnregisteredModel(models.Model):
-    """Test model that won't be registered with ModelSync"""
+    """Test model that won't be registered with ORMBridge"""
     name = models.CharField(max_length=100)
 
     class Meta:

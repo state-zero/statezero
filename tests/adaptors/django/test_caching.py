@@ -5,9 +5,9 @@ from typing import Any, Callable, Dict, Optional, Set, Type
 
 import fakeredis
 
-from modelsync.core.caching import (CacheInvalidationEmitter, CachingMixin,
+from ormbridge.core.caching import (CacheInvalidationEmitter, CachingMixin,
                                     RedisCacheBackend, RedisDependencyStore)
-from modelsync.core.types import ActionType
+from ormbridge.core.types import ActionType
 # Import your actual dummy model from tests.django_app.models.
 from tests.django_app.models import \
     DummyModel  # adjust the import path as needed
