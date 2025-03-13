@@ -18,7 +18,6 @@ from ormbridge.core.process_request import RequestProcessor
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-
 class EventsAuthView(APIView):
     """
     A generic authentication view for event emitters.

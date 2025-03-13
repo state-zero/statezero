@@ -25,7 +25,7 @@ class DjangoConsoleEventEmitter(ConsoleEventEmitter):
         # Get permission class from settings with a default fallback
         permission_class_path = getattr(
             settings,
-            "ORMBRIDGE_EMITTER_PERMISSION_CLASS",
+            "ORMBRIDGE_VIEW_ACCESS_CLASS",
             "rest_framework.permissions.IsAuthenticated",
         )
         try:
@@ -80,7 +80,7 @@ class DjangoPusherEventEmitter(PusherEventEmitter):
         # Get permission class from settings with a default fallback
         permission_class_path = getattr(
             settings,
-            "ORMBRIDGE_EMITTER_PERMISSION_CLASS",
+            "ORMBRIDGE_VIEW_ACCESS_CLASS",
             "rest_framework.permissions.IsAuthenticated",
         )
         try:
