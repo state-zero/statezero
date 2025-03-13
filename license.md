@@ -1,3 +1,5 @@
+I'll add that important note about the early release status:
+
 # **ORMBridge License Agreement**
 _Last Updated: 2025-03-13_
 
@@ -5,6 +7,7 @@ _Last Updated: 2025-03-13_
 1.1. **ORMBridge is proprietary software** developed and owned by **Hoza Holdings Pte Ltd** ("Licensor").
 1.2. **ORMBridge is not open-source.** All rights not expressly granted in this License are **reserved by the Licensor**.
 1.3. **Distribution**: ORMBridge is made available via **PyPI** (Python Package Index), **npm** (Node Package Manager), and **GitHub**.
+1.4. **Early Release Status**: This is an **early release version** of ORMBridge designed for community feedback. It is **not considered production ready**. Users are encouraged to provide feedback but should exercise caution when implementing in critical systems.
 
 ## **2. Grant of License**
 2.1. **Free Usage**:
