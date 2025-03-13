@@ -17,7 +17,7 @@ class DjangoLocalConfig(AppConfig):
 
     def initialize(self):
         from ormbridge.adaptors.django.event_emitters import \
-            DjangoPusherEventEmitter, ConsoleEventEmitter
+            DjangoPusherEventEmitter, DjangoConsoleEventEmitter
         from ormbridge.adaptors.django.extensions.custom_field_serializers.money_field import (
             MoneyFieldSchema, MoneyFieldSerializer)
         from ormbridge.adaptors.django.orm import DjangoORMAdapter
@@ -60,7 +60,7 @@ class DjangoLocalConfig(AppConfig):
             event_emitter = DjangoPusherEventEmitter()
         else:
             warnings.warn("You have not added ORMBRIDGE_PUSHER to your settings.py. Live model changes will not be broadcast")
-            event_emitter = ConsoleEventEmitter()
+            event_emitter = DjangoConsoleEventEmitter()
         
         
         cache_invalidation_emitter = CacheInvalidationEmitter(
