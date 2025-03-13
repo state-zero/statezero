@@ -1,5 +1,3 @@
-I'll add that important note about the early release status:
-
 # **ORMBridge License Agreement**
 _Last Updated: 2025-03-13_
 

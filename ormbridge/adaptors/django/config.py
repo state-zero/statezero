@@ -4,6 +4,7 @@ import fakeredis
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
+import warnings
 
 from ormbridge.core.config import AppConfig, Registry
 
@@ -16,7 +17,7 @@ class DjangoLocalConfig(AppConfig):
 
     def initialize(self):
         from ormbridge.adaptors.django.event_emitters import \
-            DjangoPusherEventEmitter
+            DjangoPusherEventEmitter, ConsoleEventEmitter
         from ormbridge.adaptors.django.extensions.custom_field_serializers.money_field import (
             MoneyFieldSchema, MoneyFieldSerializer)
         from ormbridge.adaptors.django.orm import DjangoORMAdapter
@@ -55,7 +56,13 @@ class DjangoLocalConfig(AppConfig):
             self.dependency_store = RedisDependencyStore(redis_client)
 
         # Instantiate emitters by injecting only the necessary functions.
-        event_emitter = DjangoPusherEventEmitter()
+        if hasattr(settings, 'ORMBRIDGE_PUSHER'):
+            event_emitter = DjangoPusherEventEmitter()
+        else:
+            warnings.warn("You have not added ORMBRIDGE_PUSHER to your settings.py. Live model changes will not be broadcast")
+            event_emitter = ConsoleEventEmitter()
+        
+        
         cache_invalidation_emitter = CacheInvalidationEmitter(
             cache_backend=self.cache_backend,
             dependency_store=self.dependency_store,
