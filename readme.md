@@ -32,7 +32,7 @@ Developers know this painful truth:
 
 ## How It Works
 
-### Backend: Connect your Django models in one line
+### Backend: Connect your Django models
 
 ```python
 # Register your existing Django models with ORMBridge
