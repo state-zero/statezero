@@ -26,11 +26,18 @@ class ORMBridgeDjangoConfig(DjangoAppConfig):
 
     def ready(self):
         # Import crud modules which register models in the registry.
+        if hasattr(settings, 'CONFIG_FILE_PREFIX'):
+            config_file_prefix: str = settings.CONFIG_FILE_PREFIX
+            config_file_prefix = config_file_prefix.replace('.py', '')
+            if (not isinstance(config_file_prefix, str)) or (len(config_file_prefix) < 1):
+                raise ValueError(f"If provided, CONFIG_FILE_PREFIX must be a string with at least one character. In your settings.py it is set to {settings.CONFIG_FILE_PREFIX}. Either delete the setting completely or use a valid file name like 'crud'")
+        else:
+            config_file_prefix = "crud"
         for app_config_instance in apps.get_app_configs():
-            module_name = f"{app_config_instance.name}.crud"
+            module_name = f"{app_config_instance.name}.{config_file_prefix}"
             try:
                 importlib.import_module(module_name)
-                logger.debug(f"Imported crud module from {app_config_instance.name}")
+                logger.debug(f"Imported {config_file_prefix} module from {app_config_instance.name}")
             except ModuleNotFoundError:
                 pass
 
