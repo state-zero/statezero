@@ -25,6 +25,8 @@ class EventsAuthView(APIView):
     calls its authenticate method with the request.
     """
 
+    permission_classes = [ORMBridgeViewAccessGate]
+
     def post(self, request, *args, **kwargs):
         channel_name = request.data.get("channel_name")
         socket_id = request.data.get("socket_id")
@@ -80,6 +82,9 @@ class ModelListView(APIView):
 
 
 class ModelView(APIView):
+
+    permission_classes = [ORMBridgeViewAccessGate]
+
     @transaction.atomic
     def post(self, request, model_name):
         processor = RequestProcessor(config=config, registry=registry)
@@ -91,6 +96,7 @@ class ModelView(APIView):
 
 
 class SchemaView(APIView):
+    
     permission_classes = [ORMBridgeViewAccessGate]
 
     def get(self, request, model_name):
