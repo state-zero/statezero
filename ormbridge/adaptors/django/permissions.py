@@ -39,17 +39,17 @@ class AllowAllPermission(AbstractPermission):
         return {"id", "username", "email", "first_name", "last_name"}
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
-        if isinstance(model, User):
+        if model is User:
             return self._get_user_fields()
         return {ALL_FIELDS}
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
-        if isinstance(model, User):
+        if model is User:
             return self._get_user_fields()
         return {ALL_FIELDS}
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
-        if isinstance(model, User):
+        if model is User:
             return self._get_user_fields()
         return {ALL_FIELDS}
 
@@ -95,21 +95,21 @@ class IsAuthenticatedPermission(AbstractPermission):
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not request.user.is_authenticated:
             return set()
-        if isinstance(model, User):
+        if model is User:
             return self._get_user_fields()
         return {ALL_FIELDS}
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not request.user.is_authenticated:
             return set()
-        if isinstance(model, User):
+        if model is User:
             return self._get_user_fields()
         return {ALL_FIELDS}
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not request.user.is_authenticated:
             return set()
-        if isinstance(model, User):
+        if model is User:
             return self._get_user_fields()
         return {ALL_FIELDS}
 
@@ -155,21 +155,21 @@ class IsStaffPermission(AbstractPermission):
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not (request.user.is_authenticated and request.user.is_staff):
             return set()
-        if isinstance(model, User):
+        if model is User:
             return self._get_user_fields()
         return {ALL_FIELDS}
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not (request.user.is_authenticated and request.user.is_staff):
             return set()
-        if isinstance(model, User):
+        if model is User:
             return self._get_user_fields()
         return {ALL_FIELDS}
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not (request.user.is_authenticated and request.user.is_staff):
             return set()
-        if isinstance(model, User):
+        if model is User:
             return self._get_user_fields()
         return {ALL_FIELDS}
 
