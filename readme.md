@@ -5,9 +5,8 @@
 Connect your Django backend to React/Vue frontends with 90% less code.  
 No repetitive serializers, views or tight coupling.
 
-[Get Started](https://ormbridge.com/getting-started/) | 
-[Documentation](https://ormbridge.com/advanced/query-syntax) | 
-[Report Bug](https://github.com/yourusername/ormbridge/issues)
+[Get Started](https://www.ormbridge.com/walkthrough/) | 
+[Documentation](https://ormbridge.com)
 
 ## The Python-JavaScript Disconnect
 
