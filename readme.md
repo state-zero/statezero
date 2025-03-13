@@ -18,7 +18,7 @@ Developers know this painful truth:
 * **50%** of your total codebase
 * **Hundreds of hours** of your time
 
-**...is wasted writing code that shuttles data between your database and your users.**
+**...on code code that shuttles data between your database and your users.**
 
 **ORMBridge eliminates this entirely.**
 
