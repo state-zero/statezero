@@ -46,18 +46,15 @@ class RelatedFieldWithRepr(serializers.RelatedField):
     def to_representation(self, value):
         if value is None:
             return None
-
-        # For many-to-many or reverse relations.
-        if hasattr(value, "all"):
-            if self.depth == 0:
-                return [self._minimal_representation(item) for item in value.all()]
-            else:
-                return [self._expanded_representation(item) for item in value.all()]
+            
+        # DRF has already taken care of handling the collection for us
+        # If many=True, value will be a single instance from the collection
+        # If many=False, value will be the related instance directly
+        
+        if self.depth == 0:
+            return self._minimal_representation(value)
         else:
-            if self.depth == 0:
-                return self._minimal_representation(value)
-            else:
-                return self._expanded_representation(value)
+            return self._expanded_representation(value)
 
     def _minimal_representation(self, instance):
         # Determine the primary key field from the model class (default to "id" if not provided)
@@ -100,7 +97,6 @@ class RelatedFieldWithRepr(serializers.RelatedField):
                 {pk_field: f"Related object with {pk_field} {pk} does not exist."}
             )
         return instance
-
 
 class IndividualCachingListSerializer(serializers.ListSerializer):
     """
@@ -176,11 +172,16 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             if getattr(field, "auto_created", False) and not field.concrete:
                 continue
             if field.is_relation:
+                # Determine if this is a many-to-many or one-to-many field
+                # ManyToManyField, ManyToManyRel, ManyToOneRel
+                is_many = field.many_to_many or field.one_to_many
+
                 serializer_class._declared_fields[field.name] = RelatedFieldWithRepr(
                     queryset=field.related_model.objects.all(),
                     required=not (field.null or field.blank),
                     depth=depth,
                     allow_null=field.null,
+                    many=is_many
                 )
             else:
                 custom_field_serializer = get_custom_serializer(field.__class__)
