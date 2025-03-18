@@ -207,7 +207,7 @@ class ASTParser:
         validated_data = self.serializer.deserialize(
             model=self.model, data=data, partial=False
         )
-        record = self.engine.create(validated_data)
+        record = self.engine.create(validated_data, self.serializer)
         serialized = self.serializer.serialize(
             record, self.model, many=False, **self.ser_args
         )
@@ -260,7 +260,7 @@ class ASTParser:
         permissions = self.registry.get_config(self.model).permissions
 
         # Delegate to the engine's instance-based update method.
-        updated_instance = self.engine.update_instance(ast, self.request, permissions)
+        updated_instance = self.engine.update_instance(ast, self.request, permissions, self.serializer)
 
         # Serialize the updated instance for the response.
         serialized = self.serializer.serialize(

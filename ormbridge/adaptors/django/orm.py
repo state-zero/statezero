@@ -260,15 +260,22 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         self.queryset = self.queryset.exclude(q_object)
 
-    def create(self, data: Dict[str, Any]) -> models.Model:
+    def create(self, data: Dict[str, Any], serializer) -> models.Model:
         assert self.model is not None, "Model must be set before creating."
-        return self.model.objects.create(**data)
+        # Use the provided serializer's save method
+        return serializer.save(
+            model=self.model,
+            data=data,
+            instance=None,
+            partial=False
+        )
 
     def update_instance(
         self,
         ast: Dict[str, Any],
         request: RequestType,
         permissions: List[Type[AbstractPermission]],
+        serializer
     ) -> models.Model:
         data = ast.get("data", {})
         filter_ast = ast.get("filter")
@@ -286,13 +293,13 @@ class DjangoORMAdapter(AbstractORMProvider):
             if ActionType.UPDATE not in allowed:
                 raise PermissionDenied(f"Update not permitted on {instance}")
 
-        # Apply the validated data to the instance.
-        for field, value in data.items():
-            setattr(instance, field, value)
-        instance.save()  # This triggers post_save signals.
-
-        # Return the raw instance.
-        return instance
+        # Use the provided serializer's save method for the update
+        return serializer.save(
+            model=self.model,
+            data=data,
+            instance=instance,
+            partial=True  # Allow partial updates - only specified fields will be validated/updated
+        )
 
     def delete_instance(
         self,

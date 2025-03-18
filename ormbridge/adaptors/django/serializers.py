@@ -85,10 +85,16 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         return serializer.cached_data()
 
     def to_internal_value(self, data):
+        # If data is already a Django model instance, return it directly
+        if hasattr(data, '_meta'):  # This is how we can check if it's a Django model
+            return data
+            
         # Use the model's actual pk field name
         pk_field = getattr(
             self.queryset.model, "primaryKeyField", self.queryset.model._meta.pk.name
         )
+        
+        # Handle dictionary or primitive value
         pk = data.get(pk_field) if isinstance(data, dict) else data
         try:
             instance = self.queryset.get(**{pk_field: pk})
@@ -347,3 +353,46 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             for hook in model_config.post_hooks:
                 validated_data = hook(validated_data, request=request)
         return validated_data
+    
+    def save(
+        self, 
+        model: Type[models.Model], 
+        data: Dict[str, Any],
+        instance: Optional[Any] = None,
+        fields_map: Optional[Dict[str, Set[str]]] = None,
+        partial: bool = True
+    ) -> Any:
+        """
+        Save data to create a new instance or update an existing one.
+        
+        Args:
+            model: The model class
+            data: Data to save
+            instance: Optional existing instance to update (if None, creates new instance)
+            fields_map: Optional mapping of field restrictions
+            partial: Whether this is a partial update (default True, only relevant for updates)
+            
+        Returns:
+            The saved instance (either created or updated)
+        """
+        # Get the appropriate serializer class for this model
+        serializer_class = DynamicModelSerializer.for_model(model)
+        
+        # Create context with fields_map if provided
+        context = {}
+        if fields_map is not None:
+            context["fields_map"] = fields_map
+        
+        # Create the serializer - with or without an instance
+        serializer = serializer_class(
+            instance=instance,  # Will be None for creation
+            data=data,
+            context=context,
+            partial=partial if instance else False  # partial only makes sense for updates
+        )
+        
+        # Validate the data
+        serializer.is_valid(raise_exception=True)
+        
+        # Save and return the instance
+        return serializer.save()
