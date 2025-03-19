@@ -128,7 +128,7 @@ class DjangoORMAdapterTest(TestCase):
 
     def test_create(self):
         data = {"name": "Dummy3", "value": 30, "related": self.related1}
-        instance = self.adapter.create(data)
+        instance = self.adapter.create(data, self.serializer)
         self.assertEqual(instance.name, "Dummy3")
         self.assertEqual(instance.value, 30)
 
@@ -267,7 +267,7 @@ class DjangoORMAdapterTest(TestCase):
         }
         # Call the instance-based update.
         updated_instance = self.adapter.update_instance(
-            ast, self.dummy_req, [self.always_allow]
+            ast, self.dummy_req, [self.always_allow], self.serializer
         )
 
         self.assertEqual(updated_instance.value, 555)

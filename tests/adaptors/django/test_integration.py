@@ -1090,3 +1090,82 @@ class ORMBridgeE2ETest(APITestCase):
         # Verify that more than just id is returned (default behavior)
         self.assertIn("id", data)
         self.assertIn("char_field", data)
+
+    def test_deep_model_default_depth_behavior(self):
+        """
+        Test that with a default depth of 1 and no explicit deeper field request,
+        only the first level of related fields (i.e. level2) is fully expanded.
+        The nested level3 within level2 should remain minimal (or be absent).
+        """
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "get",
+                    "filter": {"type": "filter", "conditions": {"id": self.deep_level1.id}},
+                },
+                "serializerOptions": {
+                    "fields": ["id", "name", "level2", "level2__name"],
+                    "depth": 1,
+                },
+            }
+        }
+        url = reverse("ormbridge:model_view", args=["django_app.DeepModelLevel1"])
+        response = self.client.post(url, data=payload, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.data.get("data", {})
+
+        # Verify root-level fields.
+        self.assertEqual(data.get("id"), self.deep_level1.id)
+        self.assertEqual(data.get("name"), "Deep1")
+
+        # Check that level2 is expanded and includes its own 'name'
+        self.assertIn("level2", data)
+        self.assertIsInstance(data["level2"], dict)
+        self.assertIn("name", data["level2"])
+        self.assertEqual(data["level2"]["name"], "Deep2")
+
+        # Without an explicit request, level2's nested level3 should not be fully expanded.
+        if "level3" in data["level2"]:
+            # Minimal representation should not include the 'name' field.
+            self.assertNotIn("name", data["level2"]["level3"])
+        else:
+            # Or it might be None.
+            self.assertIsNone(data["level2"].get("level3"))
+
+    def test_deep_model_explicit_deep_field_request(self):
+        """
+        Test that explicitly requesting a nested field (e.g. 'level2__level3__name')
+        forces the serializer to expand that nested field even when the default depth is 1.
+        """
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "get",
+                    "filter": {"type": "filter", "conditions": {"id": self.deep_level1.id}},
+                },
+                "serializerOptions": {
+                    "fields": ["id", "name", "level2__name", "level2__level3__name"],
+                    "depth": 1,
+                },
+            }
+        }
+        url = reverse("ormbridge:model_view", args=["django_app.DeepModelLevel1"])
+        response = self.client.post(url, data=payload, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.data.get("data", {})
+
+        # Verify root-level fields.
+        self.assertEqual(data.get("id"), self.deep_level1.id)
+        self.assertEqual(data.get("name"), "Deep1")
+
+        # Verify that level2 is expanded and includes its own 'name'
+        self.assertIn("level2", data)
+        self.assertIsInstance(data["level2"], dict)
+        self.assertIn("name", data["level2"])
+        self.assertEqual(data["level2"]["name"], "Deep2")
+
+        # The explicit request for 'level2__level3__name' forces level3 to be expanded.
+        self.assertIn("level3", data["level2"])
+        self.assertIsInstance(data["level2"]["level3"], dict)
+        self.assertIn("name", data["level2"]["level3"])
+        self.assertEqual(data["level2"]["level3"]["name"], "Deep3")

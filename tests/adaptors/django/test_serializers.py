@@ -151,7 +151,7 @@ class RelatedFieldWithReprTests(TestCase):
         r1 = DummyRelatedModel.objects.create(name="Test1")
         r2 = DummyRelatedModel.objects.create(name="Test2")
         qs = DummyRelatedModel.objects.all().filter(pk__in=[r1.pk, r2.pk])
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0)
+        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0, many=True)
         rep = field.to_representation(qs)
         expected = [
             {"id": r1.pk, "repr": str(r1), "img": r1.__img__()},
@@ -181,7 +181,7 @@ class RelatedFieldWithReprTests(TestCase):
         qs = DummyRelatedModel.objects.filter(pk__in=[r1.pk, r2.pk])
         SerializerClass = DynamicModelSerializer.for_model(DummyRelatedModel, depth=1)
         parent = SerializerClass(instance=r1, context={"fields_map": {}})
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=1)
+        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=1, many=True)
         field.bind("related", parent)
         rep = field.to_representation(qs)
         expected_r1 = {
@@ -427,6 +427,78 @@ class DependencyLoggingTests(TestCase):
         self.assertIn(level1_key, dep_registry)
         self.assertIn(level1.pk, dep_registry[level1_key])
 
+class RelatedModelFetchingTests(TestCase):
+    def test_depth_param_effect(self):
+        # Create a chain of nested objects:
+        # DeepModelLevel3 -> DeepModelLevel2 -> DeepModelLevel1
+        level3 = DeepModelLevel3.objects.create(name="Depth Level3")
+        level2 = DeepModelLevel2.objects.create(name="Depth Level2", level3=level3)
+        level1 = DeepModelLevel1.objects.create(name="Depth Level1", level2=level2)
+
+        # Serialize with depth=0: Nested related field should be minimal
+        Serializer0 = DynamicModelSerializer.for_model(DeepModelLevel1, depth=0)
+        serializer0 = Serializer0(instance=level1, context={"fields_map": {}}, depth=0)
+        data0 = serializer0.data
+
+        # Serialize with depth=1: The first level (i.e. level2) should now be expanded
+        Serializer1 = DynamicModelSerializer.for_model(DeepModelLevel1, depth=1)
+        serializer1 = Serializer1(instance=level1, context={"fields_map": {}}, depth=1)
+        data1 = serializer1.data
+
+        # Serialize with depth=2: Now the nested level within level2 (i.e. level3) should be expanded too
+        Serializer2 = DynamicModelSerializer.for_model(DeepModelLevel1, depth=2)
+        serializer2 = Serializer2(instance=level1, context={"fields_map": {}}, depth=2)
+        data2 = serializer2.data
+
+        # Check for depth=0: level2 should be represented minimally
+        self.assertIsInstance(data0.get("level2"), dict)
+        # For a minimal representation, we expect only 'id', 'repr', and 'img' – no 'name'
+        self.assertIn("id", data0["level2"])
+        self.assertNotIn("name", data0["level2"])
+
+        # Check for depth=1: level2 should now include its own fields (e.g. 'name')
+        self.assertIsInstance(data1.get("level2"), dict)
+        self.assertIn("name", data1["level2"])
+        # Depending on the implementation, level3 may still be minimal or null. We check both cases.
+        if data1["level2"].get("level3") is not None:
+            self.assertNotIn("name", data1["level2"]["level3"])
+        else:
+            self.assertIsNone(data1["level2"].get("level3"))
+
+        # Check for depth=2: level2 and its nested level3 should be expanded
+        self.assertIsInstance(data2.get("level2"), dict)
+        self.assertIn("name", data2["level2"])
+        self.assertIsInstance(data2["level2"].get("level3"), dict)
+        self.assertIn("name", data2["level2"]["level3"])
+
+    def test_requested_deeper_field_with_lower_depth(self):
+        # Create the chain of nested objects:
+        # DeepModelLevel3 -> DeepModelLevel2 -> DeepModelLevel1
+        level3 = DeepModelLevel3.objects.create(name="Depth Level3")
+        level2 = DeepModelLevel2.objects.create(name="Depth Level2", level3=level3)
+        level1 = DeepModelLevel1.objects.create(name="Depth Level1", level2=level2)
+
+        # Simulate a requested fields list that explicitly asks for a deeper field.
+        # For example, the frontend might have requested "level2__level3__name".
+        # The resulting fields_map might look like this (assuming the model names are used as keys):
+        fields_map = {
+            "django_app.deepmodellevel1": {"level2"},
+            "django_app.deepmodellevel2": {"level3"},
+            "django_app.deepmodellevel3": {"name"}
+        }
+
+        # Even though the serializer depth is set to 1,
+        # the explicit request should force the expansion of level3.
+        Serializer = DynamicModelSerializer.for_model(DeepModelLevel1, depth=1)
+        serializer = Serializer(instance=level1, context={"fields_map": fields_map}, depth=1)
+        data = serializer.data
+
+        # Verify that level2 is expanded (due to depth=1)
+        self.assertIsInstance(data.get("level2"), dict)
+        # Verify that even with depth=1, level3 is expanded because 'name' was explicitly requested.
+        self.assertIsInstance(data["level2"].get("level3"), dict)
+        self.assertIn("name", data["level2"]["level3"])
+        self.assertEqual(data["level2"]["level3"]["name"], "Depth Level3")
 
 if __name__ == "__main__":
     unittest.main()

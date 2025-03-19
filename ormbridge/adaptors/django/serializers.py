@@ -44,14 +44,10 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         super().__init__(*args, **kwargs)
 
     def to_representation(self, value):
-        if value is None:
-            return None
-            
-        # DRF has already taken care of handling the collection for us
-        # If many=True, value will be a single instance from the collection
-        # If many=False, value will be the related instance directly
-        
-        if self.depth == 0:
+        fields_map: Dict[str, Set[str]] = self.context.get("fields_map", {})
+        model_name = config.orm_provider.get_model_name(self.queryset.model)
+        allowed = fields_map.get(model_name)
+        if self.depth == 0 and not allowed:
             return self._minimal_representation(value)
         else:
             return self._expanded_representation(value)
@@ -69,8 +65,12 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         return rep.to_dict()
 
     def _expanded_representation(self, instance):
-        # The parent serializer logs that its expanded data depends on this instance.
-        self.parent.log_dependency(instance, config.orm_provider.get_model_name)
+        # Get the nearest parent serializer that implement
+        serializer_parent = self.parent
+        if not hasattr(serializer_parent, "log_dependency") and hasattr(serializer_parent, "parent"):
+            serializer_parent = serializer_parent.parent
+        serializer_parent.log_dependency(instance, config.orm_provider.get_model_name)
+        
         fields_map = self.context.get("fields_map", {})
         serializer_class = DynamicModelSerializer.for_model(
             instance.__class__, depth=self.depth - 1

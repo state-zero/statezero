@@ -71,7 +71,7 @@ class ASTParser:
         self.default_handler = self._handle_read
         self.request = request
 
-    def _process_requested_fields(self, requested_fields):
+    def _process_requested_fields(self, requested_fields: List[str]) -> Dict[str, Set[str]]:
         """
         Process the requested fields, including nested fields, and build a complete fields_map.
         """
