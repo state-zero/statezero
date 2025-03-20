@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 import networkx as nx
 from django.apps import apps
 from django.db import models
-from django.db.models import Avg, Count, Max, Min, Q, Sum
+from django.db.models import Avg, Count, Max, Min, Q, Sum, QuerySet
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.forms.models import model_to_dict
@@ -336,12 +336,12 @@ class DjangoORMAdapter(AbstractORMProvider):
         assert self.model is not None, "Model must be set before updating."
         data: Dict[str, Any] = node.get("data", {})
         filter_ast: Optional[Dict[str, Any]] = node.get("filter")
+        # Start with self.queryset which already has permission filtering
+        qs: QuerySet = self.queryset
         if filter_ast:
             visitor = QueryASTVisitor(self.model)
             q_obj = visitor.visit(filter_ast)
-            qs = self.model.objects.filter(q_obj)
-        else:
-            qs = self.model.objects.all()
+            qs = qs.filter(q_obj)
 
         check_bulk_permissions(req, qs, ActionType.UPDATE, permissions, self.model)
         instances = list(qs)
@@ -360,12 +360,12 @@ class DjangoORMAdapter(AbstractORMProvider):
     ) -> int:
         assert self.model is not None, "Model must be set before deleting."
         filter_ast: Optional[Dict[str, Any]] = node.get("filter")
+        # Start with self.queryset which already has permission filtering
+        qs: QuerySet = self.queryset
         if filter_ast:
             visitor = QueryASTVisitor(self.model)
             q_obj = visitor.visit(filter_ast)
-            qs = self.model.objects.filter(q_obj)
-        else:
-            qs = self.model.objects.all()
+            qs = qs.filter(q_obj)
 
         check_bulk_permissions(req, qs, ActionType.DELETE, permissions, self.model)
         instances = list(qs)
@@ -460,7 +460,7 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         # Check if an instance exists
         try:
-            instance = self.model.objects.get(**lookup)
+            instance = self.queryset.get(**lookup)
             created = False
 
             # Check object-level permission to read the existing object
@@ -509,7 +509,7 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         # Determine if the instance exists
         try:
-            instance = self.model.objects.get(**lookup)
+            instance = self.queryset.get(**lookup)
             created = False
 
             # Perform object-level permission check before update
