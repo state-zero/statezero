@@ -153,8 +153,9 @@ class ModelConfig:
         Functions to run after serialization/deserialization
     additional_fields: List[AdditionalField], optional
         Additional computed fields to add to the model schema
-    cache_enabled: bool, default=False
-        Whether to enable caching for this model
+    cache_ttl: Optional[int], default=None
+        Time-to-live in seconds for cache entries. If None, uses the default TTL
+        from the cache backend. If 0, caching is disabled for this model.
     anonymous_read_allowed: bool, default=False
         Whether unauthenticated users can read this model
     filterable_fields: Set[str], optional
@@ -180,7 +181,7 @@ class ModelConfig:
         pre_hooks: Optional[List] = None,
         post_hooks: Optional[List] = None,
         additional_fields: Optional[List[AdditionalField]] = None,
-        cache_enabled: bool = False,
+        cache_ttl: Optional[int] = None,
         anonymous_read_allowed: bool = False,
         filterable_fields: Optional[Set[str]] = None,
         searchable_fields: Optional[Set[str]] = None,
@@ -195,7 +196,7 @@ class ModelConfig:
         self.pre_hooks = pre_hooks or []
         self.post_hooks = post_hooks or []
         self.additional_fields = additional_fields or []
-        self.cache_enabled = cache_enabled
+        self.cache_ttl = cache_ttl
         self.anonymous_read_allowed = anonymous_read_allowed
         self.filterable_fields = filterable_fields or set()
         self.searchable_fields = searchable_fields or set()

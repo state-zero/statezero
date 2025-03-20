@@ -229,10 +229,23 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         using a key computed from the model, instance, depth, and fields_map.
         If not found, compute the serialization, cache it (registering all dependencies
         that were logged during this serialization pass), and return the result.
+        
+        Respects model-specific cache TTL settings from the registry.
         """
+        model = self.Meta.model
+        
+        # Check if caching is enabled for this model
+        try:
+            model_config = registry.get_config(model)
+            # If cache_ttl is 0, caching is disabled for this model
+            if model_config.cache_ttl == 0:
+                return self.data
+        except ValueError:
+            # If model isn't registered, use default caching behavior
+            model_config = None
+        
         if self.cache_backend is not None:
             fields_map = self.context.get("fields_map", {})
-            model = self.Meta.model
             get_model_name = config.orm_provider.get_model_name
             cache_key = self.generate_cache_key(
                 model, self.instance, self.depth, fields_map, get_model_name
@@ -260,11 +273,17 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
                         self.log_dependency(related_instance, get_model_name)
 
             result = self.data  # Trigger full serialization.
-            self.cache_result(cache_key, result)
+            
+            # Get model-specific TTL if available
+            ttl = None
+            if model_config is not None:
+                ttl = model_config.cache_ttl
+                
+            # Cache the result with the model-specific TTL
+            self.cache_result(cache_key, result, ttl)
             return result
         else:
             return self.data
-
 
 class DRFDynamicSerializer(AbstractDataSerializer):
     """

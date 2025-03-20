@@ -43,7 +43,6 @@ class DjangoCacheBackend(AbstractCacheBackend):
         except Exception as e:
             logger.error(f"Error invalidating key {key} from cache: {str(e)}")
 
-
 class DjangoDependencyStore(AbstractDependencyStore):
     """Dependency store that uses Django's caching framework with locking similar to Redis"""
     
