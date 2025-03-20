@@ -128,7 +128,7 @@ class DjangoORMAdapterTest(TestCase):
 
     def test_create(self):
         data = {"name": "Dummy3", "value": 30, "related": self.related1}
-        instance = self.adapter.create(data, self.serializer)
+        instance = self.adapter.create(data, self.serializer, req=self.dummy_req)
         self.assertEqual(instance.name, "Dummy3")
         self.assertEqual(instance.value, 30)
 

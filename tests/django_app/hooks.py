@@ -15,7 +15,7 @@ def normalize_email(data, request=None):
 def generate_order_number(data, request=None):
     """Post-processing hook that generates an order number if not provided or if it's a dummy value."""
     from django.utils import timezone
-    if 'order_number' not in data or not data['order_number'] or data['order_number'] == "DUMMY":
+    if 'order_number' not in data or not data['order_number'] or "DUMMY" in data['order_number']:
         # Generate a unique order number based on timestamp
         timestamp = timezone.now().strftime('%Y%m%d%H%M%S')
         data['order_number'] = f"ORD-{timestamp}"

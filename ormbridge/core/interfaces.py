@@ -238,9 +238,15 @@ class AbstractORMProvider(ABC):
 
 class AbstractCustomQueryset(ABC):
     @abstractmethod
-    def get_queryset(self) -> Any:
+    def get_queryset(self, request: Optional[RequestType] = None) -> Any:
         """
         Return a custom queryset (e.g. a custom SQLAlchemy Query or Django QuerySet).
+        
+        Args:
+            request: The current request object, which may contain user information
+        
+        Returns:
+            A custom queryset
         """
         pass
 

@@ -260,22 +260,23 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         self.queryset = self.queryset.exclude(q_object)
 
-    def create(self, data: Dict[str, Any], serializer) -> models.Model:
+    def create(self, data: Dict[str, Any], serializer, req) -> models.Model:
         assert self.model is not None, "Model must be set before creating."
         # Use the provided serializer's save method
         return serializer.save(
             model=self.model,
             data=data,
             instance=None,
-            partial=False
+            partial=False,
+            request=req
         )
 
     def update_instance(
         self,
         ast: Dict[str, Any],
-        request: RequestType,
+        req: RequestType,
         permissions: List[Type[AbstractPermission]],
-        serializer
+        serializer,
     ) -> models.Model:
         data = ast.get("data", {})
         filter_ast = ast.get("filter")
@@ -289,7 +290,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         # Check object-level permissions for update.
         for perm_cls in permissions:
             perm = perm_cls()
-            allowed = perm.allowed_object_actions(request, instance, self.model)
+            allowed = perm.allowed_object_actions(req, instance, self.model)
             if ActionType.UPDATE not in allowed:
                 raise PermissionDenied(f"Update not permitted on {instance}")
 
@@ -298,13 +299,14 @@ class DjangoORMAdapter(AbstractORMProvider):
             model=self.model,
             data=data,
             instance=instance,
-            partial=True  # Allow partial updates - only specified fields will be validated/updated
+            partial=True,
+            request=req
         )
 
     def delete_instance(
         self,
         ast: Dict[str, Any],
-        request: RequestType,
+        req: RequestType,
         permissions: List[Type[AbstractPermission]],
     ) -> int:
         filter_ast = ast.get("filter")
@@ -318,7 +320,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         # Check object-level permissions.
         for perm_cls in permissions:
             perm = perm_cls()
-            allowed = perm.allowed_object_actions(request, instance, self.model)
+            allowed = perm.allowed_object_actions(req, instance, self.model)
             if ActionType.DELETE not in allowed:
                 raise PermissionDenied(f"Delete not permitted on {instance}")
 
@@ -449,19 +451,6 @@ class DjangoORMAdapter(AbstractORMProvider):
     ) -> Tuple[models.Model, bool]:
         """
         Get an existing object, or create it if it doesn't exist, with object-level permission checks.
-
-        Args:
-            node: The query AST node with lookup and defaults
-            serializer: The serializer to validate the data
-            req: The request object
-            permissions: List of permission classes to check
-
-        Returns:
-            A tuple of (instance, created) where created is a boolean
-
-        Raises:
-            PermissionDenied: If the user doesn't have permission to read an existing object
-            ValidationError: If the data fails validation
         """
         lookup = node.get("lookup", {})
         defaults = node.get("defaults", {})
@@ -473,7 +462,6 @@ class DjangoORMAdapter(AbstractORMProvider):
         try:
             instance = self.model.objects.get(**lookup)
             created = False
-            partial = True
 
             # Check object-level permission to read the existing object
             check_object_permissions(
@@ -481,50 +469,37 @@ class DjangoORMAdapter(AbstractORMProvider):
             )
         except self.model.DoesNotExist:
             # Object doesn't exist, we'll create it
-            # No object-level permissions check needed for non-existent objects
-            partial = False
+            instance = None
             created = True
         except self.model.MultipleObjectsReturned as e:
             raise MultipleObjectsReturned(
                 f"Multiple {self.model.__name__} instances match the given lookup parameters"
             )
 
-        # Validate the merged data using the provided serializer
-        validated_data = serializer.deserialize(
-            model=self.model, data=merged_data, partial=partial
-        )
+        # If the instance exists, we don't need to update it, just return it
+        if not created:
+            return instance, created
 
-        if created:
-            # Create a new instance
-            try:
-                instance = self.model.objects.create(**{**lookup, **validated_data})
-            except Exception as e:
-                raise ORMBridgeError(detail=str(e))
+        # Only create a new instance if it doesn't exist
+        instance = serializer.save(
+            model=self.model,
+            data=merged_data,
+            instance=None,  # No instance for creation
+            partial=False,   # Not a partial update for creation
+            request=req
+        )
 
         return instance, created
 
     def update_or_create(
         self,
         node: Dict[str, Any],
-        request: RequestType,
+        req: RequestType,
         serializer,
         permissions: List[Type[AbstractPermission]],
     ) -> Tuple[models.Model, bool]:
         """
         Update an existing object, or create it if it doesn't exist, with object-level permission checks.
-
-        Args:
-            node: The query AST node with lookup and defaults
-            request: The request object
-            serializer: The serializer to validate the data
-            permissions: List of permission classes to check
-
-        Returns:
-            A tuple of (instance, created) where created is a boolean
-
-        Raises:
-            PermissionDenied: If the user doesn't have permission to update an existing object
-            ValidationError: If the data fails validation
         """
         lookup = node.get("lookup", {})
         defaults = node.get("defaults", {})
@@ -535,53 +510,28 @@ class DjangoORMAdapter(AbstractORMProvider):
         # Determine if the instance exists
         try:
             instance = self.model.objects.get(**lookup)
-            partial = True
             created = False
 
             # Perform object-level permission check before update
             check_object_permissions(
-                request, instance, ActionType.UPDATE, permissions, self.model
+                req, instance, ActionType.UPDATE, permissions, self.model
             )
         except self.model.DoesNotExist:
             # Object doesn't exist, we'll create it
-            # No object-level permissions check needed for non-existent objects
-            partial = False
+            instance = None
             created = True
         except self.model.MultipleObjectsReturned as e:
             raise MultipleObjectsReturned(
                 f"Multiple {self.model.__name__} instances match the given lookup parameters"
             )
 
-        # Validate the data
-        validated_data = serializer.deserialize(
-            model=self.model, data=merged_data, partial=partial
+        # Use the serializer's save method, which handles validation and saving
+        instance = serializer.save(
+            model=self.model,
+            data=merged_data,
+            instance=instance,
+            request=req
         )
-
-        # If creating a new instance, ensure all required fields are present
-        if created:
-            missing_fields = []
-            for field in self.model._meta.fields:
-                if field.auto_created or field.blank or field.null:
-                    continue
-                if field.name not in validated_data and field.name not in lookup:
-                    missing_fields.append(field.name)
-            if missing_fields:
-                raise ValidationError(
-                    {field: ["This field is required."] for field in missing_fields}
-                )
-
-            try:
-                instance = self.model.objects.create(**{**lookup, **validated_data})
-            except Exception as e:
-                raise ORMBridgeError(detail=str(e))
-        else:
-            # Update existing instance
-            for field, value in validated_data.items():
-                setattr(instance, field, value)
-            try:
-                instance.save()
-            except Exception as e:
-                raise ORMBridgeError(detail=str(e))
 
         return instance, created
 
@@ -686,7 +636,7 @@ class DjangoORMAdapter(AbstractORMProvider):
     # --- AbstractORMProvider Methods ---
     def get_queryset(
         self,
-        request: RequestType,
+        req: RequestType,
         model: Type,
         initial_ast: Dict[str, Any],
         custom_querysets: Dict[str, Type[AbstractCustomQueryset]],
@@ -695,7 +645,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         custom_name = initial_ast.get("custom_queryset")
         if custom_name and custom_name in custom_querysets:
             custom_queryset_class = custom_querysets[custom_name]
-            return custom_queryset_class().get_queryset()
+            return custom_queryset_class().get_queryset(req)
         return model.objects.all()
 
     def build_model_graph(

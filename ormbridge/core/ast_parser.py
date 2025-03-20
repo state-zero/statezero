@@ -205,9 +205,9 @@ class ASTParser:
     def _handle_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
-            model=self.model, data=data, partial=False
+            model=self.model, data=data, partial=False, request=self.request
         )
-        record = self.engine.create(validated_data, self.serializer)
+        record = self.engine.create(validated_data, self.serializer, self.request)
         serialized = self.serializer.serialize(
             record, self.model, many=False, **self.ser_args
         )
@@ -219,7 +219,7 @@ class ASTParser:
     def _handle_update(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
-            model=self.model, data=data, partial=True
+            model=self.model, data=data, partial=True, request=self.request
         )
         ast["data"] = validated_data
         # Retrieve permissions from the self.registry.
@@ -251,7 +251,7 @@ class ASTParser:
         raw_data = ast.get("data", {})
         # Allow partial updates.
         validated_data = self.serializer.deserialize(
-            model=self.model, data=raw_data, partial=True
+            model=self.model, data=raw_data, partial=True, request=self.request
         )
         # Replace raw data with validated data in the AST.
         ast["data"] = validated_data
@@ -310,7 +310,7 @@ class ASTParser:
 
     def _handle_get_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         # Validate and split lookup/defaults (without extra wrapping)
-        self._validate_and_split_lookup_defaults(ast, partial=False)
+        self._validate_and_split_lookup_defaults(ast, partial=True)
 
         # Merge lookup and defaults.
         merged_data = {**ast.get("lookup", {}), **ast.get("defaults", {})}
@@ -343,7 +343,7 @@ class ASTParser:
 
     def _handle_update_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         # Validate and split lookup/defaults.
-        self._validate_and_split_lookup_defaults(ast, partial=False)
+        self._validate_and_split_lookup_defaults(ast, partial=True)
 
         # Merge lookup and defaults for full validation.
         merged_data = {**ast.get("lookup", {}), **ast.get("defaults", {})}
@@ -358,7 +358,7 @@ class ASTParser:
         # Call the ORM update_or_create method, passing the serializer, request, and permissions.
         record, created = self.engine.update_or_create(
             {"lookup": ast.get("lookup", {}), "defaults": ast.get("defaults", {})},
-            request=self.request,
+            req=self.request,
             serializer=self.serializer,
             permissions=permissions,
         )
@@ -502,7 +502,7 @@ class ASTParser:
         raw_defaults = ast.get("defaults", {})
         combined_data = {**raw_lookup, **raw_defaults}
         validated_data = self.serializer.deserialize(
-            model=self.model, data=combined_data, partial=partial
+            model=self.model, data=combined_data, partial=partial, request=self.request
         )
         validated_lookup = {
             k: validated_data[k] for k in raw_lookup if k in validated_data

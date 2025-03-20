@@ -103,7 +103,7 @@ class RequestProcessor:
         model_config: ModelConfig = self.registry.get_config(model)
 
         base_queryset = self.orm_provider.get_queryset(
-            request=req,
+            req=req,
             model=model,
             initial_ast=initial_query_ast,
             custom_querysets=model_config.custom_querysets,

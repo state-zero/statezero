@@ -123,7 +123,6 @@ def generate_cache_key(
     key_str = json.dumps(key_data, sort_keys=True)
     return hashlib.md5(key_str.encode("utf-8")).hexdigest()
 
-
 class CachingMixin:
     """
     A mixin to add caching and dependency logging logic to a serializer.

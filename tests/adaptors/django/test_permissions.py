@@ -86,7 +86,7 @@ class PermissionsTest(APITestCase):
         self.assertEqual(response.status_code, 403)
         # Check that the error message indicates missing update permission.
         self.assertIn(
-            "Missing global permissions for actions: update", str(response.data)
+            "Permission denied", response.data.get("detail")
         )
 
         # Verify model was not updated

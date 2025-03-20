@@ -12,6 +12,7 @@ from ormbridge.core.caching import CachingMixin
 from ormbridge.core.classes import ModelSummaryRepresentation
 from ormbridge.core.constants import ALL_FIELDS
 from ormbridge.core.interfaces import AbstractDataSerializer
+from ormbridge.core.types import RequestType
 
 
 def get_custom_serializer(field_class: Type) -> Optional[Type[serializers.Field]]:
@@ -303,6 +304,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         depth: int,
         fields_map: Optional[Dict[str, Set[str]]],
         many: bool,
+        request: Optional[RequestType] = None
     ) -> DynamicModelSerializer:
         serializer_class = DynamicModelSerializer.for_model(model, depth=depth)
         fm = fields_map.copy() if fields_map is not None else {}
@@ -310,7 +312,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         if model_name not in fm:
             fm[model_name] = {ALL_FIELDS}
         # Build a base context that includes a fresh dependency registry.
-        ctx = {"depth": depth, "fields_map": fm, "dependency_registry": {}}
+        ctx = {"depth": depth, "fields_map": fm, "dependency_registry": {}, "request": request}
         serializer = serializer_class(
             data,
             many=many,
@@ -328,6 +330,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         depth: int,
         fields_map: Optional[Dict[str, Set[str]]] = None,
         many: bool = False,
+        request: Optional[RequestType] = None
     ) -> Any:
         """
         Public serialization method.
@@ -336,7 +339,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         with all nested dependencies (e.g. reservation depends on home, address, postcode),
         while a nested serializer (e.g. home) registers only its own nested dependencies.
         """
-        serializer = self._serialize(data, model, depth, fields_map, many)
+        serializer = self._serialize(data, model, depth, fields_map, many, request)
         return serializer.cached_data()
 
     def deserialize(
@@ -345,7 +348,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         data: Dict[str, Any],
         fields_map: Optional[Dict[str, Set[str]]] = None,
         partial: bool = False,
-        request: Optional[Any] = None,
+        request: Optional[RequestType] = None,
     ) -> Dict[str, Any]:
         serializer_class = DynamicModelSerializer.for_model(model)
         model_name = config.orm_provider.get_model_name(model)
@@ -379,7 +382,8 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         data: Dict[str, Any],
         instance: Optional[Any] = None,
         fields_map: Optional[Dict[str, Set[str]]] = None,
-        partial: bool = True
+        partial: bool = True,
+        request: Optional[RequestType] = None
     ) -> Any:
         """
         Save data to create a new instance or update an existing one.

@@ -177,6 +177,7 @@ class ModelConfig:
         self,
         model: Type,
         custom_querysets: Optional[Dict[str, Type[AbstractCustomQueryset]]] = None,
+        custom_querysets_user_scoped: Optional[Dict[str, bool]] = None,
         permissions: Optional[List[Type[AbstractPermission]]] = None,
         pre_hooks: Optional[List] = None,
         post_hooks: Optional[List] = None,
@@ -192,6 +193,7 @@ class ModelConfig:
     ):
         self.model = model
         self._custom_querysets = custom_querysets or {}
+        self._custom_querysets_user_scoped = custom_querysets_user_scoped or {}
         self._permissions = permissions or []
         self.pre_hooks = pre_hooks or []
         self.post_hooks = post_hooks or []
@@ -226,6 +228,22 @@ class ModelConfig:
         """Resolve queryset class strings to actual classes on each access"""
         resolved = {}
         for key, queryset in self._custom_querysets.items():
+            if isinstance(queryset, str):
+                from django.utils.module_loading import import_string
+                try:
+                    qs_class = import_string(queryset)
+                    resolved[key] = qs_class
+                except ImportError:
+                    raise ImportError(f"Could not import queryset class: {queryset}")
+            else:
+                resolved[key] = queryset
+        return resolved
+    
+    @property
+    def custom_querysets_user_scoped(self):
+        """Resolve queryset class strings to actual classes on each access"""
+        resolved = {}
+        for key, queryset in self._custom_querysets_user_scoped.items():
             if isinstance(queryset, str):
                 from django.utils.module_loading import import_string
                 try:

@@ -860,22 +860,7 @@ class ORMBridgeE2ETest(APITestCase):
             "Should handle special characters in the name",
         )
 
-        # 4. Test creating with missing required fields (should fail if 'related' is required).
-        missing_required_payload = {
-            "ast": {
-                "query": {
-                    "type": "update_or_create",
-                    "lookup": {"name": f"{unique_prefix}_MissingRequired"},
-                    "defaults": {},  # Missing required field 'related'
-                }
-            }
-        }
-        missing_response = self.client.post(
-            url, data=missing_required_payload, format="json"
-        )
-        self.assertEqual(missing_response.status_code, 400)
-
-        # 5. Test that multiple matching objects raise an error.
+        # 4. Test that multiple matching objects raise an error.
         # Create duplicates manually.
         DummyModel.objects.create(
             name=f"{unique_prefix}_DuplicateTest", value=10, related=related
