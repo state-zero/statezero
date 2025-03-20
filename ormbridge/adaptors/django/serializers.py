@@ -55,10 +55,12 @@ class RelatedFieldWithRepr(serializers.RelatedField):
     def _minimal_representation(self, instance):
         # Determine the primary key field from the model class (default to "id" if not provided)
         pk_field = instance._meta.pk.name
+        img_repr = instance.__img__() if hasattr(instance, "__img__") else None
+        str_repr = str(instance)
+
         rep = ModelSummaryRepresentation(
             pk=getattr(instance, pk_field),
-            repr=str(instance),
-            img=instance.__img__() if hasattr(instance, "__img__") else None,
+            repr={"str": str_repr, "img": img_repr},
             model_name=instance.__class__.__name__,
             pk_field=pk_field,
         )
@@ -138,7 +140,6 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
     """
 
     repr = serializers.SerializerMethodField()
-    img = serializers.SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         self.depth = kwargs.pop("depth", 0)
@@ -153,11 +154,10 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
                 name: field for name, field in self.fields.items() if name in allowed
             }
 
-    def get_repr(self, obj) -> str:
-        return str(obj)
-
-    def get_img(self, obj) -> Optional[str]:
-        return obj.__img__() if hasattr(obj, "__img__") else None
+    def get_repr(self, obj) -> Dict[str, Optional[str]]:
+        str_repr = str(obj)
+        img_repr = obj.__img__() if hasattr(obj, "__img__") else None
+        return {"str": str_repr, "img": img_repr}
 
     class Meta:
         model = None  # To be set dynamically.

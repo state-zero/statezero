@@ -347,7 +347,6 @@ class ORMBridgeE2ETest(APITestCase):
         level2_repr = deep_instance["level2"]
         self.assertTrue(isinstance(level2_repr, dict))
         self.assertIn("repr", level2_repr)
-        self.assertIn("img", level2_repr)
 
         self.assertIn("comprehensive_models", deep_instance)
         comprehensive_list = deep_instance["comprehensive_models"]

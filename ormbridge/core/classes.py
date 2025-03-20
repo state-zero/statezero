@@ -136,17 +136,14 @@ class ModelSchemaMetadata(BaseModel):
 @dataclass
 class ModelSummaryRepresentation:
     pk: Any
-    repr: str
-    img: Optional[str] = None
+    repr: Dict[str, Optional[str]] = field(default_factory=dict)
     model_name: Optional[str] = field(default=None)
     pk_field: str = "id"
 
     def to_dict(self) -> dict:
-        # use jsonable encoder to support uuid pk's without serialization errors
         return {
             self.pk_field: jsonable_encoder(self.pk),
             "repr": self.repr,
-            "img": self.img,
         }
 
 

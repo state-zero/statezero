@@ -75,7 +75,7 @@ class ModelSummaryRepresentation:
         self.model_name = model_name
 
     def to_dict(self):
-        return {"id": self.id, "repr": self.repr, "img": self.img}
+        return {"id": self.id, "repr": {"str": self.repr, "img": self.img}}
 
 
 class DummySerializerField(serializers.Field):
@@ -142,8 +142,7 @@ class RelatedFieldWithReprTests(TestCase):
         rep = field.to_representation(self.related)
         expected = {
             "id": self.related.pk,
-            "repr": str(self.related),
-            "img": self.related.__img__(),
+            "repr": {"str": str(self.related), "img": self.related.__img__()}
         }
         self.assertEqual(rep, expected)
 
@@ -154,8 +153,8 @@ class RelatedFieldWithReprTests(TestCase):
         field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0, many=True)
         rep = field.to_representation(qs)
         expected = [
-            {"id": r1.pk, "repr": str(r1), "img": r1.__img__()},
-            {"id": r2.pk, "repr": str(r2), "img": r2.__img__()},
+            {"id": r1.pk, "repr": {"str": str(r1), "img": r1.__img__()}},
+            {"id": r2.pk, "repr": {"str": str(r2), "img": r2.__img__()}},
         ]
         rep_sorted = sorted(rep, key=lambda d: d["id"])
         expected_sorted = sorted(expected, key=lambda d: d["id"])
@@ -170,8 +169,7 @@ class RelatedFieldWithReprTests(TestCase):
         expected = {
             "id": self.related.pk,
             "name": self.related.name,
-            "repr": str(self.related),
-            "img": self.related.__img__(),
+            "repr": {"str": str(self.related), "img": self.related.__img__()},
         }
         self.assertEqual(rep, expected)
 
@@ -187,14 +185,12 @@ class RelatedFieldWithReprTests(TestCase):
         expected_r1 = {
             "id": r1.pk,
             "name": r1.name,
-            "repr": str(r1),
-            "img": r1.__img__(),
+            "repr": {"str": str(r1), "img": r1.__img__()}
         }
         expected_r2 = {
             "id": r2.pk,
             "name": r2.name,
-            "repr": str(r2),
-            "img": r2.__img__(),
+            "repr": {"str": str(r2), "img": r2.__img__()}
         }
         expected = [expected_r1, expected_r2]
         rep_sorted = sorted(rep, key=lambda d: d["id"])
@@ -234,8 +230,8 @@ class DynamicModelSerializerTests(TestCase):
     def test_get_repr_and_get_img(self):
         SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=0)
         serializer = SerializerClass(instance=self.dummy, context={"fields_map": {}})
-        self.assertEqual(serializer.get_repr(self.dummy), str(self.dummy))
-        self.assertEqual(serializer.get_img(self.dummy), self.dummy.__img__())
+        self.assertEqual(serializer.get_repr(self.dummy)['str'], str(self.dummy))
+        self.assertEqual(serializer.get_repr(self.dummy)['img'], self.dummy.__img__())
 
     def test_additional_computed_fields(self):
         class DummyAdditionalField:
@@ -330,8 +326,8 @@ class DRFDynamicSerializerTests(TestCase):
         self.assertEqual(data["name"], self.dummy.name)
         self.assertIn("related", data)
         self.assertEqual(data["related"]["id"], self.related.pk)
-        self.assertEqual(data["related"]["repr"], str(self.related))
-        self.assertEqual(data["related"]["img"], self.related.__img__())
+        self.assertEqual(data["related"]["repr"]["str"], str(self.related))
+        self.assertEqual(data["related"]["repr"]["img"], self.related.__img__())
 
     def test_serialize_list_minimal(self):
         r1 = DummyRelatedModel.objects.create(name="Related1")
