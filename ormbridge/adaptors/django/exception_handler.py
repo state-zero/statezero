@@ -1,6 +1,7 @@
 import logging
 import traceback
 
+from django.conf import settings
 from django.core.exceptions import \
     MultipleObjectsReturned as DjangoMultipleObjectsReturned
 from django.core.exceptions import ObjectDoesNotExist
@@ -67,7 +68,7 @@ def explicit_exception_handler(exc):
     traceback.print_exc()
     exc = map_exception(exc)
     logger.debug("Using exception type after mapping: %s", type(exc))
-
+    
     if isinstance(exc, NotFound):
         status_code = status.HTTP_404_NOT_FOUND
     elif isinstance(exc, PermissionDenied):
@@ -76,15 +77,22 @@ def explicit_exception_handler(exc):
         status_code = status.HTTP_400_BAD_REQUEST
     else:
         status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    # Use jsonable_encoder to serialize the detail.
-    detail = jsonable_encoder(exc.detail) if hasattr(exc, "detail") else str(exc)
-
+    
+    # Only show detailed errors for 400 and 404 in production
+    # For 403 and 500 errors, only show details in debug mode
+    if status_code in [status.HTTP_403_FORBIDDEN, status.HTTP_500_INTERNAL_SERVER_ERROR] and not settings.DEBUG:
+        if status_code == status.HTTP_403_FORBIDDEN:
+            detail = "Permission denied"
+        else:
+            detail = "Internal server error"
+    else:
+        detail = jsonable_encoder(exc.detail) if hasattr(exc, "detail") else str(exc)
+    
     error_data = {
         "status": status_code,
         "type": exc.__class__.__name__,
         "detail": detail,
     }
-
+    
     logger.error("Exception handled explicitly: %s", error_data)
     return Response(error_data, status=status_code)
