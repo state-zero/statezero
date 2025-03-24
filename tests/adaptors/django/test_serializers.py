@@ -496,5 +496,50 @@ class RelatedModelFetchingTests(TestCase):
         self.assertIn("name", data["level2"]["level3"])
         self.assertEqual(data["level2"]["level3"]["name"], "Depth Level3")
 
+class RelatedFieldRestrictionBugTests(TestCase):
+    def test_related_model_with_no_fields_in_map(self):
+        """
+        Test that verifies a bug where related models without entries in fields_map
+        are expanded with ALL fields rather than using minimal representation.
+        
+        This test will FAIL with the current implementation but PASS after the fix.
+        """
+        # Create our test data
+        level3 = DeepModelLevel3.objects.create(name="TestLevel3")
+        level2 = DeepModelLevel2.objects.create(name="TestLevel2", level3=level3)
+        level1 = DeepModelLevel1.objects.create(name="TestLevel1", level2=level2)
+        
+        # Set up a fields_map that only specifies fields for level1 and level2,
+        # but NOT for level3
+        fields_map = {
+            "django_app.deepmodellevel1": {"name", "level2"},
+            "django_app.deepmodellevel2": {"name", "level3"}
+            # Deliberately NOT including "django_app.deepmodellevel3"
+        }
+        
+        # Create serializer with depth=2 to test deep expansion
+        Serializer = DynamicModelSerializer.for_model(DeepModelLevel1, depth=2)
+        serializer = Serializer(instance=level1, context={"fields_map": fields_map}, depth=2)
+        data = serializer.data
+        
+        # Verify level1 has only requested fields
+        self.assertIn("name", data)
+        self.assertIn("level2", data)
+        
+        # Verify level2 has only requested fields
+        self.assertIn("name", data["level2"])
+        self.assertIn("level3", data["level2"])
+        
+        # The bug: level3 should have a minimal representation (just id and repr),
+        # but with the current code it will have ALL fields
+        level3_data = data["level2"]["level3"]
+        
+        # This assertion will FAIL with the current code:
+        # With the bug, level3_data will have more fields than just id and repr
+        # After the fix, this assertion will PASS
+        expected_keys = {"id", "repr"}
+        self.assertEqual(set(level3_data.keys()), expected_keys, 
+            "Related model (level3) with no fields in fields_map should have minimal representation")
+
 if __name__ == "__main__":
     unittest.main()
