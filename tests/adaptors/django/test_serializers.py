@@ -24,7 +24,8 @@ from ormbridge.adaptors.django.serializers import (DRFDynamicSerializer,
                                                    get_custom_serializer)
 from tests.django_app.models import (ComprehensiveModel, DeepModelLevel1,
                                      DeepModelLevel2, DeepModelLevel3,
-                                     DummyModel, DummyRelatedModel)
+                                     DummyModel, DummyRelatedModel,
+                                     ParentTestModel, GrandChildTestModel, ChildTestModel)
 
 ###############################################################################
 # Dummy Cache and Dependency Store implementations for testing caching.
@@ -540,6 +541,3 @@ class RelatedFieldRestrictionBugTests(TestCase):
         expected_keys = {"id", "repr"}
         self.assertEqual(set(level3_data.keys()), expected_keys, 
             "Related model (level3) with no fields in fields_map should have minimal representation")
-
-if __name__ == "__main__":
-    unittest.main()

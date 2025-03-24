@@ -48,7 +48,7 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         fields_map: Dict[str, Set[str]] = self.context.get("fields_map", {})
         model_name = config.orm_provider.get_model_name(self.queryset.model)
         allowed = fields_map.get(model_name)
-        if self.depth == 0 or not allowed:
+        if self.depth == 0 and not allowed:
             return self._minimal_representation(value)
         else:
             return self._expanded_representation(value)

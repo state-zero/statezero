@@ -121,7 +121,7 @@ class RequestProcessor:
         allowed_global_actions: Set[ActionType] = set()
         for permission_cls in model_config.permissions:
             allowed_global_actions |= permission_cls().allowed_actions(req, model)
-        if ALL_FIELDS not in allowed_global_actions:
+        if "__all__" not in allowed_global_actions:
             if not requested_actions.issubset(allowed_global_actions):
                 missing = requested_actions - allowed_global_actions
                 missing_str = ", ".join(action.value for action in missing)

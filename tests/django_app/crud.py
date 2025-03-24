@@ -1,12 +1,15 @@
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.core.config import ModelConfig
-from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
+from tests.django_app.models import (
+                                     ComprehensiveModel, CustomPKModel,
                                      DeepModelLevel1, DeepModelLevel2,
                                      DeepModelLevel3, DummyModel,
                                      DummyRelatedModel,
                                      ModelWithCustomPKRelation,
                                      NameFilterCustomPKModel, Product,
-                                     ProductCategory, Order, OrderItem)
+                                     ProductCategory, Order, OrderItem,
+                                     ParentTestModel, GrandChildTestModel, ChildTestModel
+                                     )
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
 from ormbridge.core.classes import AdditionalField
@@ -205,4 +208,46 @@ registry.register(
             )
         ],
     ),
+)
+
+# Register ParentTestModel with allowed fields "name" and the relationship "children"
+registry.register(
+    ParentTestModel,
+    ModelConfig(
+        model=ParentTestModel,
+        filterable_fields={"name", "description"},
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        # Only allow "name" and the related field "children" to be expanded
+        fields={"name", "children"}
+    )
+)
+
+# Register ChildTestModel with allowed fields "name" and the relationship "grandchildren"
+registry.register(
+    ChildTestModel,
+    ModelConfig(
+        model=ChildTestModel,
+        filterable_fields={"name", "extra"},
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        # Only allow "name" and the related field "grandchildren" to be expanded
+        fields={"name", "grandchildren"}
+    )
+)
+
+# Register GrandChildTestModel with allowed field "name" only
+registry.register(
+    GrandChildTestModel,
+    ModelConfig(
+        model=GrandChildTestModel,
+        filterable_fields={"name", "detail"},
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        # Only allow the "name" field (minimal representation)
+        fields={"name"}
+    )
 )
