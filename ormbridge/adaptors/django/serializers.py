@@ -82,7 +82,7 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         serializer = serializer_class(
             instance,
             depth=self.depth - 1,
-            context=self.context,
+            context={**self.context, "fields_map": fields_map},
         )
         # Use the nested serializer's own caching mechanism.
         return serializer.cached_data()
@@ -150,9 +150,10 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         model_name = config.orm_provider.get_model_name(self.Meta.model)
         fields_map: Dict[str, Set[str]] = self.context.get("fields_map", {})
         allowed = fields_map.get(model_name)
-        print("DEBUG: context in __init__")
-        print(self.context)
-        self.fields = { name: field for name, field in self.fields.items() if name in allowed }
+        if allowed is not None and allowed != {ALL_FIELDS}:
+            self.fields = {
+                name: field for name, field in self.fields.items() if name in allowed
+            }
 
     def get_repr(self, obj) -> Dict[str, Optional[str]]:
         str_repr = str(obj)
@@ -166,7 +167,6 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
     @classmethod
     def for_model(cls, model: Type[models.Model], depth: int = 0):
         # Dynamically create a Meta inner class.
-        print(f"DEBUG: Serializer created for model {model} with depth: {depth}")
         Meta = type("Meta", (), {"model": model, "fields": ALL_FIELDS})
         serializer_class = type(
             f"Dynamic{model.__name__}Serializer", (cls,), {"Meta": Meta}
@@ -307,8 +307,12 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         request: Optional[RequestType] = None
     ) -> DynamicModelSerializer:
         serializer_class = DynamicModelSerializer.for_model(model, depth=depth)
+        fm = fields_map.copy() if fields_map is not None else {}
+        model_name = config.orm_provider.get_model_name(model)
+        if model_name not in fm:
+            fm[model_name] = {ALL_FIELDS}
         # Build a base context that includes a fresh dependency registry.
-        ctx = {"depth": depth, "fields_map": fields_map, "dependency_registry": {}, "request": request}
+        ctx = {"depth": depth, "fields_map": fm, "dependency_registry": {}, "request": request}
         serializer = serializer_class(
             data,
             many=many,
@@ -348,6 +352,10 @@ class DRFDynamicSerializer(AbstractDataSerializer):
     ) -> Dict[str, Any]:
         serializer_class = DynamicModelSerializer.for_model(model)
         model_name = config.orm_provider.get_model_name(model)
+        fm = fields_map.copy() if fields_map is not None else {}
+        if model_name not in fm:
+            fm[model_name] = {ALL_FIELDS}
+
         try:
             model_config = registry.get_config(model)
         except ValueError:
@@ -358,7 +366,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 data = hook(data, request=request)
 
         serializer = serializer_class(
-            data=data, context={"fields_map": fields_map}, partial=partial
+            data=data, context={"fields_map": fm}, partial=partial
         )
         serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data

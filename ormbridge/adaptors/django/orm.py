@@ -41,6 +41,8 @@ class QueryASTVisitor:
         "istartswith",
         "endswith",
         "iendswith",
+        "regex",
+        "iregex",
         "lt",
         "gt",
         "lte",

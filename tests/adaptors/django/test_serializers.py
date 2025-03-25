@@ -353,7 +353,7 @@ class DRFDynamicSerializerTests(TestCase):
 
         serializer_wrapper = DRFDynamicSerializer()
         input_data = {"name": "Test"}
-        validated = serializer_wrapper.deserialize(DummyModel, input_data, fields_map={})
+        validated = serializer_wrapper.deserialize(DummyModel, input_data)
         self.assertEqual(validated, input_data)
         DynamicModelSerializer.is_valid = original_is_valid
 
