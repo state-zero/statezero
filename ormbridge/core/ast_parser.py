@@ -360,7 +360,7 @@ class ASTParser:
         validated_data = self.serializer.deserialize(
             model=self.model, data=data, partial=False, request=self.request
         )
-        record = self.engine.create(validated_data, self.serializer, self.request)
+        record = self.engine.create(validated_data, self.serializer, self.request, self.fields_map)
         serialized = self.serializer.serialize(
             record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
         )
@@ -413,7 +413,7 @@ class ASTParser:
         permissions = self.registry.get_config(self.model).permissions
 
         # Delegate to the engine's instance-based update method.
-        updated_instance = self.engine.update_instance(ast, self.request, permissions, self.serializer)
+        updated_instance = self.engine.update_instance(ast, self.request, permissions, self.serializer, fields_map=self.fields_map)
 
         # Serialize the updated instance for the response.
         serialized = self.serializer.serialize(
@@ -481,6 +481,7 @@ class ASTParser:
             serializer=self.serializer,
             req=self.request,
             permissions=permissions,
+            fields_map=self.fields_map
         )
 
         serialized = self.serializer.serialize(
@@ -514,6 +515,7 @@ class ASTParser:
             req=self.request,
             serializer=self.serializer,
             permissions=permissions,
+            fields_map=self.fields_map
         )
 
         serialized = self.serializer.serialize(
@@ -655,7 +657,7 @@ class ASTParser:
         raw_defaults = ast.get("defaults", {})
         combined_data = {**raw_lookup, **raw_defaults}
         validated_data = self.serializer.deserialize(
-            model=self.model, data=combined_data, partial=partial, request=self.request
+            model=self.model, data=combined_data, partial=partial, request=self.request, fields_map=self.fields_map
         )
         validated_lookup = {
             k: validated_data[k] for k in raw_lookup if k in validated_data
