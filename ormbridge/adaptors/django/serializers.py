@@ -118,6 +118,7 @@ class IndividualCachingListSerializer(serializers.ListSerializer):
         result: List[Any] = []
         # For each instance, create a new serializer instance and use its caching.
         for item in data:
+            print(f"DEBUG: instantiating nested list serializer for model: {item.__class__.__name__}")
             serializer_instance = self.child.__class__(
                 instance=item, context=self.context, depth=self.context.get("depth", 0)
             )
@@ -182,7 +183,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
                 # Determine if this is a many-to-many or one-to-many field
                 # ManyToManyField, ManyToManyRel, ManyToOneRel
                 is_many = field.many_to_many or field.one_to_many
-
+                print(f"DEBUG: instantiating nested serializer for related field: {field.name}")
                 serializer_class._declared_fields[field.name] = RelatedFieldWithRepr(
                     queryset=field.related_model.objects.all(),
                     required=not (field.null or field.blank),

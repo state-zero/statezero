@@ -1,9 +1,13 @@
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from collections import deque
+import networkx as nx
 
+from ormbridge.core.constants import ALL_FIELDS
 from ormbridge.core.config import AppConfig, Registry
-from ormbridge.core.interfaces import AbstractDataSerializer
+from ormbridge.core.interfaces import AbstractDataSerializer, AbstractPermission
 from ormbridge.core.types import ActionType, ORMModel, RequestType
+
 
 class ResponseType(Enum):
     INSTANCE = "instance"
@@ -34,15 +38,17 @@ class ASTParser:
         self.config = config
         self.registry = registry
         self.serializer_options = serializer_options or {}
+        self.request = request
 
         # Process field selection if present
         requested_fields = self.serializer_options.get("fields", [])
-
-        # Only process fields when explicitly provided and non-empty
-        if requested_fields:
-            # Process fields into a proper fields_map with support for nested fields
-            fields_map = self._process_requested_fields(requested_fields)
-            self.serializer_options["fields_map"] = fields_map
+        depth = int(self.serializer_options.get("depth", 0))
+        print(f"DEBUG: depth - {depth}")
+        print("DEBUG: AST Parser requested fields")
+        print(requested_fields)
+        self.serializer_options["fields_map"] = self.get_permissioned_fields(requested_fields=requested_fields, depth= depth)
+        print("DEBUG: fields map")
+        print(self.serializer_options["fields_map"])
 
         self.ser_args = {
             "depth": int(self.serializer_options.get("depth", 0)),
@@ -69,8 +75,7 @@ class ASTParser:
             "delete_instance": self._handle_delete_instance,
         }
         self.default_handler = self._handle_read
-        self.request = request
-
+    
     def _process_requested_fields(self, requested_fields: List[str]) -> Dict[str, Set[str]]:
         """
         Process the requested fields, including nested fields, and build a complete fields_map.
@@ -123,6 +128,164 @@ class ASTParser:
                 fields_map[model_name].add(field)
 
         return fields_map
+
+    def _has_read_permission(self, model):
+        """
+        Check if the current request has READ permission on the model.
+        
+        Args:
+            model: Model to check permissions for
+            
+        Returns:
+            Boolean indicating if READ permission is granted
+        """
+        try:
+            model_config = self.registry.get_config(model)
+            allowed_actions = set()
+            
+            # Collect all allowed actions from all permissions
+            for permission_cls in model_config.permissions:
+                permission: AbstractPermission = permission_cls()
+                allowed_actions.update(permission.allowed_actions(self.request, model))
+            
+            # Check if READ is in the set of allowed actions
+            return ActionType.READ in allowed_actions
+        except (ValueError, KeyError):
+            # Model not registered or permissions not set up
+            return False  # Default to denying access for security
+
+    def _allowed_fields_for_model(self, model):
+        """
+        Get fields allowed by permissions for a model.
+        Aggregates the visible fields from all permission instances.
+        
+        Args:
+            model: Model to check permissions for
+            
+        Returns:
+            Set of field names allowed by permissions
+        """
+        try:
+            model_config = self.registry.get_config(model)
+            
+            # Collect allowed fields from all permissions
+            allowed_fields = set()
+            for permission_cls in model_config.permissions:
+                permission: AbstractPermission = permission_cls()
+                visible = permission.visible_fields(self.request, model)
+                allowed_fields |= visible
+            
+            # Resolve ALL_FIELDS to actual field names if present
+            return self.config.orm_provider.get_fields(model)
+                
+        except (ValueError, KeyError):
+            # Model not registered or permissions not set up
+            return set()  # Default to allowing no fields for security
+
+    def _get_depth_based_fields(self, depth=0):
+        """
+        Build a fields map by traversing the model graph up to the specified depth.
+        Respects permission checks on each model and field.
+        
+        Args:
+            depth (int): Maximum depth to traverse in relationship graph
+            
+        Returns:
+            Dict[str, Set[str]]: Dictionary mapping model names to sets of field names
+        """
+        fields_map = {}
+        visited = set()
+        model_graph: nx.DiGraph = self.config.orm_provider.build_model_graph(self.model)
+        
+        # Start BFS from the root model
+        queue = deque([(self.model, 0)])
+        
+        while queue:
+            current_model, current_depth = queue.popleft()
+            model_name = self.config.orm_provider.get_model_name(current_model)
+            
+            # Skip if we've already visited this model at this depth or lower
+            if (model_name, current_depth) in visited:
+                continue
+            visited.add((model_name, current_depth))
+            
+            # Check if we have permission to read this model
+            if not self._has_read_permission(current_model):
+                continue
+            
+            # Get fields we have permission to see for this model
+            allowed_fields = self._allowed_fields_for_model(current_model)
+            
+            # Initialize fields set for this model
+            fields_map.setdefault(model_name, set())
+            
+            # First, collect all directly accessible fields from the model
+            for node in model_graph.successors(model_name):
+                # Each successor of the model node is a field node
+                field_data = model_graph.nodes[node].get("data")
+                if field_data:
+                    field_name = field_data.field_name
+                    # Add this field to the fields map if it's in allowed_fields
+                    if field_name in allowed_fields:
+                        fields_map[model_name].add(field_name)
+            
+            # Stop traversing if we've reached max depth
+            if current_depth >= depth:
+                continue
+            
+            # Now, traverse relation fields to add related models
+            for node in model_graph.successors(model_name):
+                field_data = model_graph.nodes[node].get("data")
+                if field_data and field_data.is_relation and field_data.related_model:
+                    field_name = field_data.field_name
+                    # Only traverse relations we have permission to access
+                    if field_name in allowed_fields:
+                        # Get the related model and add it to the queue
+                        related_model = self.config.orm_provider.get_model_by_name(
+                            field_data.related_model
+                        )
+                        queue.append((related_model, current_depth + 1))
+        
+        return fields_map
+    
+    def get_permissioned_fields(self, requested_fields: Optional[Set[str]] = None, depth=0) -> Dict[str, Set[str]]:
+        """
+        Merges the results of _process_requested_fields and get_depth_based_fields.
+        
+        For models present in both maps:
+        - If a model is only in one map, use that map's fields.
+        - If a model is in both maps, prioritize fields from _process_requested_fields.
+        
+        Args:
+            depth (int): Maximum depth for related models to include.
+            
+        Returns:
+            Dict[str, Set[str]]: Merged fields map with model names as keys and sets of field names as values.
+        """
+        # Get fields from explicitly requested fields
+
+        requested_fields_map = {}
+        print(f"DEBUG: get_permissioned_fields requested fields {requested_fields}")
+        if requested_fields:
+            requested_fields_map = self._process_requested_fields(requested_fields)
+        print(f"DEBUG: get_permissioned_fields requested fields {requested_fields_map}")
+
+        # Get fields based on depth traversal
+        depth_based_fields_map = self._get_depth_based_fields(depth)
+
+        # Merge the keys
+        all_keys = set(requested_fields_map.keys()).union(depth_based_fields_map.keys())
+        print("DEBUG: all keys {all_keys}")
+
+        # Merge the fields
+        merged_fields_map = {}
+        for key in all_keys:
+            if key in requested_fields_map and requested_fields_map[key]:
+                merged_fields_map[key] = requested_fields_map[key]
+            else:
+                merged_fields_map[key] = depth_based_fields_map[key]
+        print(f"DEBUG: merged fields {merged_fields_map}")
+        return merged_fields_map
 
     def parse(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """

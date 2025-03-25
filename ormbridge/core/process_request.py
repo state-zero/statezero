@@ -130,12 +130,7 @@ class RequestProcessor:
                 )
 
         # For READ operations, delegate field permission checks to ASTValidator.
-        # If the client hasn't provided a fields map, default to allowing all fields.
         serializer_options = ast_body.get("serializerOptions", {})
-        if "fields_map" not in serializer_options:
-            serializer_options["fields_map"] = {
-                self.orm_provider.get_model_name(model): {ALL_FIELDS}
-            }
 
         # Invoke the ASTValidator to check read field permissions.
         model_graph = self.orm_provider.build_model_graph(model)

@@ -13,6 +13,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from ormbridge.core.constants import ALL_FIELDS
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.core.ast_parser import ASTParser
 from ormbridge.core.classes import FieldNode, ModelNode
@@ -647,6 +648,16 @@ class DjangoORMAdapter(AbstractORMProvider):
             custom_queryset_class = custom_querysets[custom_name]
             return custom_queryset_class().get_queryset(req)
         return model.objects.all()
+    
+    def get_fields(self, model: models.Model) -> Set[str]:
+        """
+        Return a set of the model fields.
+        """
+        model_config = registry.get_config(model)
+        if model_config.fields and model_config.fields != ALL_FIELDS:
+            resolved_fields = model_config.fields
+        resolved_fields = set((field.name for field in model._meta.get_fields()))
+        return resolved_fields
 
     def build_model_graph(
         self, model: Type[models.Model], model_graph: nx.DiGraph = None
