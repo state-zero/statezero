@@ -43,12 +43,7 @@ class ASTParser:
         # Process field selection if present
         requested_fields = self.serializer_options.get("fields", [])
         depth = int(self.serializer_options.get("depth", 0))
-        print(f"DEBUG: depth - {depth}")
-        print("DEBUG: AST Parser requested fields")
-        print(requested_fields)
         self.serializer_options["fields_map"] = self.get_permissioned_fields(requested_fields=requested_fields, depth= depth)
-        print("DEBUG: fields map")
-        print(self.serializer_options["fields_map"])
 
         self.ser_args = {
             "depth": int(self.serializer_options.get("depth", 0)),
@@ -263,19 +258,16 @@ class ASTParser:
             Dict[str, Set[str]]: Merged fields map with model names as keys and sets of field names as values.
         """
         # Get fields from explicitly requested fields
-
         requested_fields_map = {}
-        print(f"DEBUG: get_permissioned_fields requested fields {requested_fields}")
+
         if requested_fields:
             requested_fields_map = self._process_requested_fields(requested_fields)
-        print(f"DEBUG: get_permissioned_fields requested fields {requested_fields_map}")
 
         # Get fields based on depth traversal
         depth_based_fields_map = self._get_depth_based_fields(depth)
 
         # Merge the keys
         all_keys = set(requested_fields_map.keys()).union(depth_based_fields_map.keys())
-        print("DEBUG: all keys {all_keys}")
 
         # Merge the fields
         merged_fields_map = {}
@@ -284,7 +276,6 @@ class ASTParser:
                 merged_fields_map[key] = requested_fields_map[key]
             else:
                 merged_fields_map[key] = depth_based_fields_map[key]
-        print(f"DEBUG: merged fields {merged_fields_map}")
         return merged_fields_map
 
     def parse(self, ast: Dict[str, Any]) -> Dict[str, Any]:

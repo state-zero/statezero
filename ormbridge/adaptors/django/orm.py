@@ -654,9 +654,12 @@ class DjangoORMAdapter(AbstractORMProvider):
         Return a set of the model fields.
         """
         model_config = registry.get_config(model)
-        if model_config.fields and model_config.fields != ALL_FIELDS:
+        if model_config.fields and ALL_FIELDS not in model_config.fields:
             resolved_fields = model_config.fields
-        resolved_fields = set((field.name for field in model._meta.get_fields()))
+        else:
+            resolved_fields = set((field.name for field in model._meta.get_fields()))
+            additional_fields = set((field.name for field in model_config.additional_fields))
+            resolved_fields = resolved_fields.union(additional_fields)
         return resolved_fields
 
     def build_model_graph(
