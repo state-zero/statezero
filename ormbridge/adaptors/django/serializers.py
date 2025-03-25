@@ -358,7 +358,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 data = hook(data, request=request)
 
         serializer = serializer_class(
-            data=data, context={"fields_map": fields_map, "request": request}, partial=partial
+            data=data, context={"fields_map": fields_map}, partial=partial
         )
         serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data
