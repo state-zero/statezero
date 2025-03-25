@@ -258,7 +258,7 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         self.queryset = self.queryset.exclude(q_object)
 
-    def create(self, data: Dict[str, Any], serializer, req) -> models.Model:
+    def create(self, data: Dict[str, Any], serializer, req, fields_map: Dict[str, Set[str]]) -> models.Model:
         assert self.model is not None, "Model must be set before creating."
         # Use the provided serializer's save method
         return serializer.save(
@@ -266,7 +266,8 @@ class DjangoORMAdapter(AbstractORMProvider):
             data=data,
             instance=None,
             partial=False,
-            request=req
+            request=req,
+            fields_map=fields_map
         )
 
     def update_instance(
@@ -275,6 +276,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         req: RequestType,
         permissions: List[Type[AbstractPermission]],
         serializer,
+        fields_map: Dict[str, Set[str]]
     ) -> models.Model:
         data = ast.get("data", {})
         filter_ast = ast.get("filter")
@@ -298,7 +300,8 @@ class DjangoORMAdapter(AbstractORMProvider):
             data=data,
             instance=instance,
             partial=True,
-            request=req
+            request=req,
+            fields_map=fields_map
         )
 
     def delete_instance(
@@ -446,6 +449,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         serializer,
         req: RequestType,
         permissions: List[Type[AbstractPermission]],
+        fields_map: Dict[str, Set[str]]
     ) -> Tuple[models.Model, bool]:
         """
         Get an existing object, or create it if it doesn't exist, with object-level permission checks.
@@ -484,7 +488,8 @@ class DjangoORMAdapter(AbstractORMProvider):
             data=merged_data,
             instance=None,  # No instance for creation
             partial=False,   # Not a partial update for creation
-            request=req
+            request=req,
+            fields_map=fields_map
         )
 
         return instance, created
@@ -495,6 +500,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         req: RequestType,
         serializer,
         permissions: List[Type[AbstractPermission]],
+        fields_map: Dict[str, Set[str]]
     ) -> Tuple[models.Model, bool]:
         """
         Update an existing object, or create it if it doesn't exist, with object-level permission checks.
@@ -528,7 +534,8 @@ class DjangoORMAdapter(AbstractORMProvider):
             model=self.model,
             data=merged_data,
             instance=instance,
-            request=req
+            request=req,
+            fields_map=fields_map
         )
 
         return instance, created

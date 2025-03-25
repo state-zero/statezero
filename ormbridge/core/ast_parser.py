@@ -367,13 +367,18 @@ class ASTParser:
 
     def _handle_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         data = ast.get("data", {})
+        print("DEBUG: deserializing")
         validated_data = self.serializer.deserialize(
             model=self.model, data=data, partial=False, request=self.request, fields_map= self.fields_map
         )
-        record = self.engine.create(validated_data, self.serializer, self.request)
+        print("DEBUG: creating record")
+        record = self.engine.create(validated_data, self.serializer, self.request, fields_map= self.fields_map)
+        print("DEBUG: record created, calling serialize")
+        print(self.ser_args)
         serialized = self.serializer.serialize(
             record, self.model, many=False, **self.ser_args
         )
+        print("DEBUG: response serialized")
         return {
             "data": serialized,
             "metadata": {"created": True, "response_type": ResponseType.INSTANCE.value},
@@ -387,7 +392,7 @@ class ASTParser:
         ast["data"] = validated_data
         # Retrieve permissions from the self.registry.
         permissions = self.registry.get_config(self.model).permissions
-        rows_updated = self.engine.update(ast, self.request, permissions)
+        rows_updated = self.engine.update(ast, self.request, permissions, fields_map=self.fields_map)
         return {
             "data": None,
             "metadata": {
@@ -423,7 +428,7 @@ class ASTParser:
         permissions = self.registry.get_config(self.model).permissions
 
         # Delegate to the engine's instance-based update method.
-        updated_instance = self.engine.update_instance(ast, self.request, permissions, self.serializer)
+        updated_instance = self.engine.update_instance(ast, self.request, permissions, self.serializer, fields_map= self.fields_map)
 
         # Serialize the updated instance for the response.
         serialized = self.serializer.serialize(
@@ -491,6 +496,7 @@ class ASTParser:
             serializer=self.serializer,
             req=self.request,
             permissions=permissions,
+            fields_map= self.fields_map
         )
 
         serialized = self.serializer.serialize(
@@ -524,6 +530,7 @@ class ASTParser:
             req=self.request,
             serializer=self.serializer,
             permissions=permissions,
+            fields_map=self.fields_map
         )
 
         serialized = self.serializer.serialize(
@@ -645,7 +652,7 @@ class ASTParser:
             offset=offset_val,
             limit=limit_val,
             req=self.request,
-            permissions=permissions,
+            permissions=permissions
         )
 
         serialized = self.serializer.serialize(
