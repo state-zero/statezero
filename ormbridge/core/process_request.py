@@ -32,13 +32,20 @@ def _filter_writable_data(
     If the allowed fields set contains ALL_FIELDS, return the original data.
     """
     allowed_fields: Set[str] = set()
+    
+    # The model config fields param is a override that absolutely restricts fields
+    if ALL_FIELDS in allowed_fields:
+        allowed_fields = model_config.fields or ALL_FIELDS
+    
     for permission_cls in model_config.permissions:
         if create:
             allowed_fields |= permission_cls().create_fields(req, model)
         else:
             allowed_fields |= permission_cls().editable_fields(req, model)
+    
     if ALL_FIELDS in allowed_fields:
         return data
+    
     return {k: v for k, v in data.items() if k in allowed_fields}
 
 
@@ -130,12 +137,7 @@ class RequestProcessor:
                 )
 
         # For READ operations, delegate field permission checks to ASTValidator.
-        # If the client hasn't provided a fields map, default to allowing all fields.
         serializer_options = ast_body.get("serializerOptions", {})
-        if "fields_map" not in serializer_options:
-            serializer_options["fields_map"] = {
-                self.orm_provider.get_model_name(model): {ALL_FIELDS}
-            }
 
         # Invoke the ASTValidator to check read field permissions.
         model_graph = self.orm_provider.build_model_graph(model)

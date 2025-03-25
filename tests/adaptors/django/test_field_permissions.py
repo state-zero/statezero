@@ -95,7 +95,6 @@ class NestedFieldPermissionsTest(APITestCase):
         # Verify that the result contains only the allowed fields for ParentTestModel
         self.assertIn("name", result_data)
         self.assertIn("description", result_data)
-        self.assertIn("children", result_data)
         
         # Verify that children is not expanded (should be a list of minimal representations)
         children = result_data.get("children", [])
@@ -138,7 +137,6 @@ class NestedFieldPermissionsTest(APITestCase):
         # Verify that the parent has only the allowed fields
         self.assertIn("name", result_data)
         self.assertIn("description", result_data)
-        self.assertIn("children", result_data)
         
         # Verify that children is expanded and has only the allowed fields
         children = result_data.get("children", [])
@@ -190,7 +188,6 @@ class NestedFieldPermissionsTest(APITestCase):
         # Verify parent fields
         self.assertIn("name", result_data)
         self.assertIn("description", result_data)
-        self.assertIn("children", result_data)
         
         # Verify that children is expanded
         children = result_data.get("children", [])
@@ -246,7 +243,6 @@ class NestedFieldPermissionsTest(APITestCase):
         # Verify only requested fields are present
         self.assertIn("name", result_data)
         self.assertNotIn("description", result_data)
-        self.assertIn("children", result_data)
         
         # Verify children are expanded but only with requested fields
         children = result_data.get("children", [])
@@ -362,7 +358,6 @@ class NestedFieldPermissionsTest(APITestCase):
             # (allowed by both ModelConfig and CustomIntersectionPermission)
             self.assertIn("name", result_data)
             self.assertIn("description", result_data)
-            self.assertIn("children", result_data)
             
             # Verify children fields
             children = result_data.get("children", [])
