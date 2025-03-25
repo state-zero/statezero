@@ -86,6 +86,8 @@ ORMBRIDGE_PUSHER = {
     "CLUSTER": os.getenv('PUSHER_CLUSTER'),
 }
 
+ORMBRIDGE_QUERY_TIMEOUT_MS = 1000  # Important, prevents trivial Ddos
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 ORMBRIDGE_VIEW_ACCESS_CLASS = "rest_framework.permissions.IsAuthenticated"

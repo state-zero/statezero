@@ -6,10 +6,10 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 import warnings
 
+from ormbridge.adaptors.django.context_manager import query_timeout
 from ormbridge.core.config import AppConfig, Registry
 
 logger = logging.getLogger(__name__)
-
 
 class DjangoLocalConfig(AppConfig):
     def __init__(self):
@@ -34,6 +34,7 @@ class DjangoLocalConfig(AppConfig):
         self.serializer = DRFDynamicSerializer()
         self.schema_generator = DjangoSchemaGenerator()
         self.orm_provider = DjangoORMAdapter()
+        self.context_manager = query_timeout
 
         # Set up cache backends based on settings
         cache_config = getattr(settings, 'ORMBRIDGE_CACHE', {})

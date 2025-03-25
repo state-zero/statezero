@@ -69,59 +69,6 @@ class ASTParser:
             "delete_instance": self._handle_delete_instance,
         }
         self.default_handler = self._handle_read
-    
-    def _process_requested_fields(self, requested_fields: List[str]) -> Dict[str, Set[str]]:
-        """
-        Process the requested fields, including nested fields, and build a complete fields_map.
-        """
-        # Initialize fields_map
-        fields_map = {}
-
-        # Get the model name
-        model_name = self.config.orm_provider.get_model_name(self.model)
-        fields_map[model_name] = set()
-
-        # Build model graph (or use cached version if available)
-        model_graph = self.config.orm_provider.build_model_graph(self.model)
-
-        # Process each requested field
-        for field in requested_fields:
-            if "__" in field:
-                # This is a nested field
-                parts = field.split("__")
-                current_model = self.model
-                current_model_name = model_name
-
-                # Navigate through each part of the nested field
-                for i, part in enumerate(parts):
-                    # Add this field to the current model's allowed fields
-                    fields_map.setdefault(current_model_name, set()).add(part)
-
-                    # If this isn't the last part, we need to follow the relationship
-                    if i < len(parts) - 1:
-                        # Get the field node
-                        field_node = f"{current_model_name}::{part}"
-
-                        # Check if this is a relation field
-                        if field_node in model_graph.nodes:
-                            field_data = model_graph.nodes[field_node]["data"]
-                            if field_data.is_relation:
-                                # Move to the related model for the next part
-                                current_model_name = field_data.related_model
-                                # Get the actual model class
-                                current_model = (
-                                    self.config.orm_provider.get_model_by_name(
-                                        current_model_name
-                                    )
-                                )
-                            else:
-                                # If not a relation, we can't go deeper
-                                break
-            else:
-                # This is a simple field
-                fields_map[model_name].add(field)
-
-        return fields_map
 
     def _has_read_permission(self, model):
         """
@@ -256,25 +203,13 @@ class ASTParser:
         Returns:
             Dict[str, Set[str]]: Merged fields map with model names as keys and sets of field names as values.
         """
-        # Get fields from explicitly requested fields
-        requested_fields_map = {}
+        merged_fields_map = {}
 
         if requested_fields:
-            requested_fields_map = self._process_requested_fields(requested_fields)
+            merged_fields_map['fields::'] = requested_fields
+        
+        merged_fields_map.update(self._get_depth_based_fields(depth))
 
-        # Get fields based on depth traversal
-        depth_based_fields_map = self._get_depth_based_fields(depth)
-
-        # Merge the keys
-        all_keys = set(requested_fields_map.keys()).union(depth_based_fields_map.keys())
-
-        # Merge the fields
-        merged_fields_map = {}
-        for key in all_keys:
-            if key in requested_fields_map and requested_fields_map[key]:
-                merged_fields_map[key] = requested_fields_map[key]
-            else:
-                merged_fields_map[key] = depth_based_fields_map[key]
         return merged_fields_map
 
     def parse(self, ast: Dict[str, Any]) -> Dict[str, Any]:

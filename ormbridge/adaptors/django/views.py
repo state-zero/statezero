@@ -5,18 +5,20 @@ from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import AllowAny
+from django.utils.module_loading import import_string
 
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.adaptors.django.exception_handler import \
     explicit_exception_handler
 from ormbridge.adaptors.django.permissions import ORMBridgeViewAccessGate
-from ormbridge.core.exceptions import ORMBridgeError
 from ormbridge.core.interfaces import AbstractEventEmitter
 from ormbridge.core.process_request import RequestProcessor
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
+default_permission = "rest_framework.permissions.AllowAny"
+permission_class = import_string(getattr(settings, "ORMBRIDGE_VIEW_ACCESS_CLASS", default_permission))
 
 class EventsAuthView(APIView):
     """
@@ -24,7 +26,7 @@ class EventsAuthView(APIView):
     It uses the broadcast emitter from the event bus to check access and then
     calls its authenticate method with the request.
     """
-    permission_classes = [AllowAny]
+    permission_classes = [permission_class]
     
     def post(self, request, *args, **kwargs):
         channel_name = request.data.get("channel_name")
@@ -82,17 +84,19 @@ class ModelListView(APIView):
 
 class ModelView(APIView):
 
-    permission_classes = [AllowAny]
+    permission_classes = [permission_class]
 
     @transaction.atomic
     def post(self, request, model_name):
         processor = RequestProcessor(config=config, registry=registry)
+        timeout_ms = getattr(settings, 'ORMBRIDGE_QUERY_TIMEOUT_MS', 1000)
         try:
-            result = processor.process_request(req=request)
+            with config.context_manager(timeout_ms):
+                result = processor.process_request(req=request)
         except Exception as original_exception:
             return explicit_exception_handler(original_exception)
         return Response(result, status=status.HTTP_200_OK)
-
+    
 
 class SchemaView(APIView):
     permission_classes = [ORMBridgeViewAccessGate]

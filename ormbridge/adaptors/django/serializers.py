@@ -30,7 +30,6 @@ def get_custom_serializer(field_class: Type) -> Optional[Type[serializers.Field]
         return import_string(serializer_path)
     return None
 
-
 class RelatedFieldWithRepr(serializers.RelatedField):
     """
     A custom related field that returns:
@@ -43,26 +42,33 @@ class RelatedFieldWithRepr(serializers.RelatedField):
     def __init__(self, *args, **kwargs):
         self.depth = kwargs.pop("depth", 0)
         self.fields_map = kwargs.pop("fields_map", {})
+        self.current_path = kwargs.pop("current_path", "")
         super().__init__(*args, **kwargs)
 
     def to_representation(self, value):
         model_name = config.orm_provider.get_model_name(value.__class__)
-        allowed = self.fields_map.get(model_name)
-
-        # Check if specific fields were requested for this relation
-        # If allowed is None, no specific fields were requested at all
-        # If allowed is an empty set, no fields were requested for this specific relation
-        # If allowed is a non-empty set, specific fields were requested for this relation
         
-        # We should expand the representation if:
-        # 1. The depth is > 0 (traditional depth-based expansion) OR
-        # 2. Specific fields were requested for this model (allowed is not None and not empty)
-        should_expand = self.depth > 0 or (allowed is not None and len(allowed) > 0)
+        # If field_name is None, this might be a nested instance of serialization
+        field_name = getattr(self, 'field_name', None) or ""
         
-        if should_expand and allowed is not None:
-            return self._expanded_representation(value)
+        # Build the new current path
+        new_path = f"{self.current_path}__{field_name}" if self.current_path else field_name
+        
+        # Use the extracted function to determine if we should expand
+        allowed_fields = extract_fields(
+            fields_map=self.fields_map,
+            current_path=new_path,
+            model_name=model_name
+        )
+        
+        # Expand representation if we have depth or specific fields
+        should_expand = self.depth > 0 or allowed_fields is not None
+        
+        if should_expand:
+            return self._expanded_representation(value, new_path)
         else:
             return self._minimal_representation(value)
+
 
     def _minimal_representation(self, instance):
         # Determine the primary key field from the model class (default to "id" if not provided)
@@ -78,24 +84,25 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         )
         return rep.to_dict()
 
-    def _expanded_representation(self, instance):
+    def _expanded_representation(self, instance, current_path):
         # Get the nearest parent serializer that implements log_dependency
         serializer_parent = self.parent
         if not hasattr(serializer_parent, "log_dependency") and hasattr(serializer_parent, "parent"):
             serializer_parent = serializer_parent.parent
         serializer_parent.log_dependency(instance, config.orm_provider.get_model_name)
         
-        # Create serializer class with fields_map at the class level
+        # Create serializer class with current_path
         serializer_class = DynamicModelSerializer.for_model(
             instance.__class__, 
             depth=self.depth - 1,
             fields_map=self.fields_map
         )
         
-        # Create serializer instance without passing fields_map explicitly
+        # Create serializer instance with current_path
         serializer = serializer_class(
             instance,
-            depth=self.depth - 1
+            depth=self.depth - 1,
+            current_path=current_path
         )
         
         # Use the nested serializer's own caching mechanism
@@ -146,7 +153,47 @@ class IndividualCachingListSerializer(serializers.ListSerializer):
         Return the cached representation for the list by iterating over each instance.
         """
         return self.to_representation(self.instance)
-
+    
+def extract_fields(fields_map: Dict[str, Set[str]], current_path:str="", model_name:str=None):
+    """
+    Extract the set of fields that should be included based on the fields_map and current path.
+    
+    Args:
+        fields_map (dict): Dictionary mapping model names to sets of field names,
+                          or 'fields::' to a set of field paths
+        current_path (str): Current path in the nested structure (e.g. "home__address")
+        model_name (str): Optional model name for model-based filtering
+        
+    Returns:
+        set: Set of field names that should be included, or None if all fields should be included
+    """
+    # First check if we have explicitly requested fields via paths
+    if 'fields::' in fields_map and current_path:
+        # Get fields that are direct children of the current path
+        direct_fields = set()
+        for path in fields_map['fields::']:
+            # If path starts with current_path and has more segments
+            if path.startswith(current_path + "__"):
+                # Get the next segment after current_path
+                remaining = path[len(current_path) + 2:]  # +2 for the '__'
+                if remaining:
+                    field = remaining.split("__")[0]
+                    direct_fields.add(field)
+            # If path exactly matches current_path, it's a leaf node field
+            elif path == current_path:
+                # Include all fields for exact matches
+                return fields_map.get(model_name)
+        
+        # Return the set of direct fields if we found any
+        if direct_fields:
+            return direct_fields
+    
+    # Fall back to standard model-based filtering
+    if model_name:
+        return fields_map.get(model_name)
+    
+    # If no filtering was specified, return None to indicate all fields
+    return None
 
 class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
     """
@@ -161,19 +208,31 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         self.depth = kwargs.pop("depth", 0)
-        # We no longer pop fields_map here as it's now a class attribute set during for_model
+        self.current_path = kwargs.pop("current_path", "")
         self.cache_backend = kwargs.pop("cache_backend", config.cache_backend)
         self.dependency_store = kwargs.pop("dependency_store", config.dependency_store)
         self.request = kwargs.pop("request", None)
         super().__init__(*args, **kwargs)
-        
-        # Apply field filtering based on the class-level fields_map
+
+        # Get the model name
         model_name = config.orm_provider.get_model_name(self.Meta.model)
-        allowed = self.fields_map.get(model_name)
-        if allowed is not None and allowed != {ALL_FIELDS}:
-            self.fields = {
-                name: field for name, field in self.fields.items() if name in allowed
-            }
+        
+        # Use the extracted function to get the allowed fields
+        allowed_fields = extract_fields(
+            fields_map=self.fields_map,
+            current_path=self.current_path,
+            model_name=model_name
+        )
+
+        # Allowed fields must exist
+        assert allowed_fields, "No allowed fields could be extracted!"
+        
+        # Filter the fields based on the result
+        self.fields = {
+            name: field for name, field in self.fields.items() 
+            if name in allowed_fields
+        }
+            
 
     def get_repr(self, obj) -> Dict[str, Optional[str]]:
         str_repr = str(obj)
@@ -205,21 +264,27 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         serializer_class.Meta.list_serializer_class = IndividualCachingListSerializer
 
         # Iterate over the model's fields.
+        model_name = config.orm_provider.get_model_name(model)
+        allowed_fields = extract_fields(fields_map, "", model_name)
+
+        # Iterate over the model's fields.
         for field in model._meta.get_fields():
+            # Skip fields that won't be presented
+            if field.name not in allowed_fields:
+                continue
             if getattr(field, "auto_created", False) and not field.concrete:
                 continue
             if field.is_relation:
                 # Determine if this is a many-to-many or one-to-many field
                 # ManyToManyField, ManyToManyRel, ManyToOneRel
                 is_many = field.many_to_many or field.one_to_many
-                print(f"DEBUG: instantiating nested serializer for related field: {field.name}")
                 serializer_class._declared_fields[field.name] = RelatedFieldWithRepr(
                     queryset=field.related_model.objects.all(),
                     required=not (field.null or field.blank),
                     depth=depth,
                     allow_null=field.null,
                     many=is_many,
-                    fields_map=fields_map  # Pass the fields_map to RelatedFieldWithRepr
+                    fields_map=fields_map
                 )
             else:
                 custom_field_serializer = get_custom_serializer(field.__class__)
@@ -278,12 +343,20 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             cached = self.get_cached_result(cache_key)
             if cached is not None:
                 return cached
+            
+            # Get model name and allowed fields
+            model_name = config.orm_provider.get_model_name(model)
+            allowed_fields = extract_fields(self.fields_map, "", model_name)
 
             # Register the instance itself as a dependency BEFORE serializing
             self.log_dependency(self.instance, get_model_name)
 
             # For ForeignKey fields, register those as dependencies too
             for field in model._meta.get_fields():
+                # Skip fields that won't be presented
+                if field.name not in allowed_fields:
+                    continue
+
                 if (
                     field.is_relation
                     and field.concrete
@@ -341,7 +414,8 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             depth=depth,
             cache_backend=config.cache_backend,
             dependency_store=config.dependency_store,
-            request=request
+            request=request,
+            current_path=""
         )
         return serializer
 
