@@ -42,12 +42,12 @@ class RelatedFieldWithRepr(serializers.RelatedField):
 
     def __init__(self, *args, **kwargs):
         self.depth = kwargs.pop("depth", 0)
+        self.fields_map = kwargs.pop("fields_map", {})
         super().__init__(*args, **kwargs)
 
     def to_representation(self, value):
-        fields_map: Dict[str, Set[str]] = self.context.get("fields_map", {})
         model_name = config.orm_provider.get_model_name(self.queryset.model)
-        allowed = fields_map.get(model_name)
+        allowed = self.fields_map.get(model_name)
         if self.depth == 0 or not allowed:
             return self._minimal_representation(value)
         else:
@@ -74,15 +74,14 @@ class RelatedFieldWithRepr(serializers.RelatedField):
             serializer_parent = serializer_parent.parent
         serializer_parent.log_dependency(instance, config.orm_provider.get_model_name)
         
-        fields_map = self.context.get("fields_map", {})
         serializer_class = DynamicModelSerializer.for_model(
             instance.__class__, depth=self.depth - 1
         )
-        # Propagate the parent's dependency registry by shallow-copying the context.
+        # Pass explicit parameters instead of context
         serializer = serializer_class(
             instance,
             depth=self.depth - 1,
-            context={**self.context, "fields_map": fields_map},
+            fields_map=self.fields_map,
         )
         # Use the nested serializer's own caching mechanism.
         return serializer.cached_data()
@@ -120,7 +119,9 @@ class IndividualCachingListSerializer(serializers.ListSerializer):
         for item in data:
             print(f"DEBUG: instantiating nested list serializer for model: {item.__class__.__name__}")
             serializer_instance = self.child.__class__(
-                instance=item, context=self.context, depth=self.context.get("depth", 0)
+                instance=item, 
+                depth=getattr(self.child, 'depth', 0),
+                fields_map=getattr(self.child, 'fields_map', {})
             )
             result.append(serializer_instance.cached_data())
         return result
@@ -145,12 +146,13 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         self.depth = kwargs.pop("depth", 0)
+        self.fields_map = kwargs.pop("fields_map", {})
         self.cache_backend = kwargs.pop("cache_backend", config.cache_backend)
         self.dependency_store = kwargs.pop("dependency_store", config.dependency_store)
+        self.request = kwargs.pop("request", None)
         super().__init__(*args, **kwargs)
         model_name = config.orm_provider.get_model_name(self.Meta.model)
-        fields_map: Dict[str, Set[str]] = self.context.get("fields_map", {})
-        allowed = fields_map.get(model_name)
+        allowed = self.fields_map.get(model_name)
         if allowed is not None and allowed != {ALL_FIELDS}:
             self.fields = {
                 name: field for name, field in self.fields.items() if name in allowed
@@ -247,10 +249,9 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             model_config = None
         
         if self.cache_backend is not None:
-            fields_map = self.context.get("fields_map", {})
             get_model_name = config.orm_provider.get_model_name
             cache_key = self.generate_cache_key(
-                model, self.instance, self.depth, fields_map, get_model_name
+                model, self.instance, self.depth, self.fields_map, get_model_name
             )
             cached = self.get_cached_result(cache_key)
             if cached is not None:
@@ -292,7 +293,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
     The abstract base class for DRF serialization.
 
     In this design, the private `_serialize` method instantiates a DynamicModelSerializer
-    with a context that always includes a fresh dependency registry. That way, when used
+    with explicit parameters instead of using context. That way, when used
     at the top level, the serializer will collect *all* dependencies (even those from nested serializers).
     Meanwhile, when a serializer is used on its own (e.g. caching a home independently),
     it will only collect its own dependencies.
@@ -312,15 +313,16 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         model_name = config.orm_provider.get_model_name(model)
         if model_name not in fm:
             fm[model_name] = {ALL_FIELDS}
-        # Build a base context that includes a fresh dependency registry.
-        ctx = {"depth": depth, "fields_map": fm, "dependency_registry": {}, "request": request}
+        
+        # Pass explicit parameters instead of context
         serializer = serializer_class(
             data,
             many=many,
-            context=ctx,
             depth=depth,
+            fields_map=fm,
             cache_backend=config.cache_backend,
             dependency_store=config.dependency_store,
+            request=request
         )
         return serializer
 
@@ -366,8 +368,12 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             for hook in model_config.pre_hooks:
                 data = hook(data, request=request)
 
+        # Use explicit parameters instead of context
         serializer = serializer_class(
-            data=data, context={"fields_map": fm}, partial=partial
+            data=data, 
+            fields_map=fm, 
+            partial=partial,
+            request=request
         )
         serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data
@@ -402,17 +408,18 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         # Get the appropriate serializer class for this model
         serializer_class = DynamicModelSerializer.for_model(model)
         
-        # Create context with fields_map if provided
-        context = {}
+        # Prepare fields_map
+        fm = {}
         if fields_map is not None:
-            context["fields_map"] = fields_map
+            fm = fields_map.copy()
         
-        # Create the serializer - with or without an instance
+        # Create the serializer - with or without an instance - using explicit parameters
         serializer = serializer_class(
             instance=instance,  # Will be None for creation
             data=data,
-            context=context,
-            partial=partial if instance else False  # partial only makes sense for updates
+            fields_map=fm,
+            partial=partial if instance else False,  # partial only makes sense for updates
+            request=request
         )
         
         # Validate the data

@@ -42,13 +42,12 @@ class ASTParser:
 
         # Process field selection if present
         requested_fields = self.serializer_options.get("fields", [])
-        depth = int(self.serializer_options.get("depth", 0))
-        self.serializer_options["fields_map"] = self.get_permissioned_fields(requested_fields=requested_fields, depth= depth)
+        
+        # Configure the serializer options
+        self.depth = int(self.serializer_options.get("depth", 0))
+        self.fields_map = self.get_permissioned_fields(requested_fields=requested_fields, depth= self.depth)
+        self.serializer_options["fields_map"] = self.fields_map
 
-        self.ser_args = {
-            "depth": int(self.serializer_options.get("depth", 0)),
-            "fields_map": self.serializer_options.get("fields_map", {}),
-        }
         # Lookup table mapping AST op types to handler methods.
         self.handlers: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
             "create": self._handle_create,
@@ -363,7 +362,7 @@ class ASTParser:
         )
         record = self.engine.create(validated_data, self.serializer, self.request)
         serialized = self.serializer.serialize(
-            record, self.model, many=False, **self.ser_args
+            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
         )
         return {
             "data": serialized,
@@ -418,7 +417,7 @@ class ASTParser:
 
         # Serialize the updated instance for the response.
         serialized = self.serializer.serialize(
-            updated_instance, self.model, many=False, **self.ser_args
+            updated_instance, self.model, many=False, depth= self.depth, fields_map= self.fields_map
         )
         return {
             "data": serialized,
@@ -455,7 +454,7 @@ class ASTParser:
         permissions = self.registry.get_config(self.model).permissions
         record = self.engine.get(ast, self.request, permissions)
         serialized = self.serializer.serialize(
-            record, self.model, many=False, **self.ser_args
+            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
         )
         return {
             "data": serialized,
@@ -485,7 +484,7 @@ class ASTParser:
         )
 
         serialized = self.serializer.serialize(
-            record, self.model, many=False, **self.ser_args
+            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
         )
         return {
             "data": serialized,
@@ -518,7 +517,7 @@ class ASTParser:
         )
 
         serialized = self.serializer.serialize(
-            record, self.model, many=False, **self.ser_args
+            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
         )
         return {
             "data": serialized,
@@ -531,7 +530,7 @@ class ASTParser:
     def _handle_first(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         record = self.engine.first()
         serialized = self.serializer.serialize(
-            record, self.model, many=False, **self.ser_args
+            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
         )
         return {
             "data": serialized,
@@ -541,7 +540,7 @@ class ASTParser:
     def _handle_last(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         record = self.engine.last()
         serialized = self.serializer.serialize(
-            record, self.model, many=False, **self.ser_args
+            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
         )
         return {
             "data": serialized,
@@ -640,7 +639,7 @@ class ASTParser:
         )
 
         serialized = self.serializer.serialize(
-            rows, self.model, many=True, **self.ser_args
+            rows, self.model, many=True, depth= self.depth, fields_map= self.fields_map
         )
         return {
             "data": serialized,
@@ -672,9 +671,9 @@ class ASTParser:
             return None
         if isinstance(data, self.model):
             return self.serializer.serialize(
-                data, self.model, many=False, **self.ser_args
+                data, self.model, many=False, depth= self.depth, fields_map= self.fields_map
             )
-        return self.serializer.serialize(data, self.model, many=True, **self.ser_args)
+        return self.serializer.serialize(data, self.model, many=True, depth= self.depth, fields_map= self.fields_map)
 
     # --- Static Methods for Operation Extraction ---
 
