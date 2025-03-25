@@ -358,7 +358,7 @@ class ASTParser:
     def _handle_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
-            model=self.model, data=data, partial=False, request=self.request
+            model=self.model, data=data, partial=False, request=self.request, fields_map= self.fields_map
         )
         record = self.engine.create(validated_data, self.serializer, self.request, self.fields_map)
         serialized = self.serializer.serialize(
@@ -372,7 +372,7 @@ class ASTParser:
     def _handle_update(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
-            model=self.model, data=data, partial=True, request=self.request
+            model=self.model, data=data, partial=True, request=self.request, fields_map= self.fields_map
         )
         ast["data"] = validated_data
         # Retrieve permissions from the self.registry.
@@ -404,7 +404,7 @@ class ASTParser:
         raw_data = ast.get("data", {})
         # Allow partial updates.
         validated_data = self.serializer.deserialize(
-            model=self.model, data=raw_data, partial=True, request=self.request
+            model=self.model, data=raw_data, partial=True, request=self.request, fields_map= self.fields_map
         )
         # Replace raw data with validated data in the AST.
         ast["data"] = validated_data
