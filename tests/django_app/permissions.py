@@ -195,34 +195,3 @@ class NameFilterPermission(AbstractPermission):
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         return {ALL_FIELDS}
-
-class CustomIntersectionPermission(AbstractPermission):
-    def filter_queryset(self, request: RequestType, queryset: Any) -> Any:
-        return queryset
-
-    def allowed_actions(self, request: RequestType, model: Type) -> Set[ActionType]:
-        # Allow only a subset of actions (for example, no DELETE)
-        return {ActionType.CREATE, ActionType.READ, ActionType.UPDATE}
-
-    def allowed_object_actions(self, request, obj, model: Type) -> Set[ActionType]:
-        return {ActionType.CREATE, ActionType.READ, ActionType.UPDATE}
-
-    def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
-        # Return a limited set of fields per model name.
-        model_name = model.__name__
-        if model_name == "ParentTestModel":
-            # For ParentTestModel, permit "name", "description" and "children"
-            return {"name", "description", "children"}
-        elif model_name == "ChildTestModel":
-            # For ChildTestModel, only "name" and "extra" are allowed
-            return {"name", "extra"}
-        elif model_name == "GrandChildTestModel":
-            # For GrandChildTestModel, allow "name" and "detail"
-            return {"name", "detail"}
-        return {"id"}
-
-    def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
-        return self.visible_fields(request, model)
-
-    def create_fields(self, request: RequestType, model: Type) -> Set[str]:
-        return self.visible_fields(request, model)
