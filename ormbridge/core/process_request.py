@@ -6,7 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from ormbridge.core import AppConfig, ModelConfig, Registry
 from ormbridge.core.ast_parser import ASTParser
 from ormbridge.core.ast_validator import ASTValidator
-from ormbridge.core.constants import ALL_FIELDS
+
 from ormbridge.core.exceptions import PermissionDenied, ValidationError
 from ormbridge.core.interfaces import (AbstractDataSerializer,
                                        AbstractORMProvider,
@@ -29,7 +29,7 @@ def _filter_writable_data(
     When `create` is True, use the permission's `create_fields` method;
     otherwise, use `editable_fields`.
 
-    If the allowed fields set contains ALL_FIELDS, return the original data.
+    If the allowed fields set contains "__all__", return the original data.
     """
     allowed_fields: Set[str] = set()
     for permission_cls in model_config.permissions:
@@ -37,7 +37,7 @@ def _filter_writable_data(
             allowed_fields |= permission_cls().create_fields(req, model)
         else:
             allowed_fields |= permission_cls().editable_fields(req, model)
-    if ALL_FIELDS in allowed_fields:
+    if "__all__" in allowed_fields:
         return data
     return {k: v for k, v in data.items() if k in allowed_fields}
 
@@ -121,7 +121,7 @@ class RequestProcessor:
         allowed_global_actions: Set[ActionType] = set()
         for permission_cls in model_config.permissions:
             allowed_global_actions |= permission_cls().allowed_actions(req, model)
-        if ALL_FIELDS not in allowed_global_actions:
+        if "__all__" not in allowed_global_actions:
             if not requested_actions.issubset(allowed_global_actions):
                 missing = requested_actions - allowed_global_actions
                 missing_str = ", ".join(action.value for action in missing)

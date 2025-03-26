@@ -20,7 +20,7 @@ from ormbridge.adaptors.django.config import config, registry
 from ormbridge.adaptors.django.schemas import DjangoSchemaGenerator
 from ormbridge.core.classes import (AdditionalField, FieldFormat, FieldType,
                                     ModelSchemaMetadata, SchemaFieldMetadata)
-from ormbridge.core.constants import ALL_FIELDS
+
 
 # No longer need the openapi_spec_validator
 # from openapi_spec_validator import validate
@@ -31,12 +31,12 @@ from ormbridge.core.constants import ALL_FIELDS
 # Define a proper dummy model config (instead of the app-level config)
 class DummyModelConfig:
     additional_fields = []
-    filterable_fields = ALL_FIELDS
-    searchable_fields = ALL_FIELDS
-    ordering_fields = ALL_FIELDS
+    filterable_fields = "__all__"
+    searchable_fields = "__all__"
+    ordering_fields = "__all__"
     pre_hooks = []
     post_hooks = []
-    fields = {ALL_FIELDS}
+    fields = {"__all__"}
 
 
 # ----------------------
@@ -178,12 +178,12 @@ class TestAdditionalFields(unittest.TestCase):
                     title="Extra"
                 )
             ]
-            filterable_fields = ALL_FIELDS
-            searchable_fields = ALL_FIELDS
-            ordering_fields = ALL_FIELDS
+            filterable_fields = "__all__"
+            searchable_fields = "__all__"
+            ordering_fields = "__all__"
             pre_hooks = []
             post_hooks = []
-            fields = {ALL_FIELDS}
+            fields = {"__all__"}
 
         self._original_get_config = registry.get_config
         registry.get_config = lambda model: DummyConfigWithAdditional()

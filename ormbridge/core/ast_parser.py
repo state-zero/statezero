@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 from collections import deque
 import networkx as nx
 
-from ormbridge.core.constants import ALL_FIELDS
+
 from ormbridge.core.config import AppConfig, Registry
 from ormbridge.core.interfaces import AbstractDataSerializer, AbstractPermission
 from ormbridge.core.types import ActionType, ORMModel, RequestType
@@ -116,7 +116,7 @@ class ASTParser:
                 visible = permission.visible_fields(self.request, model)
                 allowed_fields |= visible
             
-            # Resolve ALL_FIELDS to actual field names if present
+            # Resolve "__all__" to actual field names if present
             return self.config.orm_provider.get_fields(model)
                 
         except (ValueError, KeyError):

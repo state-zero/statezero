@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, List, Set, Type
 import networkx as nx
 
 from ormbridge.core.config import Registry
-from ormbridge.core.constants import ALL_FIELDS
+
 from ormbridge.core.exceptions import PermissionDenied
 from ormbridge.core.interfaces import AbstractPermission
 from ormbridge.core.types import ActionType, ORMModel, RequestType
@@ -77,7 +77,7 @@ class ASTValidator:
         allowed = self._allowed_fields_for_model(current_model)
         for part in parts:
             # Check that the field is allowed on the current model.
-            if part not in allowed and ALL_FIELDS not in allowed:
+            if part not in allowed and "__all__" not in allowed:
                 return False
 
             # Construct the field node key.

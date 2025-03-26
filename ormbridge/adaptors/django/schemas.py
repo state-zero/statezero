@@ -7,7 +7,7 @@ from djmoney.models.fields import MoneyField
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.core.classes import (FieldFormat, FieldType,
                                     ModelSchemaMetadata, SchemaFieldMetadata)
-from ormbridge.core.constants import ALL_FIELDS
+
 from ormbridge.core.interfaces import (AbstractSchemaGenerator,
                                        AbstractSchemaOverride)
 from ormbridge.core.types import ORMField
@@ -36,7 +36,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         all_fields = list(model._meta.fields) + list(model._meta.many_to_many)
         all_field_names: Set[str] = set()
 
-        if model_config.fields != {ALL_FIELDS}:
+        if model_config.fields != {"__all__"}:
             all_fields = [field for field in all_fields if field.name in model_config.fields]
 
         for field in all_fields:
@@ -46,10 +46,10 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
 
             all_field_names.add(field.name)
 
-            # If allowed_fields is provided and is not the magic ALL_FIELDS, skip fields not in the allowed set.
+            # If allowed_fields is provided and is not the magic "__all__", skip fields not in the allowed set.
             if (
                 allowed_fields is not None
-                and allowed_fields != {ALL_FIELDS}
+                and allowed_fields != {"__all__"}
                 and field.name not in allowed_fields
             ):
                 continue
@@ -73,10 +73,10 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         # Process any additional fields from the registry
         add_fields = model_config.additional_fields or []
         for field in add_fields:
-            # If allowed_fields is provided and is not ALL_FIELDS, skip additional fields not allowed.
+            # If allowed_fields is provided and is not "__all__", skip additional fields not allowed.
             if (
                 allowed_fields is not None
-                and allowed_fields != {ALL_FIELDS}
+                and allowed_fields != {"__all__"}
                 and field.name not in allowed_fields
             ):
                 continue
@@ -92,22 +92,22 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
             properties[field.name] = schema_field
             all_field_names.add(field.name)
 
-        # Handle ALL_FIELDS notation and set up field sets.
+        # Handle "__all__" notation and set up field sets.
         filterable_fields = (
             all_field_names
-            if model_config.filterable_fields == ALL_FIELDS
+            if model_config.filterable_fields == "__all__"
             else model_config.filterable_fields or set()
         )
 
         searchable_fields = (
             all_field_names
-            if model_config.searchable_fields == ALL_FIELDS
+            if model_config.searchable_fields == "__all__"
             else model_config.searchable_fields or set()
         )
 
         ordering_fields = (
             all_field_names
-            if model_config.ordering_fields == ALL_FIELDS
+            if model_config.ordering_fields == "__all__"
             else model_config.ordering_fields or set()
         )
 

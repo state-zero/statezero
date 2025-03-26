@@ -13,7 +13,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ormbridge.core.constants import ALL_FIELDS
+
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.core.ast_parser import ASTParser
 from ormbridge.core.classes import FieldNode, ModelNode
@@ -661,7 +661,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         Return a set of the model fields.
         """
         model_config = registry.get_config(model)
-        if model_config.fields and ALL_FIELDS not in model_config.fields:
+        if model_config.fields and "__all__" not in model_config.fields:
             resolved_fields = model_config.fields
         else:
             resolved_fields = set((field.name for field in model._meta.get_fields()))

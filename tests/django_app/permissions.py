@@ -1,6 +1,6 @@
 from typing import Any, Set, Type
 
-from ormbridge.core.constants import ALL_FIELDS
+
 from ormbridge.core.interfaces import AbstractPermission
 from ormbridge.core.types import ActionType, ORMModel, RequestType
 
@@ -35,16 +35,16 @@ class ReadOnlyPermission(AbstractPermission):
         return {ActionType.READ}
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
-        return {ALL_FIELDS}
+        return {"__all__"}
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
         if hasattr(request, "user") and request.user.is_superuser:
-            return {ALL_FIELDS}
+            return {"__all__"}
         return set()  # No editable fields for non-admins
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         if hasattr(request, "user") and request.user.is_superuser:
-            return {ALL_FIELDS}
+            return {"__all__"}
         return set()  # No creatable fields for non-admins
 
 
@@ -83,12 +83,12 @@ class RestrictedFieldsPermission(AbstractPermission):
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
         if hasattr(request, "user") and request.user.is_superuser:
-            return {ALL_FIELDS}
+            return {"__all__"}
         return {"name"}
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         if hasattr(request, "user") and request.user.is_superuser:
-            return {ALL_FIELDS}
+            return {"__all__"}
         return {"name"}
 
 
@@ -135,13 +135,13 @@ class NameFilterPermission(AbstractPermission):
         return set()
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
-        return {ALL_FIELDS}
+        return {"__all__"}
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
-        return {ALL_FIELDS}
+        return {"__all__"}
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
-        return {ALL_FIELDS}
+        return {"__all__"}
 
 
 class NameFilterPermission(AbstractPermission):
@@ -188,10 +188,10 @@ class NameFilterPermission(AbstractPermission):
         return set()
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
-        return {ALL_FIELDS}
+        return {"__all__"}
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
-        return {ALL_FIELDS}
+        return {"__all__"}
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
-        return {ALL_FIELDS}
+        return {"__all__"}

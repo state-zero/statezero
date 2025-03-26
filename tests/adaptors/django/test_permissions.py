@@ -5,7 +5,7 @@ from django.urls import reverse
 from rest_framework.test import APITestCase
 
 from ormbridge.adaptors.django.permissions import AllowAllPermission
-from ormbridge.core.constants import ALL_FIELDS
+
 from ormbridge.core.types import ActionType
 from tests.django_app.models import (CustomPKModel, DummyModel,
                                      DummyRelatedModel,

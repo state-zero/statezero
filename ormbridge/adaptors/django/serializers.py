@@ -10,7 +10,7 @@ from rest_framework import serializers
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.core.caching import CachingMixin
 from ormbridge.core.classes import ModelSummaryRepresentation
-from ormbridge.core.constants import ALL_FIELDS
+
 from ormbridge.core.interfaces import AbstractDataSerializer
 from ormbridge.core.types import RequestType
 
@@ -241,7 +241,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
 
     class Meta:
         model = None  # To be set dynamically.
-        fields = ALL_FIELDS
+        fields = "__all__"
 
     @classmethod
     def for_model(cls, model: Type[models.Model], depth: int = 0, fields_map: Optional[Dict[str, Set[str]]] = None):
@@ -250,7 +250,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             fields_map = {}
             
         # Dynamically create a Meta inner class.
-        Meta = type("Meta", (), {"model": model, "fields": ALL_FIELDS})
+        Meta = type("Meta", (), {"model": model, "fields": "__all__"})
         serializer_class = type(
             f"Dynamic{model.__name__}Serializer", 
             (cls,), 
