@@ -346,7 +346,6 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
                 model, self.instance, self.depth, self.fields_map, get_model_name
             )
             cached = self.get_cached_result(cache_key)
-            print(f"cache result is {json.dumps(cached)}")
             if cached is not None:
                 return cached
             
@@ -453,10 +452,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             many=many, 
             request=request
         )
-        
-        cached_data = serializer.cached_data()
-        print(f"DEBUG: serializd result: {cached_data}")
-        return cached_data
+        return serializer.cached_data()
 
     def deserialize(
         self,

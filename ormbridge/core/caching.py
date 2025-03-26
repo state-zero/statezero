@@ -121,7 +121,6 @@ def generate_cache_key(
         "fields_map": {k: sorted(list(v)) for k, v in fields_map.items()},
     }
     key_str = json.dumps(key_data, sort_keys=True)
-    print(f"DEBUG: key data {json.dumps(key_data)}")
     return hashlib.md5(key_str.encode("utf-8")).hexdigest()
 
 class CachingMixin:
