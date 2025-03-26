@@ -3,6 +3,7 @@ from django.db import models
 from django.utils import timezone
 from djmoney.models.fields import MoneyField
 from django.contrib.auth import get_user_model
+from django.db.models import Max
 
 User = get_user_model()
 
@@ -119,8 +120,8 @@ class ComprehensiveModel(models.Model):
 
 
 class CustomPKModel(models.Model):
-    # Define a custom primary key field
-    custom_pk = models.AutoField(primary_key=True)
+    # Use an IntegerField as the primary key and allow it to be edited.
+    custom_pk = models.IntegerField(primary_key=True, editable=True, blank=True)
     name = models.CharField(max_length=100)
 
     def __str__(self):
@@ -132,6 +133,12 @@ class CustomPKModel(models.Model):
     class Meta:
         app_label = "django_app"
 
+    def save(self, *args, **kwargs):
+        # If no primary key is provided, auto-increment by taking the max existing pk and adding one.
+        if self.custom_pk is None:
+            max_pk = CustomPKModel.objects.aggregate(Max('custom_pk'))['custom_pk__max'] or 0
+            self.custom_pk = max_pk + 1
+        super().save(*args, **kwargs)
 
 class ModelWithCustomPKRelation(models.Model):
     name = models.CharField(max_length=100)
