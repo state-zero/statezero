@@ -82,8 +82,6 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         return rep.to_dict()
 
     def _expanded_representation(self, instance, current_path):
-        print(f"_expanded_representation called for {instance.__class__.__name__} with path: '{current_path}'")
-        
         # Get the nearest parent serializer that implements log_dependency
         serializer_parent = self.parent
         if not hasattr(serializer_parent, "log_dependency") and hasattr(serializer_parent, "parent"):
@@ -105,9 +103,7 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         )
         
         # Use the nested serializer's own caching mechanism
-        result = serializer.cached_data()
-        print(f"  Serialized result keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
-        return result
+        return serializer.cached_data()
 
     def to_internal_value(self, data):
         # If data is already a Django model instance, return it directly
@@ -218,7 +214,6 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
 
         # Get the model name
         model_name = config.orm_provider.get_model_name(self.Meta.model)
-        print(f"DynamicModelSerializer.__init__ for {model_name}, path: '{self.current_path}'")
         pk_field = self.Meta.model._meta.pk.name
         
         # Use the extracted function to get the allowed fields
@@ -230,21 +225,16 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
 
         # Allowed fields must exist
         allowed_fields = allowed_fields or set()
-        print(f"  Allowed fields before adding defaults: {allowed_fields}")
 
         # Always include the primary key and the 'repr' field.
         allowed_fields.add(pk_field)
         allowed_fields.add("repr")
-        print(f"  Final allowed fields: {allowed_fields}")
         
         # Filter the fields based on the result
-        original_fields = set(self.fields.keys())
         self.fields = {
             name: field for name, field in self.fields.items() 
             if name in allowed_fields
         }
-        print(f"  Original fields: {original_fields}")
-        print(f"  Filtered fields: {set(self.fields.keys())}")
 
     def get_repr(self, obj) -> Dict[str, Optional[str]]:
         str_repr = str(obj)
@@ -355,6 +345,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             cache_key = self.generate_cache_key(
                 model, self.instance, self.depth, self.fields_map, get_model_name
             )
+            print(f"returning cache key {cache_key}")
             cached = self.get_cached_result(cache_key)
             if cached is not None:
                 return cached
