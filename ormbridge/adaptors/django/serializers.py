@@ -453,7 +453,10 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             many=many, 
             request=request
         )
-        return serializer.cached_data()
+        
+        cached_data = serializer.cached_data()
+        print(f"DEBUG: serializd result: {cached_data}")
+        return cached_data
 
     def deserialize(
         self,
