@@ -503,7 +503,9 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         request: Optional[RequestType] = None
     ) -> Any:
         """
-        Save data to create a new instance or update an existing one.
+        Save data to create a new instance or update an existing one. Note that this does no field level
+        validation so its ESSENTIAL that deserialize is already called on the data / instance before it is
+        provided to the save method.
         
         Args:
             model: The model class
@@ -517,12 +519,19 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         """
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
+
+        # Get all fields using the ORM provider
+        all_fields = config.orm_provider.get_fields(model)
+        model_name = config.orm_provider.get_model_name(model)
+
+        # Create an unrestricted fields map
+        unrestricted_fields_map = {model_name: all_fields}
         
         # Create serializer class with fields_map as a class attribute
         serializer_class = DynamicModelSerializer.for_model(
             model=model, 
-            depth=0, 
-            fields_map=fields_map
+            depth=0,  # No need for depth during save
+            fields_map=unrestricted_fields_map  # Use all fields
         )
         
         # Create serializer without passing fields_map

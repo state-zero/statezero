@@ -47,6 +47,13 @@ class AbstractORMProvider(ABC):
     # === Query Engine Methods ===
 
     @abstractmethod
+    def get_fields(self) -> Set[str]:
+        """
+        Get all of the model fields - doesn't apply permissions check.
+        """
+        pass
+
+    @abstractmethod
     def filter_node(self, node: Dict[str, Any]) -> None:
         """
         Apply filter/and/or/not logic to the current query.
