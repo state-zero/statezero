@@ -347,6 +347,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             )
             print(f"returning cache key {cache_key}")
             cached = self.get_cached_result(cache_key)
+            print(f"cache result is {json.dumps(cached)}")
             if cached is not None:
                 return cached
             
