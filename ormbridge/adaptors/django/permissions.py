@@ -41,17 +41,17 @@ class AllowAllPermission(AbstractPermission):
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
         if model is User:
             return self._get_user_fields()
-        return {"__all__"}
+        return "__all__"
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
         if model is User:
             return self._get_user_fields()
-        return {"__all__"}
+        return "__all__"
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         if model is User:
             return self._get_user_fields()
-        return {"__all__"}
+        return "__all__"
 
 
 class IsAuthenticatedPermission(AbstractPermission):
@@ -97,21 +97,21 @@ class IsAuthenticatedPermission(AbstractPermission):
             return set()
         if model is User:
             return self._get_user_fields()
-        return {"__all__"}
+        return "__all__"
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not request.user.is_authenticated:
             return set()
         if model is User:
             return self._get_user_fields()
-        return {"__all__"}
+        return "__all__"
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not request.user.is_authenticated:
             return set()
         if model is User:
             return self._get_user_fields()
-        return {"__all__"}
+        return "__all__"
 
 
 class IsStaffPermission(AbstractPermission):
@@ -157,21 +157,21 @@ class IsStaffPermission(AbstractPermission):
             return set()
         if model is User:
             return self._get_user_fields()
-        return {"__all__"}
+        return "__all__"
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not (request.user.is_authenticated and request.user.is_staff):
             return set()
         if model is User:
             return self._get_user_fields()
-        return {"__all__"}
+        return "__all__"
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         if not (request.user.is_authenticated and request.user.is_staff):
             return set()
         if model is User:
             return self._get_user_fields()
-        return {"__all__"}
+        return "__all__"
 
 
 class ORMBridgeViewAccessGate(BasePermission):

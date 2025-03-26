@@ -1,11 +1,11 @@
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Tuple
 from collections import deque
 import networkx as nx
 
 
 from ormbridge.core.config import AppConfig, Registry
-from ormbridge.core.interfaces import AbstractDataSerializer, AbstractPermission
+from ormbridge.core.interfaces import AbstractDataSerializer, AbstractPermission, AbstractORMProvider
 from ormbridge.core.types import ActionType, ORMModel, RequestType
 
 
@@ -24,7 +24,7 @@ class ASTParser:
     """
     def __init__(
         self,
-        engine: Any,
+        engine: AbstractORMProvider,
         serializer: AbstractDataSerializer,
         model: Type,
         config: AppConfig,
@@ -108,22 +108,26 @@ class ASTParser:
         """
         try:
             model_config = self.registry.get_config(model)
+            all_fields = self.engine.get_fields(model)
             
             # Collect allowed fields from all permissions
             allowed_fields = set()
             for permission_cls in model_config.permissions:
                 permission: AbstractPermission = permission_cls()
                 visible = permission.visible_fields(self.request, model)
+                # If any permission allows all fields we can early return
+                if visible == "__all__":
+                    return all_fields
+                # Get the intersection of visible and all_fields to catch setup issues
+                visible &= all_fields
                 allowed_fields |= visible
-            
-            # Resolve "__all__" to actual field names if present
-            return self.config.orm_provider.get_fields(model)
+            return allowed_fields
                 
         except (ValueError, KeyError):
             # Model not registered or permissions not set up
             return set()  # Default to allowing no fields for security
 
-    def _get_depth_based_fields(self, depth=0):
+    def _get_depth_based_fields(self, orm_provider: AbstractORMProvider, depth=0):
         """
         Build a fields map by traversing the model graph up to the specified depth.
         Respects permission checks on each model and field.
@@ -136,14 +140,14 @@ class ASTParser:
         """
         fields_map = {}
         visited = set()
-        model_graph: nx.DiGraph = self.config.orm_provider.build_model_graph(self.model)
+        model_graph: nx.DiGraph = orm_provider.build_model_graph(self.model)
         
         # Start BFS from the root model
         queue = deque([(self.model, 0)])
         
         while queue:
             current_model, current_depth = queue.popleft()
-            model_name = self.config.orm_provider.get_model_name(current_model)
+            model_name = orm_provider.get_model_name(current_model)
             
             # Skip if we've already visited this model at this depth or lower
             if (model_name, current_depth) in visited:
@@ -182,7 +186,7 @@ class ASTParser:
                     # Only traverse relations we have permission to access
                     if field_name in allowed_fields:
                         # Get the related model and add it to the queue
-                        related_model = self.config.orm_provider.get_model_by_name(
+                        related_model = orm_provider.get_model_by_name(
                             field_data.related_model
                         )
                         queue.append((related_model, current_depth + 1))
@@ -208,7 +212,7 @@ class ASTParser:
         if requested_fields:
             merged_fields_map['fields::'] = requested_fields
         
-        merged_fields_map.update(self._get_depth_based_fields(depth))
+        merged_fields_map.update(self._get_depth_based_fields(orm_provider=self.engine, depth=depth))
 
         return merged_fields_map
 
@@ -398,14 +402,11 @@ class ASTParser:
 
     def _handle_get_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         # Validate and split lookup/defaults (without extra wrapping)
-        self._validate_and_split_lookup_defaults(ast, partial=True)
-
-        # Merge lookup and defaults.
-        merged_data = {**ast.get("lookup", {}), **ast.get("defaults", {})}
+        validated_lookup, validated_defaults = self._validate_and_split_lookup_defaults(ast, partial=True)
 
         # Optionally update the AST if needed:
-        ast["lookup"] = ast.get("lookup", {})
-        ast["defaults"] = ast.get("defaults", {})
+        ast["lookup"] = validated_lookup
+        ast["defaults"] = validated_defaults
 
         # Retrieve permissions from configuration
         permissions = self.registry.get_config(self.model).permissions
@@ -432,14 +433,11 @@ class ASTParser:
 
     def _handle_update_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         # Validate and split lookup/defaults.
-        self._validate_and_split_lookup_defaults(ast, partial=True)
-
-        # Merge lookup and defaults for full validation.
-        merged_data = {**ast.get("lookup", {}), **ast.get("defaults", {})}
+        validated_lookup, validated_defaults = self._validate_and_split_lookup_defaults(ast, partial=True)
 
         # Optionally update the AST if needed:
-        ast["lookup"] = ast.get("lookup", {})
-        ast["defaults"] = ast.get("defaults", {})
+        ast["lookup"] = validated_lookup
+        ast["defaults"] = validated_defaults
 
         # Retrieve permissions from configuration.
         permissions = self.registry.get_config(self.model).permissions
@@ -585,9 +583,10 @@ class ASTParser:
 
     # --- Helper Methods ---
 
-    def _validate_and_split_lookup_defaults(
-        self, ast: Dict[str, Any], partial: bool = False
-    ) -> None:
+    def _validate_and_split_lookup_defaults(self, ast: Dict[str, Any], partial: bool = False) -> Tuple[Dict[str, str]]:
+        """
+        Validates the lookups and the defaults as a single item, and then splits them back into two.
+        """
         raw_lookup = ast.get("lookup", {})
         raw_defaults = ast.get("defaults", {})
         combined_data = {**raw_lookup, **raw_defaults}
@@ -600,8 +599,7 @@ class ASTParser:
         validated_defaults = {
             k: validated_data[k] for k in raw_defaults if k in validated_data
         }
-        ast["lookup"] = validated_lookup
-        ast["defaults"] = validated_defaults
+        return validated_lookup, validated_defaults
 
     def _maybe_serialize_data(self, data: Union[ORMModel, Any]) -> Any:  # type:ignore
         if data is None:

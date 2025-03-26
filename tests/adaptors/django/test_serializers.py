@@ -246,7 +246,7 @@ class DynamicModelSerializerTests(TestCase):
                 self.pre_hooks = []
                 self.post_hooks = []
                 self.custom_querysets = {}
-                self.fields = {"__all__"}
+                self.fields = "__all__"
 
         additional_field = DummyAdditionalField(
             "computed", models.CharField(max_length=255), title="Computed Field"

@@ -27,7 +27,7 @@ class AlwaysAllowPermission:
 
     # Stub methods for other permission methods if needed.
     def visible_fields(self, request: Any, model: Any) -> set:
-        return {"__all__"}
+        return "__all__"
 
     def allowed_actions(self, request: Any, model: Any) -> set:
         return {
@@ -38,10 +38,10 @@ class AlwaysAllowPermission:
         }
 
     def create_fields(self, request: Any, model: Any) -> set:
-        return {"__all__"}
+        return "__all__"
 
     def editable_fields(self, request: Any, model: Any) -> set:
-        return {"__all__"}
+        return "__all__"
 
     def filter_queryset(self, request: Any, queryset: Any) -> Any:
         return queryset

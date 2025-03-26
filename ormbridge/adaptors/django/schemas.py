@@ -36,7 +36,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         all_fields = list(model._meta.fields) + list(model._meta.many_to_many)
         all_field_names: Set[str] = set()
 
-        if model_config.fields != {"__all__"}:
+        if model_config.fields != "__all__":
             all_fields = [field for field in all_fields if field.name in model_config.fields]
 
         for field in all_fields:
@@ -49,7 +49,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
             # If allowed_fields is provided and is not the magic "__all__", skip fields not in the allowed set.
             if (
                 allowed_fields is not None
-                and allowed_fields != {"__all__"}
+                and allowed_fields != "__all__"
                 and field.name not in allowed_fields
             ):
                 continue
@@ -76,7 +76,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
             # If allowed_fields is provided and is not "__all__", skip additional fields not allowed.
             if (
                 allowed_fields is not None
-                and allowed_fields != {"__all__"}
+                and allowed_fields != "__all__"
                 and field.name not in allowed_fields
             ):
                 continue

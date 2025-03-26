@@ -22,6 +22,7 @@ def _filter_writable_data(
     req: Any,
     model: Type,
     model_config: ModelConfig,
+    orm_provider: AbstractORMProvider,
     create: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -31,14 +32,21 @@ def _filter_writable_data(
 
     If the allowed fields set contains "__all__", return the original data.
     """
+    all_fields = orm_provider.get_fields(model)
     allowed_fields: Set[str] = set()
+    
     for permission_cls in model_config.permissions:
         if create:
-            allowed_fields |= permission_cls().create_fields(req, model)
+            permission_fields = permission_cls().create_fields(req, model)
         else:
-            allowed_fields |= permission_cls().editable_fields(req, model)
-    if "__all__" in allowed_fields:
-        return data
+            permission_fields = permission_cls().editable_fields(req, model)
+        # handle the __all__ shorthand
+        if permission_fields == "__all__":
+            permission_fields = all_fields
+        else:
+            permission_fields &= all_fields
+        allowed_fields |= permission_fields
+    
     return {k: v for k, v in data.items() if k in allowed_fields}
 
 
@@ -149,17 +157,17 @@ class RequestProcessor:
             data = final_query_ast.get("data", {})
             # For create operations, pass create=True so that create_fields are used.
             filtered_data = _filter_writable_data(
-                data, req, model, model_config, create=(op == "create")
+                data, req, model, model_config, self.orm_provider, create=(op == "create")
             )
             final_query_ast["data"] = filtered_data
         elif op in ["get_or_create", "update_or_create"]:
             if "lookup" in final_query_ast:
                 final_query_ast["lookup"] = _filter_writable_data(
-                    final_query_ast["lookup"], req, model, model_config, create=True
+                    final_query_ast["lookup"], req, model, model_config, self.orm_provider, create=True
                 )
             if "defaults" in final_query_ast:
                 final_query_ast["defaults"] = _filter_writable_data(
-                    final_query_ast["defaults"], req, model, model_config, create=True
+                    final_query_ast["defaults"], req, model, model_config, self.orm_provider, create=True
                 )
 
         # Create and use the AST parser directly, instead of delegating to ORM provider

@@ -109,7 +109,7 @@ class AppConfig(ABC):
                     all_model_fields.add(field_name)
                     
             # Determine which fields to check based on config.fields
-            fields_to_check = config.fields if config.fields != {"__all__"} else all_model_fields
+            fields_to_check = config.fields if config.fields != "__all__" else all_model_fields
             
             # Check each field to see if it's a relation to an unregistered model
             for field_name in fields_to_check:
@@ -203,7 +203,7 @@ class ModelConfig:
         self.filterable_fields = filterable_fields or set()
         self.searchable_fields = searchable_fields or set()
         self.ordering_fields = ordering_fields or set()
-        self.fields = fields or {"__all__"}
+        self.fields = fields or "__all__"
         self.additional_namespace_resolvers = additional_namespace_resolvers or []
         self.DEBUG = DEBUG or False
 

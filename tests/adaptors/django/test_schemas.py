@@ -36,7 +36,7 @@ class DummyModelConfig:
     ordering_fields = "__all__"
     pre_hooks = []
     post_hooks = []
-    fields = {"__all__"}
+    fields = "__all__"
 
 
 # ----------------------
@@ -183,7 +183,7 @@ class TestAdditionalFields(unittest.TestCase):
             ordering_fields = "__all__"
             pre_hooks = []
             post_hooks = []
-            fields = {"__all__"}
+            fields = "__all__"
 
         self._original_get_config = registry.get_config
         registry.get_config = lambda model: DummyConfigWithAdditional()
