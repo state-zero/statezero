@@ -136,10 +136,14 @@ class IndividualCachingListSerializer(serializers.ListSerializer):
         result: List[Any] = []
         # For each instance, create a new serializer instance and use its caching.
         for item in data:
+            # Get current path from the child serializer
+            current_path = getattr(self.child, 'current_path', "")
+            
             # Create the serializer without explicitly passing fields_map since it's at the class level
             serializer_instance = self.child.__class__(
                 instance=item, 
-                depth=getattr(self.child, 'depth', 0)
+                depth=getattr(self.child, 'depth', 0),
+                current_path=current_path
             )
             result.append(serializer_instance.cached_data())
         return result
@@ -163,24 +167,22 @@ def extract_fields(fields_map: Dict[str, Set[str]], current_path:str="", model_n
     Returns:
         set: Set of field names that should be included, or None if all fields should be included
     """
-    # First check if we have explicitly requested fields via paths
-    if 'fields::' in fields_map and current_path:
-        # Get fields that are direct children of the current path
+    # Check if we have path-based filtering
+    if 'fields::' in fields_map:
         direct_fields = set()
+        
+        prefix = current_path + "__" if current_path else ""
+        
         for path in fields_map['fields::']:
-            # If path starts with current_path and has more segments
-            if path.startswith(current_path + "__"):
-                # Get the next segment after current_path
-                remaining = path[len(current_path) + 2:]  # +2 for the '__'
+            # If the path starts with our prefix
+            if path.startswith(prefix):
+                # Remove the prefix and get the first segment
+                remaining = path[len(prefix):]
                 if remaining:
                     field = remaining.split("__")[0]
                     direct_fields.add(field)
-            # If path exactly matches current_path, it's a leaf node field
-            elif path == current_path:
-                # Include all fields for exact matches
-                return fields_map.get(model_name)
         
-        # Return the set of direct fields if we found any
+        # Return direct fields if we found any
         if direct_fields:
             return direct_fields
     
@@ -188,7 +190,7 @@ def extract_fields(fields_map: Dict[str, Set[str]], current_path:str="", model_n
     if model_name:
         return fields_map.get(model_name)
     
-    # If no filtering was specifed, return None (this will trigger the summary representation)
+    # If no filtering was specified, return None
     return None
 
 class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
