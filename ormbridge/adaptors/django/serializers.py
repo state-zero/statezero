@@ -184,10 +184,12 @@ def extract_fields(fields_map: Dict[str, Set[str]], current_path:str="", model_n
         
         # Return direct fields if we found any
         if direct_fields:
+            print(f"selected fields for model: {model_name}: {direct_fields}")
             return direct_fields
     
     # Fall back to standard model-based filtering
-    if model_name:
+    if 'fields::' not in fields_map:
+        print(f"depth based fields for model: {model_name}: {fields_map.get(model_name)}")
         return fields_map.get(model_name)
     
     # If no filtering was specified, return None
