@@ -65,10 +65,12 @@ class MoneyFieldSerializer(serializers.Field):
         amount_representation = djmoney_field.to_representation(value)
         return {"amount": amount_representation, "currency": value.currency.code}
 
-    def to_internal_value(self, data):
+    def to_internal_value(self, data) -> Money:
+        if isinstance(data, Money):
+            return data
         if not isinstance(data, dict):
             raise serializers.ValidationError(
-                "Input must be an object with 'amount' and 'currency' keys"
+                f"Input must be an object with 'amount' and 'currency' keys but we got {data} of type {type(data)}"
             )
         try:
             amount = data["amount"]
