@@ -452,7 +452,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         serializer,
         req: RequestType,
         permissions: List[Type[AbstractPermission]],
-        fields_map
+        create_fields_map
     ) -> Tuple[models.Model, bool]:
         """
         Get an existing object, or create it if it doesn't exist, with object-level permission checks.
@@ -492,7 +492,7 @@ class DjangoORMAdapter(AbstractORMProvider):
             instance=None,  # No instance for creation
             partial=False,   # Not a partial update for creation
             request=req,
-            fields_map=fields_map
+            fields_map=create_fields_map
         )
 
         return instance, created
@@ -503,7 +503,8 @@ class DjangoORMAdapter(AbstractORMProvider):
         req: RequestType,
         serializer,
         permissions: List[Type[AbstractPermission]],
-        fields_map
+        update_fields_map,
+        create_fields_map
     ) -> Tuple[models.Model, bool]:
         """
         Update an existing object, or create it if it doesn't exist, with object-level permission checks.
@@ -531,6 +532,8 @@ class DjangoORMAdapter(AbstractORMProvider):
             raise MultipleObjectsReturned(
                 f"Multiple {self.model.__name__} instances match the given lookup parameters"
             )
+        
+        fields_map_to_use = create_fields_map if created else update_fields_map
 
         # Use the serializer's save method, which handles validation and saving
         instance = serializer.save(
@@ -538,7 +541,7 @@ class DjangoORMAdapter(AbstractORMProvider):
             data=merged_data,
             instance=instance,
             request=req,
-            fields_map=fields_map
+            fields_map=fields_map_to_use
         )
 
         return instance, created

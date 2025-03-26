@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Tuple, Literal
 from collections import deque
 import networkx as nx
 
@@ -45,8 +45,31 @@ class ASTParser:
         
         # Configure the serializer options
         self.depth = int(self.serializer_options.get("depth", 0))
-        self.fields_map = self.get_permissioned_fields(requested_fields=requested_fields, depth= self.depth)
-        self.serializer_options["fields_map"] = self.fields_map
+        
+        # Get the raw field map
+        self.read_fields_map = self._get_operation_field_map(
+            requested_fields=requested_fields, 
+            depth=self.depth, 
+            operation_type='read'
+        )
+
+        # Create/update operations should use depth 0 for performance
+        self.create_fields_map = self._get_operation_field_map(
+            requested_fields=requested_fields, 
+            depth=0,  # Nested writes are not supported
+            operation_type='create'
+        )
+
+        self.update_fields_map = self._get_operation_field_map(
+            requested_fields=requested_fields, 
+            depth=0,  # Nested writes are not supported
+            operation_type='update'
+        )
+
+        # Add field maps to serializer options
+        self.serializer_options["read_fields_map"] = self.read_fields_map
+        self.serializer_options["create_fields_map"] = self.create_fields_map
+        self.serializer_options["update_fields_map"] = self.update_fields_map
 
         # Lookup table mapping AST op types to handler methods.
         self.handlers: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
@@ -70,15 +93,43 @@ class ASTParser:
         }
         self.default_handler = self._handle_read
 
-    def _has_read_permission(self, model):
+    def _get_operation_field_map(self, requested_fields: Optional[Set[str]] = None, depth=0, operation_type: Literal["read", "create", "update"]='read') -> Dict[str, Set[str]]:
         """
-        Check if the current request has READ permission on the model.
+        Build a fields map for a specific operation type.
+        
+        Args:
+            requested_fields: Optional set of explicitly requested fields
+            depth: Maximum depth for related models to include
+            operation_type: Operation type ('read', 'create', 'update')
+            
+        Returns:
+            Dict[str, Set[str]]: Fields map with model names as keys and sets of field names as values
+        """
+        merged_fields_map = {}
+
+        if requested_fields:
+            merged_fields_map['fields::'] = requested_fields
+        
+        # Build a fields map specific to this operation type
+        fields_map = self._get_depth_based_fields(
+            orm_provider=self.engine, 
+            depth=depth,
+            operation_type=operation_type
+        )
+        
+        merged_fields_map.update(fields_map)
+        return merged_fields_map
+    
+    def _has_operation_permission(self, model, operation_type):
+        """
+        Check if the current request has permission for the specified operation on the model.
         
         Args:
             model: Model to check permissions for
+            operation_type: The type of operation ('read', 'create', 'update', 'delete')
             
         Returns:
-            Boolean indicating if READ permission is granted
+            Boolean indicating if permission is granted for the operation
         """
         try:
             model_config = self.registry.get_config(model)
@@ -89,51 +140,29 @@ class ASTParser:
                 permission: AbstractPermission = permission_cls()
                 allowed_actions.update(permission.allowed_actions(self.request, model))
             
-            # Check if READ is in the set of allowed actions
-            return ActionType.READ in allowed_actions
+            # Map operation types to ActionType enum values
+            operation_to_action = {
+                'read': ActionType.READ,
+                'create': ActionType.CREATE,
+                'update': ActionType.UPDATE,
+                'delete': ActionType.DELETE
+            }
+            
+            # Check if the required action is in the set of allowed actions
+            required_action = operation_to_action.get(operation_type, ActionType.READ)
+            return required_action in allowed_actions
         except (ValueError, KeyError):
             # Model not registered or permissions not set up
             return False  # Default to denying access for security
 
-    def _allowed_fields_for_model(self, model):
-        """
-        Get fields allowed by permissions for a model.
-        Aggregates the visible fields from all permission instances.
-        
-        Args:
-            model: Model to check permissions for
-            
-        Returns:
-            Set of field names allowed by permissions
-        """
-        try:
-            model_config = self.registry.get_config(model)
-            all_fields = self.engine.get_fields(model)
-            
-            # Collect allowed fields from all permissions
-            allowed_fields = set()
-            for permission_cls in model_config.permissions:
-                permission: AbstractPermission = permission_cls()
-                visible = permission.visible_fields(self.request, model)
-                # If any permission allows all fields we can early return
-                if visible == "__all__":
-                    return all_fields
-                # Get the intersection of visible and all_fields to catch setup issues
-                visible &= all_fields
-                allowed_fields |= visible
-            return allowed_fields
-                
-        except (ValueError, KeyError):
-            # Model not registered or permissions not set up
-            return set()  # Default to allowing no fields for security
-
-    def _get_depth_based_fields(self, orm_provider: AbstractORMProvider, depth=0):
+    def _get_depth_based_fields(self, orm_provider: AbstractORMProvider, depth=0, operation_type='read'):
         """
         Build a fields map by traversing the model graph up to the specified depth.
-        Respects permission checks on each model and field.
+        Uses operation-specific field permissions.
         
         Args:
-            depth (int): Maximum depth to traverse in relationship graph
+            depth: Maximum depth to traverse in relationship graph
+            operation_type: Operation type for field permissions ('read', 'create', 'update')
             
         Returns:
             Dict[str, Set[str]]: Dictionary mapping model names to sets of field names
@@ -155,16 +184,16 @@ class ASTParser:
             visited.add((model_name, current_depth))
             
             # Check if we have permission to read this model
-            if not self._has_read_permission(current_model):
+            if not self._has_operation_permission(current_model, operation_type=operation_type):
                 continue
             
-            # Get fields we have permission to see for this model
-            allowed_fields = self._allowed_fields_for_model(current_model)
+            # Get fields allowed for this operation type
+            allowed_fields = self._get_operation_fields(current_model, operation_type)
             
             # Initialize fields set for this model
             fields_map.setdefault(model_name, set())
             
-            # First, collect all directly accessible fields from the model
+            # Collect all directly accessible fields from the model
             for node in model_graph.successors(model_name):
                 # Each successor of the model node is a field node
                 field_data = model_graph.nodes[node].get("data")
@@ -192,29 +221,52 @@ class ASTParser:
                         queue.append((related_model, current_depth + 1))
         
         return fields_map
-    
-    def get_permissioned_fields(self, requested_fields: Optional[Set[str]] = None, depth=0) -> Dict[str, Set[str]]:
+
+    def _get_operation_fields(self, model: ORMModel, operation_type: Literal["read", "create", "update"]):
         """
-        Merges the results of _process_requested_fields and get_depth_based_fields.
-        
-        For models present in both maps:
-        - If a model is only in one map, use that map's fields.
-        - If a model is in both maps, prioritize fields from _process_requested_fields.
+        Get the appropriate field set for a specific operation.
         
         Args:
-            depth (int): Maximum depth for related models to include.
+            model: Model to get fields for
+            operation_type: The operation type ('read', 'create', 'update')
             
         Returns:
-            Dict[str, Set[str]]: Merged fields map with model names as keys and sets of field names as values.
+            Set of field names allowed for the operation
         """
-        merged_fields_map = {}
-
-        if requested_fields:
-            merged_fields_map['fields::'] = requested_fields
-        
-        merged_fields_map.update(self._get_depth_based_fields(orm_provider=self.engine, depth=depth))
-
-        return merged_fields_map
+        try:
+            model_config = self.registry.get_config(model)
+            all_fields = self.engine.get_fields(model)
+            
+            # Initialize with no fields allowed
+            allowed_fields = set()
+            
+            for permission_cls in model_config.permissions:
+                permission: AbstractPermission = permission_cls()
+                
+                # Get the appropriate field set based on operation
+                if operation_type == 'read':
+                    fields: Union[Set[str], Literal["__all__"]] = permission.visible_fields(self.request, model)
+                elif operation_type == 'create':
+                    fields: Union[Set[str], Literal["__all__"]] = permission.create_fields(self.request, model)
+                elif operation_type == 'update':
+                    fields: Union[Set[str], Literal["__all__"]] = permission.editable_fields(self.request, model)
+                else:
+                    fields = set()  # Default to no fields for unknown operations
+                    
+                # If any permission allows all fields
+                if fields == "__all__":
+                    return all_fields
+                    
+                # Add allowed fields from this permission
+                else:  # Ensure we're not operating on the string "__all__"
+                    fields &= all_fields  # Ensure fields actually exist
+                    allowed_fields |= fields
+                
+            return allowed_fields
+                
+        except (ValueError, KeyError):
+            # Model not registered or permissions not set up
+            return set()  # Default to allowing no fields for security
 
     def parse(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -297,11 +349,11 @@ class ASTParser:
     def _handle_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
-            model=self.model, data=data, partial=False, request=self.request, fields_map= self.fields_map
+            model=self.model, data=data, partial=False, request=self.request, fields_map= self.create_fields_map
         )
-        record = self.engine.create(validated_data, self.serializer, self.request, self.fields_map)
+        record = self.engine.create(validated_data, self.serializer, self.request, self.create_fields_map)
         serialized = self.serializer.serialize(
-            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
+            record, self.model, many=False, depth= self.depth, fields_map= self.read_fields_map
         )
         return {
             "data": serialized,
@@ -311,7 +363,7 @@ class ASTParser:
     def _handle_update(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
-            model=self.model, data=data, partial=True, request=self.request, fields_map= self.fields_map
+            model=self.model, data=data, partial=True, request=self.request, fields_map= self.update_fields_map
         )
         ast["data"] = validated_data
         # Retrieve permissions from the self.registry.
@@ -343,7 +395,7 @@ class ASTParser:
         raw_data = ast.get("data", {})
         # Allow partial updates.
         validated_data = self.serializer.deserialize(
-            model=self.model, data=raw_data, partial=True, request=self.request, fields_map= self.fields_map
+            model=self.model, data=raw_data, partial=True, request=self.request, fields_map= self.update_fields_map
         )
         # Replace raw data with validated data in the AST.
         ast["data"] = validated_data
@@ -352,11 +404,11 @@ class ASTParser:
         permissions = self.registry.get_config(self.model).permissions
 
         # Delegate to the engine's instance-based update method.
-        updated_instance = self.engine.update_instance(ast, self.request, permissions, self.serializer, fields_map=self.fields_map)
+        updated_instance = self.engine.update_instance(ast, self.request, permissions, self.serializer, fields_map=self.update_fields_map)
 
         # Serialize the updated instance for the response.
         serialized = self.serializer.serialize(
-            updated_instance, self.model, many=False, depth= self.depth, fields_map= self.fields_map
+            updated_instance, self.model, many=False, depth= self.depth, fields_map= self.read_fields_map
         )
         return {
             "data": serialized,
@@ -393,7 +445,7 @@ class ASTParser:
         permissions = self.registry.get_config(self.model).permissions
         record = self.engine.get(ast, self.request, permissions)
         serialized = self.serializer.serialize(
-            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
+            record, self.model, many=False, depth= self.depth, fields_map= self.read_fields_map
         )
         return {
             "data": serialized,
@@ -417,11 +469,11 @@ class ASTParser:
             serializer=self.serializer,
             req=self.request,
             permissions=permissions,
-            fields_map=self.fields_map
+            create_fields_map=self.create_fields_map
         )
 
         serialized = self.serializer.serialize(
-            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
+            record, self.model, many=False, depth= self.depth, fields_map= self.read_fields_map
         )
         return {
             "data": serialized,
@@ -448,11 +500,12 @@ class ASTParser:
             req=self.request,
             serializer=self.serializer,
             permissions=permissions,
-            fields_map=self.fields_map
+            update_fields_map= self.update_fields_map,
+            create_fields_map= self.create_fields_map
         )
 
         serialized = self.serializer.serialize(
-            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
+            record, self.model, many=False, depth= self.depth, fields_map= self.read_fields_map
         )
         return {
             "data": serialized,
@@ -465,7 +518,7 @@ class ASTParser:
     def _handle_first(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         record = self.engine.first()
         serialized = self.serializer.serialize(
-            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
+            record, self.model, many=False, depth= self.depth, fields_map= self.read_fields_map
         )
         return {
             "data": serialized,
@@ -475,7 +528,7 @@ class ASTParser:
     def _handle_last(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         record = self.engine.last()
         serialized = self.serializer.serialize(
-            record, self.model, many=False, depth= self.depth, fields_map= self.fields_map
+            record, self.model, many=False, depth= self.depth, fields_map= self.read_fields_map
         )
         return {
             "data": serialized,
@@ -574,7 +627,7 @@ class ASTParser:
         )
 
         serialized = self.serializer.serialize(
-            rows, self.model, many=True, depth= self.depth, fields_map= self.fields_map
+            rows, self.model, many=True, depth= self.depth, fields_map= self.read_fields_map
         )
         return {
             "data": serialized,
@@ -585,31 +638,32 @@ class ASTParser:
 
     def _validate_and_split_lookup_defaults(self, ast: Dict[str, Any], partial: bool = False) -> Tuple[Dict[str, str]]:
         """
-        Validates the lookups and the defaults as a single item, and then splits them back into two.
+        Validates the lookups and the defaults separately, using appropriate field maps for each.
+        Lookup uses read_fields_map, defaults uses create_fields_map.
         """
         raw_lookup = ast.get("lookup", {})
         raw_defaults = ast.get("defaults", {})
-        combined_data = {**raw_lookup, **raw_defaults}
-        validated_data = self.serializer.deserialize(
-            model=self.model, data=combined_data, partial=partial, request=self.request, fields_map=self.fields_map
+        
+        # Validate lookup with read_fields_map (for filtering)
+        validated_lookup = self.serializer.deserialize(
+            model=self.model, 
+            data=raw_lookup, 
+            partial=partial, 
+            request=self.request, 
+            fields_map=self.read_fields_map
         )
-        validated_lookup = {
-            k: validated_data[k] for k in raw_lookup if k in validated_data
-        }
-        validated_defaults = {
-            k: validated_data[k] for k in raw_defaults if k in validated_data
-        }
+        
+        # Validate defaults with create_fields_map (for creation)
+        validated_defaults = self.serializer.deserialize(
+            model=self.model, 
+            data=raw_defaults, 
+            partial=partial, 
+            request=self.request, 
+            fields_map=self.create_fields_map
+        )
+        
         return validated_lookup, validated_defaults
-
-    def _maybe_serialize_data(self, data: Union[ORMModel, Any]) -> Any:  # type:ignore
-        if data is None:
-            return None
-        if isinstance(data, self.model):
-            return self.serializer.serialize(
-                data, self.model, many=False, depth= self.depth, fields_map= self.fields_map
-            )
-        return self.serializer.serialize(data, self.model, many=True, depth= self.depth, fields_map= self.fields_map)
-
+    
     # --- Static Methods for Operation Extraction ---
 
     @staticmethod

@@ -62,7 +62,7 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         )
         
         # Expand representation if we have depth or specific fields
-        should_expand = self.depth > 0 or allowed_fields is not None
+        should_expand = self.depth > 0 and allowed_fields
         
         if should_expand:
             return self._expanded_representation(value, new_path)
@@ -113,7 +113,7 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         if hasattr(data, '_meta'):  # This is how we can check if it's a Django model
             return data
             
-        # Use the model's actual pk field name
+        # Use the model's actual pk field name  
         pk_field = getattr(
             self.queryset.model, "primaryKeyField", self.queryset.model._meta.pk.name
         )
@@ -139,7 +139,6 @@ class IndividualCachingListSerializer(serializers.ListSerializer):
         result: List[Any] = []
         # For each instance, create a new serializer instance and use its caching.
         for item in data:
-            print(f"DEBUG: instantiating nested list serializer for model: {item.__class__.__name__}")
             # Create the serializer without explicitly passing fields_map since it's at the class level
             serializer_instance = self.child.__class__(
                 instance=item, 
@@ -192,7 +191,7 @@ def extract_fields(fields_map: Dict[str, Set[str]], current_path:str="", model_n
     if model_name:
         return fields_map.get(model_name)
     
-    # If no filtering was specified, return None to indicate all fields
+    # If no filtering was specifed, return None (this will trigger the summary representation)
     return None
 
 class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
@@ -216,6 +215,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
 
         # Get the model name
         model_name = config.orm_provider.get_model_name(self.Meta.model)
+        pk_field = self.Meta.model._meta.pk.name
         
         # Use the extracted function to get the allowed fields
         allowed_fields = extract_fields(
@@ -225,14 +225,17 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         )
 
         # Allowed fields must exist
-        assert allowed_fields, "No allowed fields could be extracted!"
+        allowed_fields = allowed_fields or set()
+
+        # Always include the primary key and the 'repr' field.
+        allowed_fields.add(pk_field)
+        allowed_fields.add("repr")
         
         # Filter the fields based on the result
         self.fields = {
             name: field for name, field in self.fields.items() 
             if name in allowed_fields
         }
-            
 
     def get_repr(self, obj) -> Dict[str, Optional[str]]:
         str_repr = str(obj)
@@ -248,9 +251,11 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         # Ensure we have a fields_map, even if empty
         if fields_map is None:
             fields_map = {}
+
+        pk_field = model._meta.pk.name
             
         # Dynamically create a Meta inner class.
-        Meta = type("Meta", (), {"model": model, "fields": "__all__"})
+        Meta = type("Meta", (), {"model": model, "fields": "__all__", "read_only_fields": (pk_field,) })
         serializer_class = type(
             f"Dynamic{model.__name__}Serializer", 
             (cls,), 
@@ -268,30 +273,31 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         allowed_fields = extract_fields(fields_map, "", model_name)
 
         # Iterate over the model's fields.
-        for field in model._meta.get_fields():
-            # Skip fields that won't be presented
-            if field.name not in allowed_fields:
-                continue
-            if getattr(field, "auto_created", False) and not field.concrete:
-                continue
-            if field.is_relation:
-                # Determine if this is a many-to-many or one-to-many field
-                # ManyToManyField, ManyToManyRel, ManyToOneRel
-                is_many = field.many_to_many or field.one_to_many
-                serializer_class._declared_fields[field.name] = RelatedFieldWithRepr(
-                    queryset=field.related_model.objects.all(),
-                    required=not (field.null or field.blank),
-                    depth=depth,
-                    allow_null=field.null,
-                    many=is_many,
-                    fields_map=fields_map
-                )
-            else:
-                custom_field_serializer = get_custom_serializer(field.__class__)
-                if custom_field_serializer:
-                    serializer_class.serializer_field_mapping[field.__class__] = (
-                        custom_field_serializer
+        if allowed_fields:
+            for field in model._meta.get_fields():
+                # Skip fields that won't be presented
+                if field.name not in allowed_fields:
+                    continue
+                if getattr(field, "auto_created", False) and not field.concrete:
+                    continue
+                if field.is_relation:
+                    # Determine if this is a many-to-many or one-to-many field
+                    # ManyToManyField, ManyToManyRel, ManyToOneRel
+                    is_many = field.many_to_many or field.one_to_many
+                    serializer_class._declared_fields[field.name] = RelatedFieldWithRepr(
+                        queryset=field.related_model.objects.all(),
+                        required=not (field.null or field.blank),
+                        depth=depth,
+                        allow_null=field.null,
+                        many=is_many,
+                        fields_map=fields_map
                     )
+                else:
+                    custom_field_serializer = get_custom_serializer(field.__class__)
+                    if custom_field_serializer:
+                        serializer_class.serializer_field_mapping[field.__class__] = (
+                            custom_field_serializer
+                        )
 
         # Inject additional computed fields from the registry, if any.
         try:

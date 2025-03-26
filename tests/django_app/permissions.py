@@ -78,7 +78,14 @@ class RestrictedFieldsPermission(AbstractPermission):
         return {ActionType.CREATE, ActionType.READ, ActionType.UPDATE}
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
-        # Only allow seeing the name and id fields
+        if hasattr(request, "user") and request.user.is_superuser:
+            return "__all__"
+        
+        # For ModelWithCustomPKRelation, ensure the related field is included
+        if model.__name__ == "ModelWithCustomPKRelation":
+            return {"name", "custom_pk", "pk", "custom_pk_related"}
+            
+        # For other models, keep the original limitation
         return {"name", "custom_pk", "pk"}
 
     def editable_fields(self, request: RequestType, model: Type) -> Set[str]:

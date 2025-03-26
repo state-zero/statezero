@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, Literal
 
 from ormbridge.core.classes import ModelSchemaMetadata, SchemaFieldMetadata
 from ormbridge.core.exceptions import PermissionDenied
@@ -423,7 +423,7 @@ class AbstractPermission(ABC):
     @abstractmethod
     def visible_fields(
         self, request: RequestType, model: ORMModel
-    ) -> Set[str]:  # type:ignore
+    ) -> Union[Set[str], Literal["__all__"]]:  # type:ignore
         """
         Return the set of fields that are visible to the user for the given model and CRUD actions.
         """
@@ -432,7 +432,7 @@ class AbstractPermission(ABC):
     @abstractmethod
     def editable_fields(
         self, request: RequestType, model: ORMModel
-    ) -> Set[str]:  # type:ignore
+    ) -> Union[Set[str], Literal["__all__"]]:  # type:ignore
         """
         Return the set of fields that are editable by the user for the given model and CRUD actions.
         """
@@ -441,7 +441,7 @@ class AbstractPermission(ABC):
     @abstractmethod
     def create_fields(
         self, request: RequestType, model: ORMModel
-    ) -> Set[str]:  # type:ignore
+    ) -> Union[Set[str], Literal["__all__"]]:  # type:ignore
         """
         Return the set of fields that the user is allowed to specify in their create method
         """
@@ -451,7 +451,7 @@ class AbstractSearchProvider(ABC):
     """Base class for search providers in ORMBridge."""
     
     @abstractmethod
-    def search(self, queryset: ORMQuerySet, query: str, search_fields: Set[str]) -> ORMQuerySet:
+    def search(self, queryset: ORMQuerySet, query: str, search_fields: Union[Set[str], Literal["__all__"]]) -> ORMQuerySet:
         """
         Apply search filtering to a queryset.
         
