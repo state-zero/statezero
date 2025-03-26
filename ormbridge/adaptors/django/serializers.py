@@ -61,10 +61,7 @@ class RelatedFieldWithRepr(serializers.RelatedField):
             model_name=model_name
         )
         
-        # Expand representation if we have depth or specific fields
-        should_expand = self.depth > 0 and allowed_fields
-        
-        if should_expand:
+        if allowed_fields:
             return self._expanded_representation(value, new_path)
         else:
             return self._minimal_representation(value)
