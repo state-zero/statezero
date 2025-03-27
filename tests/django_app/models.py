@@ -81,7 +81,7 @@ class DeepModelLevel1(models.Model):
     )
     # Add a many-to-many field to DummyModel.
     comprehensive_models = models.ManyToManyField(
-        "django_app.DummyModel", blank=True, related_name="deep_models"
+        "django_app.ComprehensiveModel", blank=True, related_name="deep_models"
     )
 
     def __str__(self):
