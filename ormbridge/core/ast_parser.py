@@ -93,6 +93,73 @@ class ASTParser:
         }
         self.default_handler = self._handle_read
 
+    def _process_nested_field_strings(self, orm_provider: AbstractORMProvider, field_strings, available_fields_map):
+        """
+        Build a fields map from a list of dotted field strings like ['fk__m2m', 'field', 'fk__m2m__field'],
+        respecting the available fields for each model.
+        
+        Args:
+            orm_provider: The ORM provider to use for model traversal
+            field_strings: List of field strings in the format 'relation__field' or 'field'
+            available_fields_map: Dict mapping model names to sets of available fields
+            
+        Returns:
+            Dict[str, Set[str]]: Dictionary mapping model names to sets of field names
+        """
+        fields_map = {}
+        model_graph: nx.DiGraph = orm_provider.build_model_graph(self.model)
+        
+        # Start with the root model
+        root_model_name = orm_provider.get_model_name(self.model)
+        fields_map[root_model_name] = set()
+        
+        for field_string in field_strings:
+            parts = field_string.split('__')
+            current_model = self.model
+            current_model_name = root_model_name
+            
+            # Process each part of the field string
+            for i, part in enumerate(parts):
+                # Check if this field is available for this model
+                if current_model_name in available_fields_map and part in available_fields_map[current_model_name]:
+                    # Add the current field to the current model's field set
+                    fields_map.setdefault(current_model_name, set()).add(part)
+                
+                # If this is the last part, we're done with this field
+                if i == len(parts) - 1:
+                    break
+                    
+                # Otherwise, we need to traverse to the related model if allowed
+                # First, check if the relation field is available
+                if current_model_name not in available_fields_map or part not in available_fields_map[current_model_name]:
+                    # The relation field is not available, stop traversing
+                    break
+                    
+                # Find the field node in the graph
+                field_nodes = [
+                    node for node in model_graph.successors(current_model_name)
+                    if model_graph.nodes[node].get("data") and 
+                    model_graph.nodes[node].get("data").field_name == part
+                ]
+                
+                if not field_nodes:
+                    # Field not found, skip to next field string
+                    break
+                    
+                field_node = field_nodes[0]
+                field_data = model_graph.nodes[field_node].get("data")
+                
+                # If this is a relation field, move to the related model
+                if field_data and field_data.is_relation and field_data.related_model:
+                    related_model = orm_provider.get_model_by_name(field_data.related_model)
+                    current_model = related_model
+                    current_model_name = field_data.related_model
+                else:
+                    # Not a relation field, stop traversing
+                    break
+        
+        return fields_map
+
     def _get_operation_field_map(self, requested_fields: Optional[Set[str]] = None, depth=0, operation_type: Literal["read", "create", "update"]='read') -> Dict[str, Set[str]]:
         """
         Build a fields map for a specific operation type.
@@ -104,21 +171,22 @@ class ASTParser:
             
         Returns:
             Dict[str, Set[str]]: Fields map with model names as keys and sets of field names as values
-        """
-        merged_fields_map = {}
-
-        if requested_fields:
-            merged_fields_map['fields::'] = requested_fields
-        
+        """        
         # Build a fields map specific to this operation type
         fields_map = self._get_depth_based_fields(
             orm_provider=self.engine, 
             depth=depth,
             operation_type=operation_type
         )
+
+        if requested_fields:
+            fields_map = self._process_nested_field_strings(
+                orm_provider=self.engine,
+                field_strings=requested_fields,
+                available_fields_map=fields_map
+            )
         
-        merged_fields_map.update(fields_map)
-        return merged_fields_map
+        return fields_map
     
     def _has_operation_permission(self, model, operation_type):
         """

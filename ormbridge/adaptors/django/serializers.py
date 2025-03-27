@@ -6,7 +6,7 @@ from django.conf import settings
 from django.db import models
 from django.utils.module_loading import import_string
 from rest_framework import serializers
-import threading
+import contextvars
 from contextlib import contextmanager
 
 from ormbridge.adaptors.django.config import config, registry
@@ -17,38 +17,27 @@ from ormbridge.core.interfaces import AbstractDataSerializer
 from ormbridge.core.types import RequestType
 
 # Create a thread-local storage for the fields_map
-_thread_local = threading.local()
+fields_map_var = contextvars.ContextVar('fields_map', default=None)
 
 @contextmanager
 def fields_map_context(fields_map):
     """
-    Context manager that sets the fields_map for the current thread.
-    This allows all serializers created within this context to access
-    the same fields_map without explicit passing.
+    Context manager that sets the fields_map for the current context.
     """
-    # Store the previous fields_map to restore it later
-    previous_fields_map = getattr(_thread_local, 'fields_map', None)
-    
-    # Set the new fields_map
-    _thread_local.fields_map = fields_map
-    
+    # Save the previous value to restore it later
+    token = fields_map_var.set(fields_map)
     try:
         yield
     finally:
-        # Restore the previous fields_map
-        if previous_fields_map is not None:
-            _thread_local.fields_map = previous_fields_map
-        else:
-            # Remove the attribute if there was no previous fields_map
-            if hasattr(_thread_local, 'fields_map'):
-                delattr(_thread_local, 'fields_map')
+        # Restore the previous value
+        fields_map_var.reset(token)
 
 def get_current_fields_map():
     """
-    Get the fields_map from the current thread context.
+    Get the fields_map from the current context.
     Returns an empty dict if no fields_map is set.
     """
-    return getattr(_thread_local, 'fields_map', {})
+    return fields_map_var.get() or {}
 
 def get_custom_serializer(field_class: Type) -> Optional[Type[serializers.Field]]:
     """
