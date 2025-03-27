@@ -456,7 +456,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             dependency_store=config.dependency_store,
             request=request
         )
-        explore_serializer_structure(serializer)
+
         return serializer
 
     def serialize(
