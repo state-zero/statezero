@@ -66,6 +66,8 @@ class MoneyFieldSerializer(serializers.Field):
         return {"amount": amount_representation, "currency": value.currency.code}
 
     def to_internal_value(self, data):
+        if isinstance(data, Money):
+            return data
         if not isinstance(data, dict):
             raise serializers.ValidationError(
                 "Input must be an object with 'amount' and 'currency' keys"
