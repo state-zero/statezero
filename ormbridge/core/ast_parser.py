@@ -45,6 +45,10 @@ class ASTParser:
         
         # Configure the serializer options
         self.depth = int(self.serializer_options.get("depth", 0))
+
+        # If Process fields are provided, override the user supplied depth
+        if requested_fields:
+            self.depth = max((field.count('__') for field in requested_fields), default=0) + 1
         
         # Get the raw field map
         self.read_fields_map = self._get_operation_field_map(
@@ -171,7 +175,7 @@ class ASTParser:
             
         Returns:
             Dict[str, Set[str]]: Fields map with model names as keys and sets of field names as values
-        """        
+        """
         # Build a fields map specific to this operation type
         fields_map = self._get_depth_based_fields(
             orm_provider=self.engine, 
