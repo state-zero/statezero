@@ -14,7 +14,6 @@ from ormbridge.core.classes import ModelSummaryRepresentation
 from ormbridge.core.interfaces import AbstractDataSerializer
 from ormbridge.core.types import RequestType
 
-_SERIALIZATION_CONTEXT = {'initial_depth': 0}
 
 def get_custom_serializer(field_class: Type) -> Optional[Type[serializers.Field]]:
     """
@@ -444,9 +443,6 @@ class DRFDynamicSerializer(AbstractDataSerializer):
 
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
-
-        # Set the initial depth
-        _SERIALIZATION_CONTEXT = {'initial_depth': depth}
         
         serializer = self._serialize(
             data=data, 
