@@ -53,87 +53,6 @@ def get_custom_serializer(field_class: Type) -> Optional[Type[serializers.Field]
     if serializer_path:
         return import_string(serializer_path)
     return None
-
-class RelatedFieldWithRepr(serializers.RelatedField):
-    """
-    A custom related field that returns:
-      - A minimal representation (primary key, repr, img, model_name) when depth == 0.
-      - An expanded representation (via a nested DynamicModelSerializer) when depth > 0.
-
-    For expanded representations, it calls `log_dependency` on the parent serializer.
-    """
-
-    def __init__(self, *args, **kwargs):
-        self.depth = kwargs.pop("depth", 0)
-        super().__init__(*args, **kwargs)
-
-    def to_representation(self, value):
-        model_name = config.orm_provider.get_model_name(value.__class__)
-        
-        # Use the extracted function to determine if we should expand
-        allowed_fields = extract_fields(model_name=model_name)
-        
-        if allowed_fields:
-            return self._expanded_representation(value)
-        else:
-            return self._minimal_representation(value)
-
-
-    def _minimal_representation(self, instance):
-        # Determine the primary key field from the model class (default to "id" if not provided)
-        pk_field = instance._meta.pk.name
-        img_repr = instance.__img__() if hasattr(instance, "__img__") else None
-        str_repr = str(instance)
-
-        rep = ModelSummaryRepresentation(
-            pk=getattr(instance, pk_field),
-            repr={"str": str_repr, "img": img_repr},
-            model_name=instance.__class__.__name__,
-            pk_field=pk_field,
-        )
-        return rep.to_dict()
-
-    def _expanded_representation(self, instance):
-        # Get the nearest parent serializer that implements log_dependency
-        serializer_parent = self.parent
-        if not hasattr(serializer_parent, "log_dependency") and hasattr(serializer_parent, "parent"):
-            serializer_parent = serializer_parent.parent
-        serializer_parent.log_dependency(instance, config.orm_provider.get_model_name)
-        
-        # Create serializer class
-        serializer_class = DynamicModelSerializer.for_model(
-            instance.__class__, 
-            depth=self.depth - 1
-        )
-
-        # Create serializer instance
-        serializer = serializer_class(
-            instance,
-            depth=self.depth - 1
-        )
-        
-        # Use the nested serializer's own caching mechanism
-        return serializer.data
-
-    def to_internal_value(self, data):
-        # If data is already a Django model instance, return it directly
-        if hasattr(data, '_meta'):  # This is how we can check if it's a Django model
-            return data
-            
-        # Use the model's actual pk field name  
-        pk_field = getattr(
-            self.queryset.model, "primaryKeyField", self.queryset.model._meta.pk.name
-        )
-        
-        # Handle dictionary or primitive value
-        pk = data.get(pk_field) if isinstance(data, dict) else data
-        try:
-            instance = self.queryset.get(**{pk_field: pk})
-        except self.queryset.model.DoesNotExist:
-            raise serializers.ValidationError(
-                {pk_field: f"Related object with {pk_field} {pk} does not exist."}
-            )
-        return instance
     
 def extract_fields(model_name:str=None) -> Set[str]:
     """
@@ -184,11 +103,82 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             name: field for name, field in self.fields.items() 
             if name in allowed_fields
         }
-
-    def get_repr(self, obj) -> Dict[str, Optional[str]]:
-        str_repr = str(obj)
+    
+    def get_repr(self, obj):
+        """
+        Returns a standard Repr of the model displayed in the model summary
+        """
+        pk_field = obj._meta.pk.name
         img_repr = obj.__img__() if hasattr(obj, "__img__") else None
-        return {"str": str_repr, "img": img_repr}
+        str_repr = str(obj)
+
+        # Return directly the repr dict that the test expects
+        return {
+            "str": str_repr,
+            "img": img_repr
+        }
+
+    def to_internal_value(self, data):
+        # If this is being used as a related field (not the root serializer)
+        if self.root != self:
+            # If data is already a Django model instance, return it directly
+            if hasattr(data, '_meta'):
+                return data
+                
+            # Get the primary key field
+            pk_field = self.Meta.model._meta.pk.name
+            
+            # Handle dictionary or primitive value
+            pk = data.get(pk_field) if isinstance(data, dict) else data
+            try:
+                instance = self.Meta.model.objects.get(**{pk_field: pk})
+                return instance
+            except self.Meta.model.DoesNotExist:
+                raise serializers.ValidationError({
+                    pk_field: f"Related object with {pk_field} {pk} does not exist."
+                })
+        
+        # Otherwise, use the standard deserialization
+        return super().to_internal_value(data)
+    
+    def create(self, validated_data):
+        """
+        Override create method to handle nested relationships.
+        Specifically extracts M2M relationships to set after instance creation.
+        """
+        many_to_many = {}
+        for field_name, field in self.fields.items():
+            if field_name in validated_data and isinstance(field, serializers.ListSerializer):
+                many_to_many[field_name] = validated_data.pop(field_name)
+        
+        # Create the instance with the remaining data
+        instance = super().create(validated_data)
+        
+        # Set many-to-many relationships after instance creation
+        for field_name, value in many_to_many.items():
+            field = getattr(instance, field_name)
+            field.set(value)
+        
+        return instance
+
+    def update(self, instance, validated_data):
+        """
+        Override update method to handle nested relationships.
+        """
+        many_to_many = {}
+        for field_name, field in self.fields.items():
+            if field_name in validated_data and isinstance(field, serializers.ListSerializer):
+                many_to_many[field_name] = validated_data.pop(field_name)
+        
+        # Update the instance with the remaining data
+        instance = super().update(instance, validated_data)
+        
+        # Update many-to-many relationships
+        for field_name, value in many_to_many.items():
+            field = getattr(instance, field_name)
+            field.set(value)
+        
+        return instance
 
     def to_representation(self, instance):
         """
@@ -220,6 +210,9 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             # For ForeignKey fields, register those as dependencies too
             for field in model._meta.get_fields():
                 # Skip fields that won't be presented
+                if not allowed_fields:
+                    break
+
                 if field.name not in allowed_fields:
                     continue
 
@@ -250,23 +243,35 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         
     @classmethod
     def _setup_relation_fields(cls, serializer_class, model, allowed_fields, depth):
-        """Configure relation fields to use RelatedFieldWithRepr."""
+        """Configure relation fields to use nested DynamicModelSerializer instances."""
         for field in model._meta.get_fields():
+            if allowed_fields is None:
+                break
+            
             # Skip fields that won't be presented
             if field.name not in allowed_fields:
                 continue
+            
             if getattr(field, "auto_created", False) and not field.concrete:
                 continue
                 
             if field.is_relation:
                 # Determine if this is a many-to-many or one-to-many field
                 is_many = field.many_to_many or field.one_to_many
-                serializer_class._declared_fields[field.name] = RelatedFieldWithRepr(
-                    queryset=field.related_model.objects.all(),
+                
+                # Create a serializer class for the related model
+                nested_serializer_class = cls.for_model(
+                    model=field.related_model, 
+                    depth=max(depth - 1, 0)
+                )
+                
+                # Set the nested serializer field
+                serializer_class._declared_fields[field.name] = nested_serializer_class(
+                    many=is_many,
+                    read_only=False,
                     required=not (field.null or field.blank),
-                    depth=depth,
                     allow_null=field.null,
-                    many=is_many
+                    depth=max(depth - 1, 0)
                 )
         return serializer_class
                 
@@ -348,7 +353,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         
         # Get allowed fields for this model
         model_name = config.orm_provider.get_model_name(model)
-        allowed_fields = extract_fields(model_name) or set()
+        allowed_fields = extract_fields(model_name)
         
         # Only proceed with field setup if we have allowed fields
         if allowed_fields:
