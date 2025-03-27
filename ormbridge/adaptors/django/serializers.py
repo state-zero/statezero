@@ -43,7 +43,6 @@ class RelatedFieldWithRepr(serializers.RelatedField):
     def __init__(self, *args, **kwargs):
         self.depth = kwargs.pop("depth", 0)
         self.fields_map = kwargs.pop("fields_map", {})
-        self.current_path = kwargs.pop("current_path", "")
         super().__init__(*args, **kwargs)
 
     def to_representation(self, value):
@@ -52,18 +51,14 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         # If field_name is None, this might be a nested instance of serialization
         field_name = getattr(self, 'field_name', None) or ""
         
-        # Build the new current path
-        new_path = f"{self.current_path}__{field_name}" if self.current_path else field_name
-        
         # Use the extracted function to determine if we should expand
         allowed_fields = extract_fields(
             fields_map=self.fields_map,
-            current_path=new_path,
             model_name=model_name
         )
         
         if allowed_fields:
-            return self._expanded_representation(value, new_path)
+            return self._expanded_representation(value)
         else:
             return self._minimal_representation(value)
 
@@ -82,25 +77,24 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         )
         return rep.to_dict()
 
-    def _expanded_representation(self, instance, current_path):
+    def _expanded_representation(self, instance):
         # Get the nearest parent serializer that implements log_dependency
         serializer_parent = self.parent
         if not hasattr(serializer_parent, "log_dependency") and hasattr(serializer_parent, "parent"):
             serializer_parent = serializer_parent.parent
         serializer_parent.log_dependency(instance, config.orm_provider.get_model_name)
         
-        # Create serializer class with current_path
+        # Create serializer class
         serializer_class = DynamicModelSerializer.for_model(
             instance.__class__, 
             depth=self.depth - 1,
             fields_map=self.fields_map
         )
         
-        # Create serializer instance with current_path
+        # Create serializer instance
         serializer = serializer_class(
             instance,
             depth=self.depth - 1,
-            current_path=current_path
         )
         
         # Use the nested serializer's own caching mechanism
@@ -136,15 +130,11 @@ class IndividualCachingListSerializer(serializers.ListSerializer):
     def to_representation(self, data):
         result: List[Any] = []
         # For each instance, create a new serializer instance and use its caching.
-        for item in data:
-            # Get current path from the child serializer
-            current_path = getattr(self.child, 'current_path', "")
-            
+        for item in data:            
             # Create the serializer without explicitly passing fields_map since it's at the class level
             serializer_instance = self.child.__class__(
                 instance=item, 
-                depth=getattr(self.child, 'depth', 0),
-                current_path=current_path
+                depth=getattr(self.child, 'depth', 0)
             )
             result.append(serializer_instance.cached_data())
         return result
@@ -155,14 +145,14 @@ class IndividualCachingListSerializer(serializers.ListSerializer):
         """
         return self.to_representation(self.instance)
     
-def extract_fields(fields_map: Dict[str, Set[str]], current_path:str="", model_name:str=None):
+def extract_fields(fields_map: Dict[str, Set[str]], depth: int=0, model_name:str=None):
     """
     Extract the set of fields that should be included based on the fields_map and current path.
     
     Args:
         fields_map (dict): Dictionary mapping model names to sets of field names,
                           or 'fields::' to a set of field paths
-        current_path (str): Current path in the nested structure (e.g. "home__address")
+        depth (int): The current depth
         model_name (str): Optional model name for model-based filtering
         
     Returns:
@@ -171,17 +161,15 @@ def extract_fields(fields_map: Dict[str, Set[str]], current_path:str="", model_n
     # Check if we have path-based filtering
     if 'fields::' in fields_map:
         direct_fields = set()
-        
-        prefix = current_path + "__" if current_path else ""
-        
+        depth_travelled = _SERIALIZATION_CONTEXT.get("initial_depth") - depth
+
         for path in fields_map['fields::']:
-            # If the path starts with our prefix
-            if path.startswith(prefix):
-                # Remove the prefix and get the first segment
-                remaining = path[len(prefix):]
-                if remaining:
-                    field = remaining.split("__")[0]
-                    direct_fields.add(field)
+            # Split the path and check if it has enough components for our current depth
+            parts = path.split('__')
+            if len(parts) > depth_travelled:
+                # Get the field at the current depth level
+                field = parts[depth_travelled]
+                direct_fields.add(field)
         
         # Return direct fields if we found any
         if direct_fields:
@@ -220,7 +208,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         # Use the extracted function to get the allowed fields
         allowed_fields = extract_fields(
             fields_map=self.fields_map,
-            current_path=self.current_path,
+            depth=self.depth,
             model_name=model_name
         )
 
@@ -270,7 +258,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
 
         # Iterate over the model's fields.
         model_name = config.orm_provider.get_model_name(model)
-        allowed_fields = extract_fields(fields_map, "", model_name)
+        allowed_fields = extract_fields(fields_map, depth, model_name)
 
         # Iterate over the model's fields.
         if allowed_fields:
@@ -352,7 +340,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             
             # Get model name and allowed fields
             model_name = config.orm_provider.get_model_name(model)
-            allowed_fields = extract_fields(self.fields_map, "", model_name)
+            allowed_fields = extract_fields(self.fields_map, self.depth, model_name)
 
             # Register the instance itself as a dependency BEFORE serializing
             self.log_dependency(self.instance, get_model_name)
@@ -420,8 +408,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             depth=depth,
             cache_backend=config.cache_backend,
             dependency_store=config.dependency_store,
-            request=request,
-            current_path=""
+            request=request
         )
         return serializer
 
