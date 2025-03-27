@@ -124,7 +124,7 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         )
         
         # Use the nested serializer's own caching mechanism
-        return serializer.cached_data()
+        return serializer.data
 
     def to_internal_value(self, data):
         # If data is already a Django model instance, return it directly
@@ -146,38 +146,12 @@ class RelatedFieldWithRepr(serializers.RelatedField):
             )
         return instance
     
-class IndividualCachingListSerializer(serializers.ListSerializer):
-    """
-    A custom ListSerializer that caches individual instance representations.
-    Instead of caching the entire list as one unit, it instantiates the child serializer
-    for each instance and calls its cached_data() method.
-    """
-
-    def to_representation(self, data):
-        result: List[Any] = []
-        # For each instance, create a new serializer instance and use its caching.
-        for item in data:            
-            # Create the serializer without explicitly passing fields_map since it's at the class level
-            serializer_instance = self.child.__class__(
-                instance=item, 
-                depth=getattr(self.child, 'depth', 0)
-            )
-            result.append(serializer_instance.cached_data())
-        return result
-
-    def cached_data(self) -> Any:
-        """
-        Return the cached representation for the list by iterating over each instance.
-        """
-        return self.to_representation(self.instance)
-    
 def extract_fields(model_name:str=None) -> Set[str]:
     """
     Extract the set of fields that should be included based on the fields_map and current path.
     
     Args:
         fields_map (dict): Dictionary mapping model names to sets of field names,
-                          or 'fields::' to a set of field paths
         model_name (str): Optional model name for model-based filtering
         
     Returns:
@@ -227,15 +201,63 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         img_repr = obj.__img__() if hasattr(obj, "__img__") else None
         return {"str": str_repr, "img": img_repr}
 
+    def to_representation(self, instance):
+        """
+        Overridden to_representation that integrates caching directly.
+        """
+        model = self.Meta.model
+        model_config = registry.get_config(model)
+
+        # If cache_ttl is 0, caching is disabled for this model
+        if model_config.cache_ttl == 0:
+            return super().to_representation(instance)
+        
+        if self.cache_backend is not None:
+            get_model_name = config.orm_provider.get_model_name
+            cache_key = self.generate_cache_key(
+                model, instance, self.depth, get_current_fields_map(), get_model_name
+            )
+            cached = self.get_cached_result(cache_key)
+            if cached is not None:
+                return cached
+            
+            # Get model name and allowed fields
+            model_name = config.orm_provider.get_model_name(model)
+            allowed_fields = extract_fields(model_name)
+
+            # Register the instance itself as a dependency BEFORE serializing
+            self.log_dependency(instance, get_model_name)
+
+            # For ForeignKey fields, register those as dependencies too
+            for field in model._meta.get_fields():
+                # Skip fields that won't be presented
+                if field.name not in allowed_fields:
+                    continue
+
+                if (
+                    field.is_relation
+                    and field.concrete
+                    and not getattr(field, "auto_created", False)
+                ):
+                    related_instance = getattr(instance, field.name, None)
+                    if (
+                        related_instance
+                        and hasattr(related_instance, "pk")
+                        and related_instance.pk
+                    ):
+                        self.log_dependency(related_instance, get_model_name)
+
+            result = super().to_representation(instance)
+                
+            # Cache the result with the model-specific TTL
+            self.cache_result(cache_key, result, model_config.cache_ttl)
+            return result
+        else:
+            return super().to_representation(instance)
+
     class Meta:
         model = None  # To be set dynamically.
         fields = "__all__"
-        
-    @classmethod
-    def _setup_list_serializer(cls, serializer_class):
-        """Configure the list serializer for handling many=True efficiently."""
-        serializer_class.Meta.list_serializer_class = IndividualCachingListSerializer
-        return serializer_class
         
     @classmethod
     def _setup_relation_fields(cls, serializer_class, model, allowed_fields, depth):
@@ -335,9 +357,6 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             {"Meta": Meta}
         )
         
-        # Configure list serializer
-        serializer_class = cls._setup_list_serializer(serializer_class)
-        
         # Get allowed fields for this model
         model_name = config.orm_provider.get_model_name(model)
         allowed_fields = extract_fields(model_name) or set()
@@ -358,67 +377,6 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         serializer_class = cls._setup_computed_fields(serializer_class, model)
         
         return serializer_class
-
-    def cached_data(self) -> Any:
-        """
-        Return the serialized data.
-        If a cache backend is configured, first try to retrieve a cached result
-        using a key computed from the model, instance, depth, and fields_map.
-        If not found, compute the serialization, cache it (registering all dependencies
-        that were logged during this serialization pass), and return the result.
-        
-        Respects model-specific cache TTL settings from the registry.
-        """
-        model = self.Meta.model
-        model_config = registry.get_config(model)
-
-        # If cache_ttl is 0, caching is disabled for this model
-        if model_config.cache_ttl == 0:
-            return self.data
-        
-        if self.cache_backend is not None:
-            get_model_name = config.orm_provider.get_model_name
-            cache_key = self.generate_cache_key(
-                model, self.instance, self.depth, get_current_fields_map(), get_model_name
-            )
-            cached = self.get_cached_result(cache_key)
-            if cached is not None:
-                return cached
-            
-            # Get model name and allowed fields
-            model_name = config.orm_provider.get_model_name(model)
-            allowed_fields = extract_fields(model_name)
-
-            # Register the instance itself as a dependency BEFORE serializing
-            self.log_dependency(self.instance, get_model_name)
-
-            # For ForeignKey fields, register those as dependencies too
-            for field in model._meta.get_fields():
-                # Skip fields that won't be presented
-                if field.name not in allowed_fields:
-                    continue
-
-                if (
-                    field.is_relation
-                    and field.concrete
-                    and not getattr(field, "auto_created", False)
-                ):
-                    related_instance = getattr(self.instance, field.name, None)
-                    if (
-                        related_instance
-                        and hasattr(related_instance, "pk")
-                        and related_instance.pk
-                    ):
-                        self.log_dependency(related_instance, get_model_name)
-
-            result = self.data  # Trigger full serialization.
-                
-            # Cache the result with the model-specific TTL
-            self.cache_result(cache_key, result, model_config.cache_ttl)
-            return result
-        else:
-            return self.data
-
 
 class DRFDynamicSerializer(AbstractDataSerializer):
     """
@@ -488,7 +446,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 many=many, 
                 request=request
             )
-            return serializer.cached_data()
+            return serializer.data
 
     def deserialize(
         self,
