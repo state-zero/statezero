@@ -6,6 +6,8 @@ from django.conf import settings
 from django.db import models
 from django.utils.module_loading import import_string
 from rest_framework import serializers
+import threading
+from contextlib import contextmanager
 
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.core.caching import CachingMixin
@@ -14,6 +16,39 @@ from ormbridge.core.classes import ModelSummaryRepresentation
 from ormbridge.core.interfaces import AbstractDataSerializer
 from ormbridge.core.types import RequestType
 
+# Create a thread-local storage for the fields_map
+_thread_local = threading.local()
+
+@contextmanager
+def fields_map_context(fields_map):
+    """
+    Context manager that sets the fields_map for the current thread.
+    This allows all serializers created within this context to access
+    the same fields_map without explicit passing.
+    """
+    # Store the previous fields_map to restore it later
+    previous_fields_map = getattr(_thread_local, 'fields_map', None)
+    
+    # Set the new fields_map
+    _thread_local.fields_map = fields_map
+    
+    try:
+        yield
+    finally:
+        # Restore the previous fields_map
+        if previous_fields_map is not None:
+            _thread_local.fields_map = previous_fields_map
+        else:
+            # Remove the attribute if there was no previous fields_map
+            if hasattr(_thread_local, 'fields_map'):
+                delattr(_thread_local, 'fields_map')
+
+def get_current_fields_map():
+    """
+    Get the fields_map from the current thread context.
+    Returns an empty dict if no fields_map is set.
+    """
+    return getattr(_thread_local, 'fields_map', {})
 
 def get_custom_serializer(field_class: Type) -> Optional[Type[serializers.Field]]:
     """
@@ -41,28 +76,16 @@ class RelatedFieldWithRepr(serializers.RelatedField):
 
     def __init__(self, *args, **kwargs):
         self.depth = kwargs.pop("depth", 0)
-        self.fields_map = kwargs.pop("fields_map", {})
-        self.current_path = kwargs.pop("current_path", "")
         super().__init__(*args, **kwargs)
 
     def to_representation(self, value):
         model_name = config.orm_provider.get_model_name(value.__class__)
         
-        # If field_name is None, this might be a nested instance of serialization
-        field_name = getattr(self, 'field_name', None) or ""
-        
-        # Build the new current path
-        new_path = f"{self.current_path}__{field_name}" if self.current_path else field_name
-        
         # Use the extracted function to determine if we should expand
-        allowed_fields = extract_fields(
-            fields_map=self.fields_map,
-            current_path=new_path,
-            model_name=model_name
-        )
+        allowed_fields = extract_fields(model_name=model_name)
         
         if allowed_fields:
-            return self._expanded_representation(value, new_path)
+            return self._expanded_representation(value)
         else:
             return self._minimal_representation(value)
 
@@ -81,25 +104,23 @@ class RelatedFieldWithRepr(serializers.RelatedField):
         )
         return rep.to_dict()
 
-    def _expanded_representation(self, instance, current_path):
+    def _expanded_representation(self, instance):
         # Get the nearest parent serializer that implements log_dependency
         serializer_parent = self.parent
         if not hasattr(serializer_parent, "log_dependency") and hasattr(serializer_parent, "parent"):
             serializer_parent = serializer_parent.parent
         serializer_parent.log_dependency(instance, config.orm_provider.get_model_name)
         
-        # Create serializer class with current_path
+        # Create serializer class
         serializer_class = DynamicModelSerializer.for_model(
             instance.__class__, 
-            depth=self.depth - 1,
-            fields_map=self.fields_map
+            depth=self.depth - 1
         )
-        
-        # Create serializer instance with current_path
+
+        # Create serializer instance
         serializer = serializer_class(
             instance,
-            depth=self.depth - 1,
-            current_path=current_path
+            depth=self.depth - 1
         )
         
         # Use the nested serializer's own caching mechanism
@@ -135,15 +156,11 @@ class IndividualCachingListSerializer(serializers.ListSerializer):
     def to_representation(self, data):
         result: List[Any] = []
         # For each instance, create a new serializer instance and use its caching.
-        for item in data:
-            # Get current path from the child serializer
-            current_path = getattr(self.child, 'current_path', "")
-            
+        for item in data:            
             # Create the serializer without explicitly passing fields_map since it's at the class level
             serializer_instance = self.child.__class__(
                 instance=item, 
-                depth=getattr(self.child, 'depth', 0),
-                current_path=current_path
+                depth=getattr(self.child, 'depth', 0)
             )
             result.append(serializer_instance.cached_data())
         return result
@@ -154,74 +171,43 @@ class IndividualCachingListSerializer(serializers.ListSerializer):
         """
         return self.to_representation(self.instance)
     
-def extract_fields(fields_map: Dict[str, Set[str]], current_path:str="", model_name:str=None):
+def extract_fields(model_name:str=None) -> Set[str]:
     """
     Extract the set of fields that should be included based on the fields_map and current path.
     
     Args:
         fields_map (dict): Dictionary mapping model names to sets of field names,
                           or 'fields::' to a set of field paths
-        current_path (str): Current path in the nested structure (e.g. "home__address")
         model_name (str): Optional model name for model-based filtering
         
     Returns:
         set: Set of field names that should be included, or None if all fields should be included
     """
-    # Check if we have path-based filtering
-    if 'fields::' in fields_map:
-        direct_fields = set()
-        
-        prefix = current_path + "__" if current_path else ""
-        
-        for path in fields_map['fields::']:
-            # If the path starts with our prefix
-            if path.startswith(prefix):
-                # Remove the prefix and get the first segment
-                remaining = path[len(prefix):]
-                if remaining:
-                    field = remaining.split("__")[0]
-                    direct_fields.add(field)
-        
-        # Return direct fields if we found any
-        if direct_fields:
-            return direct_fields
-    
-    # Fall back to standard model-based filtering
-    if 'fields::' not in fields_map:
-        return fields_map.get(model_name)
-    
-    # If no filtering was specified, return None
-    return None
+    return get_current_fields_map().get(model_name)
 
 class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
     """
     A dynamic serializer that adds two extra read-only fields ('repr' and 'img'),
     replaces relation fields with RelatedFieldWithRepr, and injects additional computed
     fields from the registry.
-
-    Fields are filtered based on a provided fields_map.
     """
 
     repr = serializers.SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         self.depth = kwargs.pop("depth", 0)
-        self.current_path = kwargs.pop("current_path", "")
         self.cache_backend = kwargs.pop("cache_backend", config.cache_backend)
         self.dependency_store = kwargs.pop("dependency_store", config.dependency_store)
         self.request = kwargs.pop("request", None)
+
         super().__init__(*args, **kwargs)
 
         # Get the model name
         model_name = config.orm_provider.get_model_name(self.Meta.model)
         pk_field = self.Meta.model._meta.pk.name
-        
+
         # Use the extracted function to get the allowed fields
-        allowed_fields = extract_fields(
-            fields_map=self.fields_map,
-            current_path=self.current_path,
-            model_name=model_name
-        )
+        allowed_fields = extract_fields(model_name=model_name)
 
         # Allowed fields must exist
         allowed_fields = allowed_fields or set()
@@ -244,83 +230,133 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
     class Meta:
         model = None  # To be set dynamically.
         fields = "__all__"
-
+        
     @classmethod
-    def for_model(cls, model: Type[models.Model], depth: int = 0, fields_map: Optional[Dict[str, Set[str]]] = None):
-        # Ensure we have a fields_map, even if empty
-        if fields_map is None:
-            fields_map = {}
-
-        pk_field = model._meta.pk.name
-            
-        # Dynamically create a Meta inner class.
-        Meta = type("Meta", (), {"model": model, "fields": "__all__", "read_only_fields": (pk_field,) })
-        serializer_class = type(
-            f"Dynamic{model.__name__}Serializer", 
-            (cls,), 
-            {
-                "Meta": Meta,
-                # Set fields_map as a class attribute
-                "fields_map": fields_map
-            }
-        )
-        # Use the custom list serializer so that many=True caches individual instances.
+    def _setup_list_serializer(cls, serializer_class):
+        """Configure the list serializer for handling many=True efficiently."""
         serializer_class.Meta.list_serializer_class = IndividualCachingListSerializer
-
-        # Iterate over the model's fields.
-        model_name = config.orm_provider.get_model_name(model)
-        allowed_fields = extract_fields(fields_map, "", model_name)
-
-        # Iterate over the model's fields.
-        if allowed_fields:
-            for field in model._meta.get_fields():
-                # Skip fields that won't be presented
-                if field.name not in allowed_fields:
-                    continue
-                if getattr(field, "auto_created", False) and not field.concrete:
-                    continue
-                if field.is_relation:
-                    # Determine if this is a many-to-many or one-to-many field
-                    # ManyToManyField, ManyToManyRel, ManyToOneRel
-                    is_many = field.many_to_many or field.one_to_many
-                    serializer_class._declared_fields[field.name] = RelatedFieldWithRepr(
-                        queryset=field.related_model.objects.all(),
-                        required=not (field.null or field.blank),
-                        depth=depth,
-                        allow_null=field.null,
-                        many=is_many,
-                        fields_map=fields_map
-                    )
-                else:
-                    custom_field_serializer = get_custom_serializer(field.__class__)
-                    if custom_field_serializer:
-                        serializer_class.serializer_field_mapping[field.__class__] = (
-                            custom_field_serializer
-                        )
-
-        # Inject additional computed fields from the registry, if any.
+        return serializer_class
+        
+    @classmethod
+    def _setup_relation_fields(cls, serializer_class, model, allowed_fields, depth):
+        """Configure relation fields to use RelatedFieldWithRepr."""
+        for field in model._meta.get_fields():
+            # Skip fields that won't be presented
+            if field.name not in allowed_fields:
+                continue
+            if getattr(field, "auto_created", False) and not field.concrete:
+                continue
+                
+            if field.is_relation:
+                # Determine if this is a many-to-many or one-to-many field
+                is_many = field.many_to_many or field.one_to_many
+                serializer_class._declared_fields[field.name] = RelatedFieldWithRepr(
+                    queryset=field.related_model.objects.all(),
+                    required=not (field.null or field.blank),
+                    depth=depth,
+                    allow_null=field.null,
+                    many=is_many
+                )
+        return serializer_class
+                
+    @classmethod
+    def _setup_custom_serializers(cls, serializer_class, model, allowed_fields):
+        """Configure custom serializers for non-relation fields."""
+        for field in model._meta.get_fields():
+            # Skip fields that won't be presented
+            if field.name not in allowed_fields:
+                continue
+            if getattr(field, "auto_created", False) and not field.concrete:
+                continue
+                
+            if not field.is_relation:
+                custom_field_serializer = get_custom_serializer(field.__class__)
+                if custom_field_serializer:
+                    serializer_class.serializer_field_mapping[field.__class__] = custom_field_serializer
+        return serializer_class
+        
+    @classmethod
+    def _setup_computed_fields(cls, serializer_class, model):
+        """Set up additional computed fields from the model registry."""
         try:
             model_config = registry.get_config(model)
         except ValueError:
-            model_config = None
-
+            return serializer_class  # No model config, return unchanged
+            
         mapping = serializers.ModelSerializer.serializer_field_mapping
+        
         for additional_field in model_config.additional_fields:
             drf_field_class = mapping.get(type(additional_field.field))
+            if not drf_field_class:
+                continue
+                
             field_kwargs = {"read_only": True}
             if additional_field.title:
                 field_kwargs["label"] = additional_field.title
+                
             # Pass along required attributes based on field type.
             if isinstance(additional_field.field, models.DecimalField):
                 field_kwargs["max_digits"] = additional_field.field.max_digits
                 field_kwargs["decimal_places"] = additional_field.field.decimal_places
             elif isinstance(additional_field.field, models.CharField):
                 field_kwargs["max_length"] = additional_field.field.max_length
+                
             # Instantiate the serializer field.
             serializer_field = drf_field_class(**field_kwargs)
-            # Set the source attribute so that the serializer looks for this computed field.
             serializer_field.source = additional_field.name
             serializer_class._declared_fields[additional_field.name] = serializer_field
+            
+        return serializer_class
+
+    @classmethod
+    def for_model(cls, model: Type[models.Model], depth: int = 0):
+        """
+        Create a DynamicModelSerializer class for the given model with the specified depth.
+        This configures all serialization behavior including:
+        - Setting up the Meta class
+        - Configuring list serialization
+        - Setting up relation fields
+        - Registering custom serializers
+        - Adding computed fields from the registry
+        """
+        pk_field = model._meta.pk.name
+            
+        # Dynamically create a Meta inner class
+        Meta = type("Meta", (), {
+            "model": model, 
+            "fields": "__all__", 
+            "read_only_fields": (pk_field,)
+        })
+        
+        # Create the serializer class
+        serializer_class = type(
+            f"Dynamic{model.__name__}Serializer", 
+            (cls,), 
+            {"Meta": Meta}
+        )
+        
+        # Configure list serializer
+        serializer_class = cls._setup_list_serializer(serializer_class)
+        
+        # Get allowed fields for this model
+        model_name = config.orm_provider.get_model_name(model)
+        allowed_fields = extract_fields(model_name) or set()
+        
+        # Only proceed with field setup if we have allowed fields
+        if allowed_fields:
+            # Set up relation fields with RelatedFieldWithRepr
+            serializer_class = cls._setup_relation_fields(
+                serializer_class, model, allowed_fields, depth
+            )
+            
+            # Register custom serializers for model fields
+            serializer_class = cls._setup_custom_serializers(
+                serializer_class, model, allowed_fields
+            )
+        
+        # Add computed fields from the registry
+        serializer_class = cls._setup_computed_fields(serializer_class, model)
+        
         return serializer_class
 
     def cached_data(self) -> Any:
@@ -343,7 +379,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         if self.cache_backend is not None:
             get_model_name = config.orm_provider.get_model_name
             cache_key = self.generate_cache_key(
-                model, self.instance, self.depth, self.fields_map, get_model_name
+                model, self.instance, self.depth, get_current_fields_map(), get_model_name
             )
             cached = self.get_cached_result(cache_key)
             if cached is not None:
@@ -351,7 +387,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
             
             # Get model name and allowed fields
             model_name = config.orm_provider.get_model_name(model)
-            allowed_fields = extract_fields(self.fields_map, "", model_name)
+            allowed_fields = extract_fields(model_name)
 
             # Register the instance itself as a dependency BEFORE serializing
             self.log_dependency(self.instance, get_model_name)
@@ -408,8 +444,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         # Create the serializer class with fields_map as a class attribute
         serializer_class = DynamicModelSerializer.for_model(
             model=model, 
-            depth=depth, 
-            fields_map=fields_map
+            depth=depth
         )
         
         # Pass explicit parameters without fields_map
@@ -419,9 +454,9 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             depth=depth,
             cache_backend=config.cache_backend,
             dependency_store=config.dependency_store,
-            request=request,
-            current_path=""
+            request=request
         )
+        explore_serializer_structure(serializer)
         return serializer
 
     def serialize(
@@ -444,15 +479,16 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
         
-        serializer = self._serialize(
-            data=data, 
-            model=model,
-            depth=depth,
-            fields_map=fields_map, 
-            many=many, 
-            request=request
-        )
-        return serializer.cached_data()
+        with fields_map_context(fields_map):
+            serializer = self._serialize(
+                data=data, 
+                model=model,
+                depth=depth,
+                fields_map=fields_map, 
+                many=many, 
+                request=request
+            )
+            return serializer.cached_data()
 
     def deserialize(
         self,
@@ -465,32 +501,33 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
 
-        # Create serializer class with fields_map as a class attribute
-        serializer_class = DynamicModelSerializer.for_model(
-            model=model, 
-            depth=0, 
-            fields_map=fields_map
-        )
+        # Use the context manager for the duration of deserialization
+        with fields_map_context(fields_map):
+            # Create serializer class
+            serializer_class = DynamicModelSerializer.for_model(
+                model=model, 
+                depth=0
+            )
 
-        model_config = registry.get_config(model)
+            model_config = registry.get_config(model)
 
-        if model_config.pre_hooks:
-            for hook in model_config.pre_hooks:
-                data = hook(data, request=request)
+            if model_config.pre_hooks:
+                for hook in model_config.pre_hooks:
+                    data = hook(data, request=request)
 
-        # Create serializer without passing fields_map
-        serializer = serializer_class(
-            data=data, 
-            partial=partial,
-            request=request
-        )
-        serializer.is_valid(raise_exception=True)
-        validated_data = serializer.validated_data
+            # Create serializer
+            serializer = serializer_class(
+                data=data, 
+                partial=partial,
+                request=request
+            )
+            serializer.is_valid(raise_exception=True)
+            validated_data = serializer.validated_data
 
-        if model_config.post_hooks:
-            for hook in model_config.post_hooks:
-                validated_data = hook(validated_data, request=request)
-        return validated_data
+            if model_config.post_hooks:
+                for hook in model_config.post_hooks:
+                    validated_data = hook(validated_data, request=request)
+            return validated_data
     
     def save(
         self, 
@@ -526,23 +563,24 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         # Create an unrestricted fields map
         unrestricted_fields_map = {model_name: all_fields}
         
-        # Create serializer class with fields_map as a class attribute
-        serializer_class = DynamicModelSerializer.for_model(
-            model=model, 
-            depth=0,  # No need for depth during save
-            fields_map=unrestricted_fields_map  # Use all fields
-        )
-        
-        # Create serializer without passing fields_map
-        serializer = serializer_class(
-            instance=instance,  # Will be None for creation
-            data=data,
-            partial=partial if instance else False,  # partial only makes sense for updates
-            request=request
-        )
-        
-        # Validate the data
-        serializer.is_valid(raise_exception=True)
-        
-        # Save and return the instance
-        return serializer.save()
+        # Use the context manager with the unrestricted fields map
+        with fields_map_context(unrestricted_fields_map):
+            # Create serializer class
+            serializer_class = DynamicModelSerializer.for_model(
+                model=model, 
+                depth=0  # No need for depth during save
+            )
+            
+            # Create serializer
+            serializer = serializer_class(
+                instance=instance,  # Will be None for creation
+                data=data,
+                partial=partial if instance else False,  # partial only makes sense for updates
+                request=request
+            )
+            
+            # Validate the data
+            serializer.is_valid(raise_exception=True)
+            
+            # Save and return the instance
+            return serializer.save()
