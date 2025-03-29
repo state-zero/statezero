@@ -138,7 +138,7 @@ class RelatedFieldWithReprTests(TestCase):
         self.related = DummyRelatedModel.objects.create(name="TestRelated")
 
     def test_to_representation_minimal_single(self):
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=1)
+        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0)
         rep = field.to_representation(self.related)
         expected = {
             "id": self.related.pk,
@@ -150,7 +150,7 @@ class RelatedFieldWithReprTests(TestCase):
         r1 = DummyRelatedModel.objects.create(name="Test1")
         r2 = DummyRelatedModel.objects.create(name="Test2")
         qs = DummyRelatedModel.objects.all().filter(pk__in=[r1.pk, r2.pk])
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=1, many=True)
+        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0, many=True)
         rep = field.to_representation(qs)
         expected = [
             {"id": r1.pk, "repr": {"str": str(r1), "img": r1.__img__()}},
@@ -199,7 +199,7 @@ class RelatedFieldWithReprTests(TestCase):
 
     def test_to_internal_value(self):
         related = self.related
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=1)
+        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0)
         data = {"id": related.pk}
         result = field.to_internal_value(data)
         self.assertEqual(result, related)
@@ -228,7 +228,7 @@ class DynamicModelSerializerTests(TestCase):
         self.assertNotIn("related", serializer.fields)
 
     def test_get_repr_and_get_img(self):
-        SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=1)
+        SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=0)
         serializer = SerializerClass(instance=self.dummy, context={"fields_map": {}})
         self.assertEqual(serializer.get_repr(self.dummy)['str'], str(self.dummy))
         self.assertEqual(serializer.get_repr(self.dummy)['img'], self.dummy.__img__())
@@ -257,7 +257,7 @@ class DynamicModelSerializerTests(TestCase):
             dummy_config if model == DummyModel else None
         )
 
-        SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=1)
+        SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=0)
         serializer = SerializerClass(instance=self.dummy, context={"fields_map": {}})
         self.assertIn("computed", serializer.fields)
         data = serializer.data
@@ -279,7 +279,7 @@ class DynamicModelSerializerTests(TestCase):
         # First serialization should store a value in the dummy cache.
         serializer_wrapper = DRFDynamicSerializer()
         data1 = serializer_wrapper.serialize(
-            self.dummy, DummyModel, depth=1, fields_map={}
+            self.dummy, DummyModel, depth=0, fields_map={}
         )
         # Check that a cache entry exists in the global config.
         cache_keys = list(config.cache_backend.store.keys())
@@ -289,7 +289,7 @@ class DynamicModelSerializerTests(TestCase):
         self.dummy.save()
         # Second call should return the cached result (thus still showing the old name).
         data2 = serializer_wrapper.serialize(
-            self.dummy, DummyModel, depth=1, fields_map={}
+            self.dummy, DummyModel, depth=0, fields_map={}
         )
         self.assertEqual(data1, data2)
 
@@ -300,7 +300,7 @@ class DynamicModelSerializerTests(TestCase):
         d2 = DummyModel.objects.create(name="Test2", related=r2)
         serializer_wrapper = DRFDynamicSerializer()
         data = serializer_wrapper.serialize(
-            [d1, d2], DummyModel, depth=1, fields_map={}, many=True
+            [d1, d2], DummyModel, depth=0, fields_map={}, many=True
         )
         self.assertIsInstance(data, list)
         self.assertEqual(len(data), 2)
@@ -320,7 +320,7 @@ class DRFDynamicSerializerTests(TestCase):
     def test_serialize_single_object_minimal(self):
         serializer_wrapper = DRFDynamicSerializer()
         data = serializer_wrapper.serialize(
-            self.dummy, DummyModel, depth=1, fields_map={}
+            self.dummy, DummyModel, depth=0, fields_map={}
         )
         self.assertEqual(data["id"], self.dummy.pk)
         self.assertEqual(data["name"], self.dummy.name)
@@ -336,7 +336,7 @@ class DRFDynamicSerializerTests(TestCase):
         d2 = DummyModel.objects.create(name="Test2", related=r2)
         serializer_wrapper = DRFDynamicSerializer()
         data = serializer_wrapper.serialize(
-            [d1, d2], DummyModel, depth=1, fields_map={}, many=True
+            [d1, d2], DummyModel, depth=0, fields_map={}, many=True
         )
         self.assertIsInstance(data, list)
         self.assertEqual(len(data), 2)
@@ -431,9 +431,9 @@ class RelatedModelFetchingTests(TestCase):
         level2 = DeepModelLevel2.objects.create(name="Depth Level2", level3=level3)
         level1 = DeepModelLevel1.objects.create(name="Depth Level1", level2=level2)
 
-        # Serialize with depth=1: Nested related field should be minimal
-        Serializer0 = DynamicModelSerializer.for_model(DeepModelLevel1, depth=1)
-        serializer0 = Serializer0(instance=level1, context={"fields_map": {}}, depth=1)
+        # Serialize with depth=0: Nested related field should be minimal
+        Serializer0 = DynamicModelSerializer.for_model(DeepModelLevel1, depth=0)
+        serializer0 = Serializer0(instance=level1, context={"fields_map": {}}, depth=0)
         data0 = serializer0.data
 
         # Serialize with depth=1: The first level (i.e. level2) should now be expanded
@@ -446,7 +446,7 @@ class RelatedModelFetchingTests(TestCase):
         serializer2 = Serializer2(instance=level1, context={"fields_map": {}}, depth=2)
         data2 = serializer2.data
 
-        # Check for depth=1: level2 should be represented minimally
+        # Check for depth=0: level2 should be represented minimally
         self.assertIsInstance(data0.get("level2"), dict)
         # For a minimal representation, we expect only 'id', 'repr', and 'img' – no 'name'
         self.assertIn("id", data0["level2"])

@@ -41,9 +41,6 @@ class AppConfig(ABC):
     orm_provider: AbstractORMProvider = None
     search_provider: AbstractSearchProvider = None
 
-    # Query optimizers
-    selected_fields_query_optimizer = None
-
     def __init__(self) -> None:
         self._orm_provider: Optional[AbstractORMProvider] = None
 

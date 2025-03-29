@@ -127,9 +127,8 @@ class DjangoORMAdapterTest(TestCase):
         self.serializer = DRFDynamicSerializer()
 
     def test_create(self):
-        fields_map = {"django_app.dummymodel": ['name', 'value', 'related']}
         data = {"name": "Dummy3", "value": 30, "related": self.related1}
-        instance = self.adapter.create(data, self.serializer, req=self.dummy_req, fields_map=fields_map)
+        instance = self.adapter.create(data, self.serializer, req=self.dummy_req)
         self.assertEqual(instance.name, "Dummy3")
         self.assertEqual(instance.value, 30)
 
@@ -174,16 +173,15 @@ class DjangoORMAdapterTest(TestCase):
             "lookup": {"name": "Dummy4"},
             "defaults": {"value": 40, "related": self.related1},
         }
-        fields_map = {"django_app.dummymodel": ['name', 'value', 'related']}
         self.adapter.set_queryset(DummyModel.objects.all())
-        instance, created = self.adapter.get_or_create(ast, self.serializer, self.dummy_req, [self.always_allow], fields_map)
+        instance, created = self.adapter.get_or_create(ast, self.serializer, self.dummy_req, [self.always_allow])
         self.assertTrue(created, "Instance should be created because it did not exist.")
         self.assertEqual(
             instance.name, "Dummy4", "Instance name should match the lookup value."
         )
 
         # Test get_or_create when the instance exists.
-        instance2, created2 = self.adapter.get_or_create(ast, self.serializer, self.dummy_req, [self.always_allow], fields_map)
+        instance2, created2 = self.adapter.get_or_create(ast, self.serializer, self.dummy_req, [self.always_allow])
         self.assertFalse(
             created2, "Instance should not be created again when it already exists."
         )
@@ -197,10 +195,9 @@ class DjangoORMAdapterTest(TestCase):
             "lookup": {"name": "Dummy5"},
             "defaults": {"value": 55, "related": self.related2},
         }
-        fields_map = {"django_app.dummymodel": ['name', 'value', 'related']}
         self.adapter.set_queryset(DummyModel.objects.all())
         instance, created = self.adapter.update_or_create(
-            ast, self.dummy_req, self.serializer, [self.always_allow], fields_map, fields_map 
+            ast, self.dummy_req, self.serializer, [self.always_allow]
         )
         self.assertTrue(
             created, "Instance should be created since it does not exist yet."
@@ -212,7 +209,7 @@ class DjangoORMAdapterTest(TestCase):
         # Now update the instance.
         ast["defaults"]["value"] = 100
         instance2, created2 = self.adapter.update_or_create(
-            ast, self.dummy_req, self.serializer, [self.always_allow], fields_map, fields_map
+            ast, self.dummy_req, self.serializer, [self.always_allow]
         )
         self.assertFalse(
             created2, "Instance should not be created if it already exists."
@@ -268,10 +265,9 @@ class DjangoORMAdapterTest(TestCase):
             "filter": {"type": "filter", "conditions": {"id": instance.id}},
             "data": {"value": 555},
         }
-        fields_map = {"django_app.dummymodel": ['name', 'value', 'related']}
         # Call the instance-based update.
         updated_instance = self.adapter.update_instance(
-            ast, self.dummy_req, [self.always_allow], self.serializer, fields_map
+            ast, self.dummy_req, [self.always_allow], self.serializer
         )
 
         self.assertEqual(updated_instance.value, 555)
