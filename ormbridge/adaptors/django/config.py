@@ -6,6 +6,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 import warnings
 
+from ormbridge.adaptors.django.query_optimizer import optimize_query
 from ormbridge.adaptors.django.context_manager import query_timeout
 from ormbridge.core.config import AppConfig, Registry
 
@@ -35,6 +36,7 @@ class DjangoLocalConfig(AppConfig):
         self.schema_generator = DjangoSchemaGenerator()
         self.orm_provider = DjangoORMAdapter()
         self.context_manager = query_timeout
+        self.selected_fields_query_optimizer = optimize_query
 
         # Set up cache backends based on settings
         cache_config = getattr(settings, 'ORMBRIDGE_CACHE', {})

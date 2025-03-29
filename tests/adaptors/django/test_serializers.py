@@ -161,9 +161,9 @@ class RelatedFieldWithReprTests(TestCase):
         self.assertEqual(rep_sorted, expected_sorted)
 
     def test_to_representation_expanded_single(self):
-        SerializerClass = DynamicModelSerializer.for_model(DummyRelatedModel, depth=1)
+        SerializerClass = DynamicModelSerializer.for_model(DummyRelatedModel, depth=0)
         parent = SerializerClass(instance=self.related, context={"fields_map": {}})
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=1)
+        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0)
         field.bind("related", parent)
         rep = field.to_representation(self.related)
         expected = {
@@ -177,9 +177,9 @@ class RelatedFieldWithReprTests(TestCase):
         r1 = DummyRelatedModel.objects.create(name="Test1")
         r2 = DummyRelatedModel.objects.create(name="Test2")
         qs = DummyRelatedModel.objects.filter(pk__in=[r1.pk, r2.pk])
-        SerializerClass = DynamicModelSerializer.for_model(DummyRelatedModel, depth=1)
+        SerializerClass = DynamicModelSerializer.for_model(DummyRelatedModel, depth=0)
         parent = SerializerClass(instance=r1, context={"fields_map": {}})
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=1, many=True)
+        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0, many=True)
         field.bind("related", parent)
         rep = field.to_representation(qs)
         expected_r1 = {
@@ -219,9 +219,9 @@ class DynamicModelSerializerTests(TestCase):
         fields_map: Dict[str, Set[str]] = {
             "django_app.dummymodel": {"name", "computed"}
         }
-        SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=1)
+        SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=0)
         serializer = SerializerClass(
-            instance=self.dummy, context={"fields_map": fields_map}, depth=1
+            instance=self.dummy, context={"fields_map": fields_map}, depth=0
         )
         self.assertIn("name", serializer.fields)
         self.assertNotIn("id", serializer.fields)
@@ -265,9 +265,9 @@ class DynamicModelSerializerTests(TestCase):
         registry.get_config = original_get_config
 
     def test_dependency_logging_expanded(self):
-        SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=1)
+        SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=0)
         serializer = SerializerClass(
-            instance=self.dummy, context={"fields_map": {}}, depth=1
+            instance=self.dummy, context={"fields_map": {}}, depth=0
         )
         _ = serializer.data
         dep_registry = serializer.context.get("dependency_registry", {})
@@ -361,9 +361,9 @@ class DependencyLoggingTests(TestCase):
     def test_dependency_logging_on_dummy_model(self):
         related = DummyRelatedModel.objects.create(name="DepTestRelated")
         dummy = DummyModel.objects.create(name="DepTestDummy", related=related)
-        SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=1)
+        SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=0)
         serializer = SerializerClass(
-            instance=dummy, context={"fields_map": {}}, depth=1
+            instance=dummy, context={"fields_map": {}}, depth=0
         )
         _ = serializer.data
         dep_registry: Dict = serializer.context.get("dependency_registry", {})
@@ -414,8 +414,8 @@ class DependencyLoggingTests(TestCase):
             money_field=Decimal("10.50"),
             related=level1,
         )
-        SerializerClass = DynamicModelSerializer.for_model(ComprehensiveModel, depth=1)
-        serializer = SerializerClass(instance=comp, context={"fields_map": {}}, depth=1)
+        SerializerClass = DynamicModelSerializer.for_model(ComprehensiveModel, depth=0)
+        serializer = SerializerClass(instance=comp, context={"fields_map": {}}, depth=0)
         _ = serializer.data
         dep_registry: Dict = serializer.context.get("dependency_registry", {})
 
@@ -436,9 +436,9 @@ class RelatedModelFetchingTests(TestCase):
         serializer0 = Serializer0(instance=level1, context={"fields_map": {}}, depth=0)
         data0 = serializer0.data
 
-        # Serialize with depth=1: The first level (i.e. level2) should now be expanded
-        Serializer1 = DynamicModelSerializer.for_model(DeepModelLevel1, depth=1)
-        serializer1 = Serializer1(instance=level1, context={"fields_map": {}}, depth=1)
+        # Serialize with depth=0: The first level (i.e. level2) should now be expanded
+        Serializer1 = DynamicModelSerializer.for_model(DeepModelLevel1, depth=0)
+        serializer1 = Serializer1(instance=level1, context={"fields_map": {}}, depth=0)
         data1 = serializer1.data
 
         # Serialize with depth=2: Now the nested level within level2 (i.e. level3) should be expanded too
@@ -452,7 +452,7 @@ class RelatedModelFetchingTests(TestCase):
         self.assertIn("id", data0["level2"])
         self.assertNotIn("name", data0["level2"])
 
-        # Check for depth=1: level2 should now include its own fields (e.g. 'name')
+        # Check for depth=0: level2 should now include its own fields (e.g. 'name')
         self.assertIsInstance(data1.get("level2"), dict)
         self.assertIn("name", data1["level2"])
         # Depending on the implementation, level3 may still be minimal or null. We check both cases.
@@ -485,13 +485,13 @@ class RelatedModelFetchingTests(TestCase):
 
         # Even though the serializer depth is set to 1,
         # the explicit request should force the expansion of level3.
-        Serializer = DynamicModelSerializer.for_model(DeepModelLevel1, depth=1)
-        serializer = Serializer(instance=level1, context={"fields_map": fields_map}, depth=1)
+        Serializer = DynamicModelSerializer.for_model(DeepModelLevel1, depth=0)
+        serializer = Serializer(instance=level1, context={"fields_map": fields_map}, depth=0)
         data = serializer.data
 
-        # Verify that level2 is expanded (due to depth=1)
+        # Verify that level2 is expanded (due to depth=0)
         self.assertIsInstance(data.get("level2"), dict)
-        # Verify that even with depth=1, level3 is expanded because 'name' was explicitly requested.
+        # Verify that even with depth=0, level3 is expanded because 'name' was explicitly requested.
         self.assertIsInstance(data["level2"].get("level3"), dict)
         self.assertIn("name", data["level2"]["level3"])
         self.assertEqual(data["level2"]["level3"]["name"], "Depth Level3")

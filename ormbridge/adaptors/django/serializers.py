@@ -8,13 +8,15 @@ from django.utils.module_loading import import_string
 from rest_framework import serializers
 import contextvars
 from contextlib import contextmanager
+import logging
 
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.core.caching import CachingMixin
 from ormbridge.core.classes import ModelSummaryRepresentation
-
 from ormbridge.core.interfaces import AbstractDataSerializer
 from ormbridge.core.types import RequestType
+
+logger = logging.getLogger(__name__)
 
 # Create a thread-local storage for the fields_map
 fields_map_var = contextvars.ContextVar('fields_map', default=None)
@@ -392,6 +394,16 @@ class DRFDynamicSerializer(AbstractDataSerializer):
     ) -> DynamicModelSerializer:
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
+
+        # Optimize queryset if applicable
+        if isinstance(data, models.QuerySet) and config.selected_fields_query_optimizer is not None:
+            if "requested-fields::" in fields_map:
+                requested_fields = fields_map["requested-fields::"]
+                try:
+                    data = config.selected_fields_query_optimizer(data, requested_fields)
+                    logger.debug(f"Query optimized for {model.__name__} with fields: {requested_fields}")
+                except Exception as e:
+                    logger.error(f"Error optimizing query for {model.__name__}: {e}")
         
         # Create the serializer class with fields_map as a class attribute
         serializer_class = DynamicModelSerializer.for_model(
