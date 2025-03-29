@@ -129,8 +129,28 @@ class ASTParser:
                     # Add the current field to the current model's field set
                     fields_map.setdefault(current_model_name, set()).add(part)
                 
-                # If this is the last part, we're done with this field
+                # If this is the last part, we might need to include all fields if it's a relation
                 if i == len(parts) - 1:
+                    # Find the field node in the graph to check if it's a relation
+                    field_nodes = [
+                        node for node in model_graph.successors(current_model_name)
+                        if model_graph.nodes[node].get("data") and 
+                        model_graph.nodes[node].get("data").field_name == part
+                    ]
+                    
+                    if field_nodes:
+                        field_node = field_nodes[0]
+                        field_data = model_graph.nodes[field_node].get("data")
+                        
+                        # If this is a relation field, include all available fields of the related model
+                        if field_data and field_data.is_relation and field_data.related_model:
+                            related_model_name = field_data.related_model
+                            
+                            # Include all available fields for this related model
+                            if related_model_name in available_fields_map:
+                                fields_map.setdefault(related_model_name, set()).update(
+                                    available_fields_map[related_model_name]
+                                )
                     break
                     
                 # Otherwise, we need to traverse to the related model if allowed
