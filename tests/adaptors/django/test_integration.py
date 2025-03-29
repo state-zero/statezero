@@ -53,7 +53,7 @@ class ORMBridgeE2ETest(APITestCase):
         )
 
         # Add the DummyModel instance to the many-to-many field on DeepModelLevel1.
-        self.deep_level1.comprehensive_models.add(self.dummy)
+        self.deep_level1.comprehensive_models.add(self.comprehensive)
 
     def test_update_instance_dummy_model(self):
         """Test that the instance-based update operation correctly modifies the database."""
@@ -982,8 +982,7 @@ class ORMBridgeE2ETest(APITestCase):
                     },
                 },
                 "serializerOptions": {
-                    "fields": ["id", "related__name", "related__level2__name"],
-                    "depth": 2,  # Need to set depth to follow multiple levels
+                    "fields": ["id", "related__name", "related__level2__name"]
                 },
             }
         }
@@ -1088,8 +1087,7 @@ class ORMBridgeE2ETest(APITestCase):
                     "filter": {"type": "filter", "conditions": {"id": self.deep_level1.id}},
                 },
                 "serializerOptions": {
-                    "fields": ["id", "name", "level2", "level2__name"],
-                    "depth": 1,
+                    "fields": ["id", "name", "level2", "level2__name"]
                 },
             }
         }
@@ -1128,8 +1126,7 @@ class ORMBridgeE2ETest(APITestCase):
                     "filter": {"type": "filter", "conditions": {"id": self.deep_level1.id}},
                 },
                 "serializerOptions": {
-                    "fields": ["id", "name", "level2__name", "level2__level3__name"],
-                    "depth": 1,
+                    "fields": ["id", "name", "level2__name", "level2__level3__name"]
                 },
             }
         }

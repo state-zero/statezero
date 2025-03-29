@@ -44,11 +44,11 @@ class ASTParser:
         requested_fields = self.serializer_options.get("fields", [])
         
         # Configure the serializer options
-        self.depth = int(self.serializer_options.get("depth", 0))
+        self.depth = int(self.serializer_options.get("depth", 1))
 
         # If Process fields are provided, override the user supplied depth
         if requested_fields:
-            self.depth = max((field.count('__') for field in requested_fields), default=0) + 1
+            self.depth = 1 + max((field.count('__') for field in requested_fields), default=0) + 1
         
         # Get the raw field map
         self.read_fields_map = self._get_operation_field_map(
@@ -60,13 +60,13 @@ class ASTParser:
         # Create/update operations should use depth 0 for performance
         self.create_fields_map = self._get_operation_field_map(
             requested_fields=requested_fields, 
-            depth=0,  # Nested writes are not supported
+            depth=1,  # Nested writes are not supported
             operation_type='create'
         )
 
         self.update_fields_map = self._get_operation_field_map(
             requested_fields=requested_fields, 
-            depth=0,  # Nested writes are not supported
+            depth=1,  # Nested writes are not supported
             operation_type='update'
         )
 
@@ -184,7 +184,7 @@ class ASTParser:
         
         return fields_map
 
-    def _get_operation_field_map(self, requested_fields: Optional[Set[str]] = None, depth=0, operation_type: Literal["read", "create", "update"]='read') -> Dict[str, Set[str]]:
+    def _get_operation_field_map(self, requested_fields: Optional[Set[str]] = None, depth=1, operation_type: Literal["read", "create", "update"]='read') -> Dict[str, Set[str]]:
         """
         Build a fields map for a specific operation type.
         
@@ -209,6 +209,7 @@ class ASTParser:
                 field_strings=requested_fields,
                 available_fields_map=fields_map
             )
+            fields_map['requested-fields::'] = requested_fields
         
         return fields_map
     
@@ -247,7 +248,7 @@ class ASTParser:
             # Model not registered or permissions not set up
             return False  # Default to denying access for security
 
-    def _get_depth_based_fields(self, orm_provider: AbstractORMProvider, depth=0, operation_type='read'):
+    def _get_depth_based_fields(self, orm_provider: AbstractORMProvider, depth=1, operation_type='read'):
         """
         Build a fields map by traversing the model graph up to the specified depth.
         Uses operation-specific field permissions.

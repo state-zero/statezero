@@ -8,13 +8,14 @@ from django.utils.module_loading import import_string
 from rest_framework import serializers
 import contextvars
 from contextlib import contextmanager
+import logging
 
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.core.caching import CachingMixin
-from ormbridge.core.classes import ModelSummaryRepresentation
-
 from ormbridge.core.interfaces import AbstractDataSerializer
 from ormbridge.core.types import RequestType
+
+logger = logging.getLogger(__name__)
 
 # Create a thread-local storage for the fields_map
 fields_map_var = contextvars.ContextVar('fields_map', default=None)
@@ -77,7 +78,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
     repr = serializers.SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
-        self.depth = kwargs.pop("depth", 0)
+        self.depth = kwargs.pop("depth", 1)
         self.cache_backend = kwargs.pop("cache_backend", config.cache_backend)
         self.dependency_store = kwargs.pop("dependency_store", config.dependency_store)
         self.request = kwargs.pop("request", None)
@@ -245,7 +246,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
     def _setup_relation_fields(cls, serializer_class, model, allowed_fields, depth):
         """Configure relation fields to use nested DynamicModelSerializer instances."""
         for field in model._meta.get_fields():
-            if allowed_fields is None:
+            if (allowed_fields is None) or (depth == 0):
                 break
             
             # Skip fields that won't be presented
@@ -393,13 +394,23 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
         
-        # Create the serializer class with fields_map as a class attribute
+        # Optimize queryset if applicable
+        if isinstance(data, models.QuerySet) and config.selected_fields_query_optimizer is not None:
+            if "requested-fields::" in fields_map:
+                requested_fields = fields_map["requested-fields::"]
+                try:
+                    data = config.selected_fields_query_optimizer(data, requested_fields)
+                    logger.debug(f"Query optimized for {model.__name__} with fields: {requested_fields}")
+                except Exception as e:
+                    logger.error(f"Error optimizing query for {model.__name__}: {e}")
+        
+        # Create the serializer class
         serializer_class = DynamicModelSerializer.for_model(
             model=model, 
             depth=depth
         )
         
-        # Pass explicit parameters without fields_map
+        # Pass explicit parameters
         serializer = serializer_class(
             data,
             many=many,
@@ -458,7 +469,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             # Create serializer class
             serializer_class = DynamicModelSerializer.for_model(
                 model=model, 
-                depth=0
+                depth=1
             )
 
             model_config = registry.get_config(model)
@@ -520,7 +531,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             # Create serializer class
             serializer_class = DynamicModelSerializer.for_model(
                 model=model, 
-                depth=0  # No need for depth during save
+                depth=1  # No need for depth during save
             )
             
             # Create serializer
