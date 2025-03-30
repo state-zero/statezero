@@ -3,13 +3,13 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ormbridge"
+name = "statezero"
 version = "0.1.0"
 description = "A short description of your package"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
-    { name = "Robert Herring", email = "robert.herring@resipilot.com" }
+    { name = "Robert Herring", email = "robert.herring@statezero.dev" }
 ]
 requires-python = ">=3.10"
 dependencies = [
@@ -29,9 +29,9 @@ dependencies = [
 ]
 
 [project.urls]
-homepage = "https://github.com/ormbridge/ormbridge"
-repository = "https://github.com/ormbridge/ormbridge"
+homepage = "https://www.statezero.dev"
+repository = "https://github.com/state-zero/statezero"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["ormbridge", "ormbridge.*"]
+include = ["statezero", "statezero.*"]
