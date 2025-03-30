@@ -1,4 +1,4 @@
-# ORMBridge
+# StateZero
 
 **The Real-Time Django to JavaScript Data Bridge**
 
@@ -19,7 +19,7 @@ Developers know this painful truth:
 
 **...on code code that shuttles data between your database and your users.**
 
-**ORMBridge eliminates this entirely.**
+**StateZero eliminates this entirely.**
 
 ## Features at a Glance
 
@@ -34,7 +34,7 @@ Developers know this painful truth:
 ### Backend: Connect your Django models
 
 ```python
-# Register your existing Django models with ORMBridge
+# Register your existing Django models with StateZero
 from statezero.adaptors.django.config import registry
 
 registry.register(model=Post)
@@ -94,7 +94,7 @@ And run:
 npx statezero sync-models
 ```
 
-## Why Choose ORMBridge?
+## Why Choose StateZero?
 
 ### Over HTMX
 - **Modern JS Frontend:** Use modern JS frameworks (React, Vue) and UI libraries (Shadcn, Tailwind)
@@ -133,4 +133,4 @@ For complete setup instructions, advanced usage, and API references, visit:
 
 ## License
 
-ORMBridge is available under a free commercial license. You can use it in both personal and commercial projects at no cost.
+StateZero is available under a free commercial license. You can use it in both personal and commercial projects at no cost.

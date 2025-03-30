@@ -131,7 +131,7 @@ class AppConfig(ABC):
                                 raise ValueError(
                                     f"Model '{model_name}' exposes relation '{field_name}' "
                                     f"to unregistered model '{related_model_name}'. "
-                                    f"Please register '{related_model_name}' with ORMBridge "
+                                    f"Please register '{related_model_name}' with StateZero "
                                     f"or restrict access to this field by excluding it from the 'fields' parameter."
                                 )
                                 

@@ -73,7 +73,7 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-operation-id",
 ]
 
-# Then configure ORMBridge to use one of these caches
+# Then configure StateZero to use one of these caches
 ORMBRIDGE_CACHE = {
     'NAME': 'default',
     'DEFAULT_TTL': 3600,

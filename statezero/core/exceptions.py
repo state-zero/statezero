@@ -15,7 +15,7 @@ class ErrorDetail:
 
 
 class ORMBridgeError(Exception):
-    """Base exception for all ORMBridge errors."""
+    """Base exception for all StateZero errors."""
 
     status_code: int = 500
     default_detail: Union[str, Dict, List] = "A server error occurred."

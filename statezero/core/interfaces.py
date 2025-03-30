@@ -455,7 +455,7 @@ class AbstractPermission(ABC):
         pass
 
 class AbstractSearchProvider(ABC):
-    """Base class for search providers in ORMBridge."""
+    """Base class for search providers in StateZero."""
     
     @abstractmethod
     def search(self, queryset: ORMQuerySet, query: str, search_fields: Union[Set[str], Literal["__all__"]]) -> ORMQuerySet:

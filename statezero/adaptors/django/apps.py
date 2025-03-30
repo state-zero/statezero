@@ -20,9 +20,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class ORMBridgeDjangoConfig(DjangoAppConfig):
+class StateZeroDjangoConfig(DjangoAppConfig):
     name = "statezero.adaptors.django"
-    verbose_name = "ORMBridge Django Integration"
+    verbose_name = "StateZero Django Integration"
 
     def ready(self):
         # Import crud modules which register models in the registry.
@@ -41,12 +41,12 @@ class ORMBridgeDjangoConfig(DjangoAppConfig):
             except ModuleNotFoundError:
                 pass
 
-        # Once all the apps are imported, initialize ORMBridge and provide the registry to the event bus.
+        # Once all the apps are imported, initialize StateZero and provide the registry to the event bus.
         config.initialize()
-        config.validate_exposed_models(registry) # Raises an exception if a non ORMBridge model is implicitly exposed
+        config.validate_exposed_models(registry) # Raises an exception if a non StateZero model is implicitly exposed
         config.event_bus.set_registry(registry)
 
-        # Print the list of published models (from registry) to confirm ORMBridge is running.
+        # Print the list of published models (from registry) to confirm StateZero is running.
         try:
             published_models = []
             for model in registry._models_config.keys():
@@ -56,12 +56,12 @@ class ORMBridgeDjangoConfig(DjangoAppConfig):
 
             if published_models:
                 base_message = (
-                    "[bold green]ORM Bridge is exposing models:[/bold green] [bold yellow]"
+                    "[bold green]StateZero is exposing models:[/bold green] [bold yellow]"
                     + ", ".join(published_models)
                     + "[/bold yellow]"  
                 )
             else:
-                base_message = "[bold yellow]ORM Bridge is running but no models are registered.[/bold yellow]"
+                base_message = "[bold yellow]StateZero is running but no models are registered.[/bold yellow]"
 
             # Append the npm command instruction only in debug mode.
             if published_models and settings.DEBUG:

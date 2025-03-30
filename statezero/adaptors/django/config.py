@@ -45,7 +45,7 @@ class DjangoLocalConfig(AppConfig):
         
         # Use Django's caching framework
         if settings.CACHES.get(cache_name):
-            logger.info(f"Using Django cache backend '{cache_name}' for ORMBridge")
+            logger.info(f"Using Django cache backend '{cache_name}' for StateZero")
             self.cache_backend = DjangoCacheBackend(cache_name=cache_name, default_ttl=default_ttl)
             self.dependency_store = DjangoDependencyStore(cache_name=cache_name)
         else:

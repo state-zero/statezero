@@ -9,7 +9,7 @@ from statezero.adaptors.django.permissions import AllowAllPermission
 
 # Test models with unique names to avoid conflicts
 class TestUnregisteredModel(models.Model):
-    """Test model that won't be registered with ORMBridge"""
+    """Test model that won't be registered with StateZero"""
     name = models.CharField(max_length=100)
 
     class Meta:
