@@ -430,7 +430,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
     ) -> DynamicModelSerializer:
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
-
+        
         data = self._optimize_queryset(
             data= data,
             model= model,

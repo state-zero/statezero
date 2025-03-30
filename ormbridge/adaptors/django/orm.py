@@ -609,7 +609,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         limit: Optional[int] = None,
         req: RequestType = None,
         permissions: List[Type[AbstractPermission]] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> QuerySet:
         """
         Fetch a list of model instances with bulk permission checks.
 
@@ -635,7 +635,7 @@ class DjangoORMAdapter(AbstractORMProvider):
             # Use the existing bulk permission check function
             check_bulk_permissions(req, qs, ActionType.READ, permissions, self.model)
 
-        return list(qs)
+        return qs
 
     def _build_conditions(self, conditions: dict) -> Q:
         visitor = QueryASTVisitor(self.model)

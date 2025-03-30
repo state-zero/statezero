@@ -86,7 +86,7 @@ ORMBRIDGE_PUSHER = {
     "CLUSTER": os.getenv('PUSHER_CLUSTER'),
 }
 
-ZEN_STRICT_SERIALIZATION = True
+ZEN_STRICT_SERIALIZATION = False # Used for testing ormbridge
 
 ORMBRIDGE_QUERY_TIMEOUT_MS = 1000  # Important, prevents trivial Ddos
 
