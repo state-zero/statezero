@@ -264,7 +264,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
                 # Create a serializer class for the related model
                 nested_serializer_class = cls.for_model(
                     model=field.related_model, 
-                    depth=max(depth - 1, 0)
+                    depth=max(depth - 1, -1)
                 )
                 
                 # Set the nested serializer field
@@ -273,7 +273,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
                     read_only=False,
                     required=not (field.null or field.blank),
                     allow_null=field.null,
-                    depth=max(depth - 1, 0)
+                    depth=max(depth - 1, -1)
                 )
         return serializer_class
                 
@@ -358,7 +358,7 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
         allowed_fields = extract_fields(model_name)
         
         # Only proceed with field setup if we have allowed fields
-        if allowed_fields:
+        if allowed_fields and depth >= 0:
             # Set up relation fields with RelatedFieldWithRepr
             serializer_class = cls._setup_relation_fields(
                 serializer_class, model, allowed_fields, depth
@@ -369,8 +369,8 @@ class DynamicModelSerializer(CachingMixin, serializers.ModelSerializer):
                 serializer_class, model, allowed_fields
             )
         
-        # Add computed fields from the registry
-        serializer_class = cls._setup_computed_fields(serializer_class, model)
+            # Add computed fields from the registry
+            serializer_class = cls._setup_computed_fields(serializer_class, model)
         
         return serializer_class
 
