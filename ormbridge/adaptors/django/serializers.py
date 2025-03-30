@@ -9,6 +9,7 @@ from rest_framework import serializers
 import contextvars
 from contextlib import contextmanager
 import logging
+from zen_queries import queries_disabled
 
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.core.caching import CachingMixin
@@ -396,7 +397,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 optimization_kwargs = {
                     'depth': depth,
                     'fields_map': fields_map,
-                    'get_model_name_func': config.orm_provider.get_model_by_name
+                    'get_model_name_func': config.orm_provider.get_model_name
                 }
                 
                 if "requested-fields::" in fields_map:
@@ -484,7 +485,15 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 many=many, 
                 request=request
             )
-            return serializer.data
+
+            # Now apply zen-queries protection only to the data access part
+            if getattr(settings, 'ZEN_STRICT_SERIALIZATION', False):
+                with queries_disabled():
+                    # This will raise an exception if any query is executed
+                    return serializer.data
+            else:
+                # Original code path without zen-queries
+                return serializer.data
 
     def deserialize(
         self,
