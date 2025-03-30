@@ -385,7 +385,9 @@ class DRFDynamicSerializer(AbstractDataSerializer):
     """
 
     def _optimize_queryset(self, data, model, depth, fields_map):
-        if isinstance(data, models.QuerySet) and config.query_optimizer is not None:
+        if config.query_optimizer is None:
+            return
+        if isinstance(data, models.QuerySet) or isinstance(data, model):
             try:
                 query_optimizer: Type[AbstractQueryOptimizer] = config.query_optimizer(
                     depth=depth,
@@ -393,25 +395,16 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                     get_model_name_func=config.orm_provider.get_model_name,
                 )
                 
-                # Common kwargs for both optimization paths
-                optimization_kwargs = {
-                    'depth': depth,
-                    'fields_map': fields_map,
-                    'get_model_name_func': config.orm_provider.get_model_name
-                }
-                
                 if "requested-fields::" in fields_map:
                     requested_fields = fields_map["requested-fields::"]
                     data = query_optimizer.optimize(
                         queryset=data,
-                        fields=requested_fields,
-                        **optimization_kwargs
+                        fields=requested_fields
                     )
                     logger.debug(f"Query optimized for {model.__name__} with fields: {requested_fields}")
                 else:
                     data = query_optimizer.optimize(
-                        queryset=data,
-                        **optimization_kwargs
+                        queryset=data
                     )
                     logger.debug(f"Query optimized for {model.__name__} with no explicit field selection")
             except Exception as e:

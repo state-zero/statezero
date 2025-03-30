@@ -328,6 +328,21 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         instance.delete()
         return 1
+    
+    def get_pk_list(queryset: QuerySet):
+        """
+        Gets a list of primary key values from a QuerySet, handling different PK field names.
+
+        Args:
+            queryset: The Django QuerySet.
+
+        Returns:
+            A list of primary key values.
+        """
+        model = queryset.model
+        pk_field_name = model._meta.pk.name  # Dynamically get the PK field name
+        pk_list = queryset.values_list(pk_field_name, flat=True)
+        return list(pk_list)
 
     def update(
         self,
@@ -346,7 +361,9 @@ class DjangoORMAdapter(AbstractORMProvider):
             qs = qs.filter(q_obj)
 
         check_bulk_permissions(req, qs, ActionType.UPDATE, permissions, self.model)
-        instances = list(qs)
+        model = qs.model
+        pk_field_name = model._meta.pk.name
+        instances = list(qs.only(pk_field_name))
         rows_updated = qs.update(**data)
 
         # Triggers cache invalidation and broadcast to the frontend
@@ -370,7 +387,9 @@ class DjangoORMAdapter(AbstractORMProvider):
             qs = qs.filter(q_obj)
 
         check_bulk_permissions(req, qs, ActionType.DELETE, permissions, self.model)
-        instances = list(qs)
+        model = qs.model
+        pk_field_name = model._meta.pk.name
+        instances = list(qs.only(pk_field_name))
         deleted, _ = qs.delete()
 
         # Triggers cache invalidation and broadcast to the frontend

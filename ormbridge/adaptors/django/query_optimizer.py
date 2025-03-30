@@ -4,8 +4,8 @@ from django.db.models.fields.related import (
     ForeignObjectRel, ManyToManyField, ManyToManyRel, ForeignKey, OneToOneField, ManyToOneRel
 )
 
-from typing import Optional, Dict, Set, Callable, Type, Any, List
-from django.db.models import Model as ORMModel
+from typing import Optional, Dict, Set, Callable, Type, Any, List, Union
+from django.db.models import Model
 from django.core.exceptions import FieldDoesNotExist, FieldError
 from django.db.models.constants import LOOKUP_SEP
 from contextvars import ContextVar
@@ -641,6 +641,53 @@ def generate_paths(model, depth, fields, get_model_name):
     # The main optimize_query function relies on its *internal* generate_query_paths for validation.
     return paths
 
+def optimize_individual_model(model_instance, fields_map=None, depth=0, use_only=True, get_model_name=None):
+    """
+    Optimizes fetching a single model instance using select_related, prefetch_related, and .only().
+    """
+    if not isinstance(model_instance, Model):
+        raise TypeError("model_instance must be a Django Model instance.")
+
+    model_class = model_instance.__class__
+
+    #Check for related fields before proceeding to optimization
+    any_related_fields = False
+
+    if fields_map:
+            for model_name, model_fields in fields_map.items():
+                for field in model_fields:
+                    if '__' in field:  # If there's a related field its length is >1
+                        any_related_fields = True
+                        break
+                if any_related_fields:
+                    break
+    #If there are no related fields, return the instance with no extra queries.
+    if not any_related_fields:
+        logger.info("No related fields requested. Skipping optimization.")
+        return model_instance
+    try:
+        # 1. Turn the instance into a queryset.
+        queryset = model_class.objects.filter(pk=model_instance.pk)
+
+        # 2. Optimize the queryset using the shared optimization logic.
+        optimized_queryset = optimize_query(
+            queryset,
+            fields=None, #Let fields_map handle field validation and path creation
+            fields_map=fields_map,
+            depth=depth,
+            use_only=use_only,
+            get_model_name=get_model_name
+        )
+
+        # 3. Extract the optimized instance.
+        optimized_instance = optimized_queryset.first()
+
+        return optimized_instance
+
+    except Exception as e:
+        logger.exception(f"An error occurred during individual model optimization: {e}")
+        raise
+
 class DjangoQueryOptimizer(AbstractQueryOptimizer):
     """
     Concrete implementation of AbstractQueryOptimizer for Django QuerySets.
@@ -649,7 +696,7 @@ class DjangoQueryOptimizer(AbstractQueryOptimizer):
         self,
         depth: Optional[int] = None,
         fields_per_model: Optional[Dict[str, Set[str]]] = None,
-        get_model_name_func: Optional[Callable[[Type[ORMModel]], str]] = None,
+        get_model_name_func: Optional[Callable[[Type[Model]], str]] = None,
         use_only: bool = True
     ):
         """
@@ -665,7 +712,9 @@ class DjangoQueryOptimizer(AbstractQueryOptimizer):
                 consistent string name for a model class.
             use_only (bool): Whether to use .only() on the root model.
         """
-        super().__init__(depth, fields_per_model, get_model_name_func)
+        self.depth = depth
+        self.fields_per_model = fields_per_model
+        self.get_model_name_func = get_model_name_func
         self.use_only = use_only
         
         # Validate configuration
@@ -677,35 +726,38 @@ class DjangoQueryOptimizer(AbstractQueryOptimizer):
 
     def optimize(
         self,
-        queryset: QuerySet,
-        fields: Optional[List[str]] = None,
-        **kwargs: Any
-    ) -> QuerySet:
+        queryset: Union[QuerySet, Model],
+        fields: Optional[List[str]] = None
+    ) -> Union[QuerySet, Model]:
         """
-        Optimizes the given Django QuerySet using preconfigured parameters.
+        Optimizes the given Django QuerySet or Model instance.
 
         Args:
-            queryset (QuerySet): The Django QuerySet to optimize.
+            queryset (Union[QuerySet, Model]): The Django QuerySet or Model instance to optimize.
             fields (Optional[List[str]]): An explicit list of field paths to optimize for.
                 If provided, this overrides automatic path generation.
             **kwargs: Optional overrides for depth, fields_map, get_model_name_func, or use_only.
 
         Returns:
-            QuerySet: The optimized Django QuerySet.
+            Union[QuerySet, Model]: The optimized QuerySet or Model instance.
         """
         # Handle optional overrides
-        depth = kwargs.get('depth', self.default_depth)
-        fields_map = kwargs.get('fields_map', self.default_fields_per_model)
-        get_model_name_func = kwargs.get('get_model_name_func', self.default_get_model_name_func)
-        use_only = kwargs.get('use_only', self.use_only)
+        depth = self.depth
+        fields_map = self.fields_per_model
+        get_model_name_func = self.get_model_name_func
+        use_only = self.use_only
 
-        try:
-            # Generate paths if fields not explicitly provided
-            if not fields and fields_map and depth is not None and get_model_name_func:
-                generated_paths = generate_paths(queryset.model, depth, fields_map, get_model_name_func)
-                fields = list(generated_paths)
-
-            # Core optimization call
+        if isinstance(queryset, Model):
+            # Optimize a single model instance
+            return optimize_individual_model(
+                queryset,
+                fields_map=fields_map,
+                depth=depth,
+                use_only=use_only,
+                get_model_name=get_model_name_func
+            )
+        elif isinstance(queryset, QuerySet):
+            #Optimize a queryset object.
             optimized_queryset = optimize_query(
                 queryset,
                 fields=fields,
@@ -716,7 +768,5 @@ class DjangoQueryOptimizer(AbstractQueryOptimizer):
             )
 
             return optimized_queryset
-
-        except Exception as e:
-            logger.error(f"Error during query optimization: {e}")
-            raise  # Re-raise the exception to propagate it
+        else:
+            raise TypeError("Input must be a QuerySet or a Model instance.")
