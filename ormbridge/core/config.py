@@ -10,7 +10,7 @@ from ormbridge.core.event_bus import EventBus
 from ormbridge.core.interfaces import (AbstractCustomQueryset,
                                        AbstractDataSerializer,
                                        AbstractORMProvider, AbstractPermission,
-                                       AbstractSchemaGenerator, AbstractSearchProvider)
+                                       AbstractSchemaGenerator, AbstractSearchProvider, AbstractQueryOptimizer)
 from ormbridge.core.types import ORMField
 
 NamespaceResolver = Callable[[Any, str], Union[str, List[str], None]]
@@ -42,7 +42,7 @@ class AppConfig(ABC):
     search_provider: AbstractSearchProvider = None
 
     # Query optimizers
-    selected_fields_query_optimizer = None
+    query_optimizer: Optional[AbstractQueryOptimizer] = None
 
     def __init__(self) -> None:
         self._orm_provider: Optional[AbstractORMProvider] = None

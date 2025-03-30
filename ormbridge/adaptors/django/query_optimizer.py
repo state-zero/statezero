@@ -1,232 +1,279 @@
 import logging
 from django.db.models import Prefetch, QuerySet
 from django.db.models.fields.related import (
-    ForeignObjectRel, ManyToManyField, ManyToManyRel, ForeignKey, OneToOneField
+    ForeignObjectRel, ManyToManyField, ManyToManyRel, ForeignKey, OneToOneField, ManyToOneRel
 )
+
+from typing import Optional, Dict, Set, Callable, Type, Any, List
+from django.db.models import Model as ORMModel
 from django.core.exceptions import FieldDoesNotExist, FieldError
+from django.db.models.constants import LOOKUP_SEP
+from contextvars import ContextVar
+
+from ormbridge.core.interfaces import AbstractQueryOptimizer
 
 logger = logging.getLogger(__name__)
 
-# Cache for model metadata to avoid repeated lookups
-_meta_cache = {}
+# Cache for model metadata
+_meta_cache_var = ContextVar('_meta_cache', default={})
+
+"""
+This module implements a Django QuerySet optimizer that intelligently applies
+`select_related`, `prefetch_related`, and optionally `.only()` to reduce the
+number of database queries and the amount of data transferred.
+
+**Vibe Coded with Gemini**
+
+This code was co-authored with Google Gemini because the specific behaviours of the
+orm are difficult to reason about. This should eventually be verified and enhanced -
+the overall behaviours are verified in the tests to make sure that query counts reduce
+and runtimes improve.
+
+**Detailed Explanation:**
+
+The core logic resides within the `optimize_query` function. This function takes a
+Django QuerySet and a specification of the desired fields to retrieve as input and
+returns an optimized QuerySet.  It intelligently determines the optimal combination
+of `select_related`, `prefetch_related`, and `.only()` calls to minimize database
+interactions.
+
+1.  **Field Path Generation and Validation (`generate_query_paths`):**  The
+    process begins by validating the provided field paths.  The
+    `generate_query_paths` function parses each field path (e.g.,
+    `'author__profile__bio'`) and verifies that each segment of the path exists
+    as a valid field on the corresponding model.  It also identifies whether
+    each relationship along the path is a `ForeignKey`, `OneToOneField`,
+    `ManyToManyField`, or a reverse relation.  This validation ensures that the
+    specified fields are actually accessible and helps prevent runtime errors. It
+    returns two structures: `all_relation_paths`, a set of all relationship paths,
+    and `field_map`, a dictionary mapping relation paths to the fields that should
+    be fetched at the end of that relationship.
+
+2.  **Relationship Path Refinement (`refine_relationship_paths`):**  After
+    validation, the `refine_relationship_paths` function analyzes the relationship
+    paths to determine whether to use `select_related` or `prefetch_related`.
+    `select_related` is used for `ForeignKey` and `OneToOneField` relationships,
+    while `prefetch_related` is used for `ManyToManyField` and reverse
+    relationships.  The function intelligently handles nested relationships,
+    ensuring that the most efficient approach is used for each path.
+
+3.  **Redundancy Removal (`remove_redundant_paths`):** This function removes
+    redundant paths. For example, if you request both 'a' and 'a__b', requesting
+    'a' becomes redundant because 'a__b' will automatically fetch 'a' as well.
+
+4.  **Prefetch Splitting (`_find_prefetch_split`):** This helper function finds
+    the first prefetch-requiring relation in a path and splits the path into a root
+    prefetch path and a subsequent path. This is necessary for constructing
+    `Prefetch` objects with inner querysets for nested optimizations.
+
+5.  **`Prefetch` Object Construction:** For each `prefetch_related` path, the
+    code constructs a `Prefetch` object.  It finds any nested `select_related`
+    paths *within* the prefetched relationship and applies them to the inner
+    queryset of the `Prefetch` object. It also restricts the fields fetched by the
+    inner queryset using `.only()` based on the specified fields_map.
+
+6.  **`.only()` Application:**  If enabled via the `use_only` parameter, the
+    code applies `.only()` to the root QuerySet.  It includes only the fields
+    explicitly requested via the `fields_map`, as well as any foreign key fields
+    required by the `select_related` paths. This ensures that only the necessary
+    data is retrieved from the database.
+
+7.  **Error Handling:**  The code includes comprehensive error handling to catch
+    `FieldDoesNotExist`, `FieldError`, and other exceptions that may occur during
+    the optimization process.  Error messages are logged to provide detailed
+    information about the cause of the error.
+
+8.  **Caching:**  Model metadata is cached to improve performance by avoiding
+    repeated calls to `model._meta`.
+
+9.  **`generate_paths` Function:** This utility function is used to
+    automatically generate field paths based on a depth parameter and a
+    `fields_map`.  It is used when the user does not provide an explicit list of
+    fields to optimize.
+
+10. **`DjangoQueryOptimizer` Class:** This class implements the
+    `AbstractQueryOptimizer` interface, providing a reusable and configurable way
+    to optimize Django QuerySets.  It allows users to specify the depth of
+    relationship traversal, the fields to retrieve for each model, and a function
+    to get a consistent string name for a model class.
+
+**How it Works:**
+
+The optimizer works by analyzing the structure of the requested data and
+intelligently constructing a series of `select_related`, `prefetch_related`, and
+`.only()` calls.  `select_related` eagerly loads related objects in the same
+database query, which is efficient for `ForeignKey` and `OneToOneField`
+relationships. `prefetch_related` performs a separate query for each related
+object, which is necessary for `ManyToManyField` and reverse relationships.
+`.only()` restricts the fields that are retrieved from the database, reducing the
+amount of data transferred.
+
+By combining these techniques, the optimizer can significantly reduce the number of
+database queries and the amount of data transferred, resulting in improved
+application performance.
+"""
 
 def _get_model_meta(model):
-    """Gets cached model _meta."""
-    if model not in _meta_cache:
-        _meta_cache[model] = model._meta
-    return _meta_cache[model]
+    """Gets cached model _meta using context variable."""
+    meta_cache = _meta_cache_var.get()
+    if model not in meta_cache:
+        meta_cache[model] = model._meta
+        # Update the context variable with the modified cache
+        _meta_cache_var.set(meta_cache)
+    return meta_cache[model]
 
 def _clear_meta_cache():
-    """Clears the meta cache (useful for testing environments)."""
-    _meta_cache.clear()
+    """Clears the meta cache in the current context."""
+    _meta_cache_var.set({})
 
 # ================================================================
-# Path Generation & VALIDATION (MODIFIED FOR STRICTNESS)
+# Path Generation & VALIDATION (Strict)
 # ================================================================
 def generate_query_paths(model, fields):
-    """
-    Generate relationship paths and map fields to those paths.
-    Crucially, validates that *every* requested path segment and the final
-    field exist, raising ValueError if not.
-    """
-    field_map = {'': set()}  # Root model fields
+    """Generate relationship paths and map fields, validating strictly."""
+    field_map = {'': set()}
     all_relation_paths = set()
-    root_meta = _get_model_meta(model) # Cache root meta
+    root_meta = _get_model_meta(model)
 
     for field_path in fields:
-        parts = field_path.split('__')
+        parts = field_path.split(LOOKUP_SEP)
         field_name = parts[-1]
         relationship_parts = parts[:-1]
-
-        # --- Strict Validation ---
         current_model = model
         current_meta = root_meta
 
-        # 1. Validate relationship traversal parts
         for i, part in enumerate(relationship_parts):
             try:
                 field_obj = current_meta.get_field(part)
-                current_path_str = '__'.join(relationship_parts[:i+1])
-                all_relation_paths.add(current_path_str) # Add valid relation prefix
-
-                # Determine the next model in the chain
-                next_model = None
-                if hasattr(field_obj, 'remote_field') and field_obj.remote_field and field_obj.remote_field.model:
-                    next_model = field_obj.remote_field.model
-                elif hasattr(field_obj, 'related_model') and field_obj.related_model:
-                    next_model = field_obj.related_model
-                # Check if it's a non-relational field trying to be traversed
-                elif not field_obj.is_relation:
-                     raise ValueError(
-                         f"Path '{field_path}' attempts to traverse non-relational field "
-                         f"'{part}' on model {current_model.__name__}."
-                     )
-                # Check if traversal is possible
-                elif not next_model:
-                    raise ValueError(
-                        f"Cannot determine related model for part '{part}' in path "
-                        f"'{field_path}' on model {current_model.__name__}."
-                    )
-
+                current_path_str = LOOKUP_SEP.join(relationship_parts[:i+1])
+                all_relation_paths.add(current_path_str)
+                next_model = getattr(field_obj, 'related_model', None) or \
+                             (getattr(field_obj, 'remote_field', None) and getattr(field_obj.remote_field, 'model', None))
+                if not field_obj.is_relation:
+                     raise ValueError(f"Path '{field_path}' traverses non-relational field '{part}' on {current_model.__name__}.")
+                if not next_model:
+                    raise ValueError(f"Cannot determine related model for '{part}' in path '{field_path}' on {current_model.__name__}.")
                 current_model = next_model
-                current_meta = _get_model_meta(current_model) # Get meta for next model
-
+                current_meta = _get_model_meta(current_model)
             except FieldDoesNotExist:
-                # Raise error if any part of the path is invalid
-                raise ValueError(
-                    f"Invalid path segment: Field '{part}' not found on model "
-                    f"{current_model.__name__} while processing path '{field_path}'."
-                )
-            except Exception as e: # Catch other potential errors during traversal
-                 raise ValueError(
-                    f"Error processing segment '{part}' on model {current_model.__name__} "
-                    f"for path '{field_path}': {e}"
-                 )
+                raise ValueError(f"Invalid path segment: '{part}' not found on {current_model.__name__} processing '{field_path}'.")
+            except Exception as e:
+                 raise ValueError(f"Error processing segment '{part}' on {current_model.__name__} for path '{field_path}': {e}")
 
-        # 2. Validate the final field name on the target model
         try:
-            # This get_field call now acts as the final validation
             current_meta.get_field(field_name)
         except FieldDoesNotExist:
-             raise ValueError(
-                 f"Invalid final field: Field '{field_name}' not found on target model "
-                 f"{current_model.__name__} for path '{field_path}'."
-             )
+             raise ValueError(f"Invalid final field: '{field_name}' not found on {current_model.__name__} for path '{field_path}'.")
         except Exception as e:
-             raise ValueError(
-                 f"Error validating final field '{field_name}' on model {current_model.__name__} "
-                 f"for path '{field_path}': {e}"
-             )
+             raise ValueError(f"Error validating final field '{field_name}' on {current_model.__name__} for path '{field_path}': {e}")
 
-        # --- Populate field_map (only if validation passed) ---
-        relation_path_key = '__'.join(relationship_parts)
-        if relation_path_key not in field_map:
-            field_map[relation_path_key] = set()
-        field_map[relation_path_key].add(field_name)
+        relation_path_key = LOOKUP_SEP.join(relationship_parts)
+        field_map.setdefault(relation_path_key, set()).add(field_name)
 
     return all_relation_paths, field_map
 
 # ================================================================
-# Refine Paths (No Changes Needed)
+# Refine Paths
 # ================================================================
 def refine_relationship_paths(model, all_relation_paths):
-    """
-    Refine which paths should use select_related vs prefetch_related.
-    (No changes needed here as input paths are now guaranteed to be valid)
-    """
+    """Refine paths into select_related vs prefetch_related."""
     select_related_paths = set()
     prefetch_related_paths = set()
 
     for path in sorted(list(all_relation_paths), key=len):
-        parts = path.split('__')
+        parts = path.split(LOOKUP_SEP)
         current_model = model
         requires_prefetch = False
-        valid_path = True # Assume valid as checked upstream
-        is_subpath_of_prefetch = False
+        valid_path = True
+        is_subpath_of_prefetch = any(path.startswith(p + LOOKUP_SEP) for p in prefetch_related_paths)
 
-        for prefetch_path in prefetch_related_paths:
-            if path.startswith(prefetch_path + '__'):
-                is_subpath_of_prefetch = True
-                break
         if is_subpath_of_prefetch:
              prefetch_related_paths.add(path)
              continue
 
         for part in parts:
-            # We assume get_field works here due to upstream validation
             try:
                 current_meta = _get_model_meta(current_model)
                 field = current_meta.get_field(part)
-
-                if isinstance(field, (ManyToManyField, ManyToManyRel, ForeignObjectRel)):
+                if isinstance(field, (ManyToManyField, ManyToManyRel, ForeignObjectRel, ManyToOneRel)):
                     requires_prefetch = True
-                    # Upstream validation ensures related_model exists if needed
-                    current_model = field.related_model
+                    # Ensure related_model is valid before assignment
+                    related_model = getattr(field, 'related_model', None)
+                    if not related_model:
+                        raise ValueError(f"Cannot determine related model for prefetch field '{part}' on {current_model.__name__}")
+                    current_model = related_model
                 elif isinstance(field, (ForeignKey, OneToOneField)):
-                     # Upstream validation ensures remote_field.model exists
-                     current_model = field.remote_field.model
-                else:
-                    # This case *shouldn't* happen if upstream validation is correct
-                    logger.error(f"Unexpected non-relational field '{part}' encountered "
-                                  f"in supposedly validated relation path '{path}'.")
+                     # Ensure remote_field and model are valid
+                     remote_field = getattr(field, 'remote_field', None)
+                     if not remote_field or not getattr(remote_field, 'model', None):
+                          raise ValueError(f"Cannot determine related model for FK/O2O field '{part}' on {current_model.__name__}")
+                     current_model = remote_field.model
+                else: # Should not happen with validation
+                    logger.error(f"Unexpected non-relational field '{part}' in validated path '{path}'.")
                     valid_path = False; break
             except Exception as e:
-                 # Log unexpected errors during refinement, though validation passed
-                 logger.error(f"Unexpected error refining validated path '{path}' at part '{part}': {e}")
+                 logger.error(f"Unexpected error refining path '{path}' at part '{part}': {e}")
                  valid_path = False; break
 
-        if valid_path: # Should always be true now
+        if valid_path:
             if requires_prefetch:
                 prefetch_related_paths.add(path)
-                # Remove select_related paths that are prefixes of this new prefetch
-                final_select_related = set(select_related_paths) # Temp copy for iteration
-                for sr_path in final_select_related:
-                    if path.startswith(sr_path + '__'):
-                         if sr_path in select_related_paths:
-                            select_related_paths.remove(sr_path)
+                paths_to_remove = {sr for sr in select_related_paths if path.startswith(sr + LOOKUP_SEP)}
+                select_related_paths.difference_update(paths_to_remove)
             else:
-                # Only add if not already covered by a prefetch path
-                 is_prefix_of_prefetch = False
-                 for pf_path in prefetch_related_paths:
-                      if pf_path.startswith(path + '__'):
-                          is_prefix_of_prefetch = True; break
+                 is_prefix_of_prefetch = any(pf.startswith(path + LOOKUP_SEP) for pf in prefetch_related_paths)
                  if not is_prefix_of_prefetch:
                      select_related_paths.add(path)
 
-    # Final check for select_related paths being prefixes of prefetch paths
+    # Final cleanup
     final_select_related = set(select_related_paths)
     for sr_path in select_related_paths:
-        for pf_path in prefetch_related_paths:
-            if pf_path.startswith(sr_path + '__'):
-                if sr_path in final_select_related:
-                    logger.debug(f"Removing '{sr_path}' from select_related as it's covered by prefetch_path '{pf_path}'")
-                    final_select_related.remove(sr_path)
+        if any(pf_path.startswith(sr_path + LOOKUP_SEP) for pf_path in prefetch_related_paths):
+            final_select_related.discard(sr_path)
 
     return final_select_related, prefetch_related_paths
 
+
 # ================================================================
-# Redundancy Removal (No Changes Needed)
+# Redundancy Removal
 # ================================================================
 def remove_redundant_paths(paths):
-    """
-    Remove redundant paths for select/prefetch.
-    (No changes needed here)
-    """
-    if not paths:
-        return set()
-
+    """Remove redundant paths (e.g., 'a' if 'a__b' exists)."""
+    if not paths: return set()
+    # Sort by length descending to check longer paths against shorter ones
     sorted_paths = sorted(list(paths), key=len, reverse=True)
-    result = set(sorted_paths)
-
-    logger.debug(f"remove_redundant_paths input: {paths}")
-    logger.debug(f"Sorted paths: {sorted_paths}")
+    result = set(sorted_paths) # Start with all paths
+    to_remove = set() # Keep track of paths to remove
 
     for i, long_path in enumerate(sorted_paths):
-        if long_path not in result:
+        # If long_path itself was already removed, skip checks for it
+        if long_path in to_remove:
             continue
-
+        # Check against all shorter paths that come after it in the sorted list
         for j in range(i + 1, len(sorted_paths)):
             short_path = sorted_paths[j]
-            if short_path not in result:
+            # If short_path was already marked for removal, skip
+            if short_path in to_remove:
                 continue
-            if long_path.startswith(short_path + '__'):
-                logger.debug(f"Removing '{short_path}' because '{long_path}' exists and covers it.")
-                result.remove(short_path)
+            # Check if the long path starts with the short path + separator
+            if long_path.startswith(short_path + LOOKUP_SEP):
+                # Mark the shorter path for removal
+                logger.debug(f"Marking '{short_path}' for removal because '{long_path}' exists.")
+                to_remove.add(short_path)
 
+    # Remove the marked paths from the result set
+    result.difference_update(to_remove)
+    logger.debug(f"remove_redundant_paths input: {paths}")
     logger.debug(f"remove_redundant_paths output: {result}")
     return result
 
-
 # ================================================================
-# Prefetch Split Helper (No Changes Needed)
+# Prefetch Split Helper
 # ================================================================
 def _find_prefetch_split(start_model, path):
-    """
-    Finds the first relationship in the path that requires prefetch.
-    (No changes needed here, relies on validated paths)
-    """
+    """Finds the first prefetch-requiring relation and splits the path."""
     current_model = start_model
-    parts = path.split('__')
+    parts = path.split(LOOKUP_SEP)
     root_prefetch_list = []
     subsequent_list = []
     related_model_after_root = None
@@ -235,110 +282,108 @@ def _find_prefetch_split(start_model, path):
     for i, part in enumerate(parts):
         try:
             current_meta = _get_model_meta(current_model)
-            # Assumes get_field works due to upstream validation
             field = current_meta.get_field(part)
-            is_prefetch_relation = isinstance(field, (ManyToManyField, ManyToManyRel, ForeignObjectRel))
-
-            next_model = None
-            if hasattr(field, 'remote_field') and field.remote_field and field.remote_field.model:
-                next_model = field.remote_field.model
-            elif hasattr(field, 'related_model') and field.related_model:
-                next_model = field.related_model
-            # No need for extensive error checks here as path validity is assumed
+            is_prefetch_relation = isinstance(field, (ManyToManyField, ManyToManyRel, ForeignObjectRel, ManyToOneRel))
+            next_model = getattr(field, 'related_model', None) or \
+                         (getattr(field, 'remote_field', None) and getattr(field.remote_field, 'model', None))
 
             if not prefetch_found:
                 root_prefetch_list.append(part)
+                # Need the next model to continue, even if prefetch not found yet
+                if not next_model and i < len(parts) - 1: # Check if not the last part
+                     raise ValueError(f"Cannot determine next model for non-prefetch part '{part}' in '{path}'")
                 current_model = next_model
                 if is_prefetch_relation:
                     prefetch_found = True
-                    related_model_after_root = current_model
+                    related_model_after_root = current_model # The model *being* prefetched
             else:
                 subsequent_list.append(part)
-                current_model = next_model # Continue traversal
+                 # Need to continue stepping through models for subsequent path
+                if not next_model and i < len(parts) - 1:
+                     raise ValueError(f"Cannot determine next model for subsequent part '{part}' in '{path}'")
+                current_model = next_model
 
         except Exception as e:
-            # Should ideally not happen with validated paths, but log defensively
-            logger.error(f"Unexpected error splitting validated path '{path}' at part '{part}': {e}")
-            return None, None, None
+            logger.error(f"Error splitting path '{path}' at part '{part}': {e}")
+            return None, None, None # Return three Nones
 
     if prefetch_found:
-        root_prefetch_path = '__'.join(root_prefetch_list)
-        subsequent_path = '__'.join(subsequent_list)
+        root_prefetch_path = LOOKUP_SEP.join(root_prefetch_list)
+        subsequent_path = LOOKUP_SEP.join(subsequent_list)
         return root_prefetch_path, subsequent_path, related_model_after_root
     else:
-        # This case means the path didn't actually contain a prefetch-triggering relation,
-        # which might indicate an issue in refine_relationship_paths logic if it occurs.
-        logger.warning(f"Path '{path}' categorized for prefetch did not contain a prefetch relation during split.")
+        # This path didn't actually contain a prefetch relation
+        logger.warning(f"Path '{path}' ended up in prefetch logic but contained no prefetch relation.")
         return None, None, None
 
-
 # ================================================================
-# MAIN OPTIMIZATION FUNCTION (No Changes Needed for Core Logic)
+# MAIN OPTIMIZATION FUNCTION
 # ================================================================
-def optimize_query(queryset, fields, use_only=True, defer_fields=None):
+def optimize_query(queryset, fields=None, fields_map=None, depth=0, use_only=True, get_model_name=None):
     """
-    Apply select_related, prefetch_related, and only/defer optimizations.
-    Relies on generate_query_paths to strictly validate input fields.
-    Prefetch building remains simplified (no inner .only()).
+    Apply select_related, prefetch_related, and optionally .only() optimizations.
+    Uses either:
+    1.  A list of field paths (fields). In this case it still relies on the field map to get which models will be selected.
+    2.  A fields_map and depth to automatically generate paths.
 
     Args:
         queryset: Django QuerySet
-        fields (list): List of field paths like ['author__books__publisher', 'author__name'].
-                       MUST be valid paths, otherwise generate_query_paths will raise ValueError.
-        use_only (bool): If True, use .only() to fetch only needed fields on the
-                         ROOT model (based on field_map[''] + required FKs + PK).
-                         Defaults to True.
-        defer_fields (list, optional): List of fields to exclude from the root
-                                       queryset using .defer().
+        fields (list, optional): List of field paths.
+        fields_map (dict, optional): Dictionary specifying fields to retrieve for each model,
+                                     with model names obtained using get_model_name.
+        depth (int, optional):  Depth of relationships to traverse when using fields_map.
+        use_only (bool): If True, use .only() on the root model.
+        get_model_name (callable, optional): Function to get model name from a model class.
+                                               Required if using fields_map or if 'fields' is used with 'fields_map'.
 
     Returns:
         QuerySet: Optimized queryset
-
-    Raises:
-        ValueError: If any path in `fields` is invalid (segment not found,
-                    final field not found, or attempts to traverse non-relation).
-        TypeError: If queryset is not a QuerySet instance.
-        FieldError: Potential Django error during .only()/.defer() application if
-                    conflicts arise (less likely with validation).
     """
-    # --- Initial checks and setup ---
     if not isinstance(queryset, QuerySet):
         raise TypeError("queryset must be a Django QuerySet instance.")
 
     model = queryset.model
-    _clear_meta_cache() # Clear cache for fresh run
+    _clear_meta_cache()
 
-    # If no fields specified, apply defer if needed, otherwise return original
-    # No validation needed if fields list is empty.
-    if not fields:
-        logger.info("No fields specified, returning original queryset.")
-        if defer_fields:
-             # Basic validation for defer_fields even when no specific fields requested
-             valid_defer_fields = []
-             root_meta = _get_model_meta(model)
-             for field_name in defer_fields:
-                 try:
-                     root_meta.get_field(field_name)
-                     valid_defer_fields.append(field_name)
-                 except FieldDoesNotExist:
-                      logger.warning(f"Field '{field_name}' specified in defer_fields not found on {model.__name__}. Skipping.")
-             if valid_defer_fields:
-                  logger.info(f"Applying .defer({valid_defer_fields}) as specified (no fields list)")
-                  return queryset.defer(*valid_defer_fields)
-             else:
-                  logger.warning("No valid fields found in defer_fields. Not applying .defer().")
+    # Validate get_model_name if fields_map is used or fields is used along with fields_map
+    if (fields_map or fields) and not callable(get_model_name):
+        raise ValueError("If 'fields_map' or 'fields' with 'fields_map' is provided, 'get_model_name' must be a callable function.")
+
+    # 1. Generate paths either from explicit field list or fields_map/depth
+    if fields:
+        try:
+            all_relation_paths, field_map = generate_query_paths(model, fields)
+        except ValueError as e:
+            logger.error(f"Input field validation failed: {e}")
+            _clear_meta_cache()
+            raise
+
+    elif fields_map:
+        # Generate paths from fields_map and depth
+        if get_model_name is None:
+            raise ValueError("get_model_name must be provided when using fields_map")
+        generated_paths = generate_paths(model, depth, fields_map, get_model_name)
+        fields = list(generated_paths)  # Convert set to list
+        #Generate fields from generated paths to be used in only clause for the root model
+
+        all_relation_paths = set()
+        field_map = {'': set()}
+
+        for field_path in fields:
+            parts = field_path.split(LOOKUP_SEP)
+            field_name = parts[-1]
+            relationship_parts = parts[:-1]
+            relation_path_key = LOOKUP_SEP.join(relationship_parts)
+            field_map.setdefault(relation_path_key, set()).add(field_name)
+            if relationship_parts:
+                all_relation_paths.add(relation_path_key)
+
+
+    else:
+        logger.info("No fields or fields_map specified, returning original queryset.")
         return queryset
 
-    # 1. Generate potential paths and the field map (CRITICAL VALIDATION STEP)
-    # This will raise ValueError if any input field path is invalid.
-    try:
-        all_relation_paths, field_map = generate_query_paths(model, fields)
-    except ValueError as e:
-        logger.error(f"Input field validation failed: {e}")
-        _clear_meta_cache()
-        raise # Re-raise the validation error
-
-    # --- Continue with optimization if validation passed ---
+    # --- Continue with optimization ---
     try:
         # 2. Determine which paths use select_related vs prefetch_related
         select_related_paths, prefetch_related_paths = refine_relationship_paths(
@@ -350,17 +395,12 @@ def optimize_query(queryset, fields, use_only=True, defer_fields=None):
 
         logger.debug(f"--- Optimization Plan for {model.__name__} ---")
         logger.debug(f"  Input Fields (Validated): {fields}")
-        # Log raw paths determined *after* validation
-        # logger.debug(f"  Raw Select Related Paths: {select_related_paths}") # Maybe less useful now
-        # logger.debug(f"  Raw Prefetch Related Paths: {prefetch_related_paths}")
         logger.debug(f"  Final Select Related: {final_select_related}")
-        logger.debug(f"  Final Prefetch Paths (Roots): {prefetch_related_paths}") # Log the paths going into prefetch loop
+        logger.debug(f"  All Prefetch Paths (to process): {prefetch_related_paths}")
         logger.debug(f"  Field Map (Validated): {field_map}")
-        logger.debug(f"  Use Only (Root): {use_only}")
-        logger.debug(f"  Defer Fields (Root): {defer_fields}")
+        logger.debug(f"  Use Only (Root): {use_only}") # Log use_only parameter
+        logger.debug(f"  Fields Map (Passed In): {fields_map}")
 
-        # Keep track of the original queryset for potential error reporting
-        original_queryset = queryset # Although queryset gets modified below
         prefetch_data = {} # Dictionary to store Prefetch build info
 
         # Apply top-level select_related first
@@ -371,105 +411,129 @@ def optimize_query(queryset, fields, use_only=True, defer_fields=None):
             logger.info("No select_related paths to apply.")
 
         # ================================================================
-        # Build Prefetch objects (Simplified - No Inner .only())
+        # Build Prefetch objects
         # ================================================================
+        processed_prefetch_roots = set() # Track roots to build only one Prefetch per root path
+        prefetch_objects = []
+
+        # Process prefetch paths, potentially building nested select_related inside
         for path in prefetch_related_paths:
             split_result = _find_prefetch_split(model, path)
             if not split_result or not split_result[0]:
-                logger.warning(f"Skipping prefetch build for path '{path}' - split failed unexpectedly.")
+                logger.debug(f"Skipping prefetch build for path '{path}' - split failed or no prefetch found.")
                 continue # Skip if path doesn't represent a valid prefetch structure
 
             root_pf_path, subsequent_path, related_model = split_result
 
+            if not related_model:
+                 logger.warning(f"Cannot determine related model for prefetch '{root_pf_path}'. Skipping.")
+                 continue
+
+            # Aggregate nested select info for this root path
             if root_pf_path not in prefetch_data:
                  prefetch_data[root_pf_path] = {
                      'related_model': related_model,
                      'nested_selects': set(),
                  }
-
-            current_pf_info = prefetch_data[root_pf_path]
-
-            # --- Determine nested select_related path ---
-            is_nested_select_path = True
-            current_nested_model = related_model
+            # Add subsequent path if it represents a valid nested select_related chain
             if subsequent_path:
-                sub_parts = subsequent_path.split('__')
-                temp_nested_select_parts = []
-                for part in sub_parts:
-                     try:
-                         if not current_nested_model:
-                            is_nested_select_path = False; break
+                # Basic check: Does subsequent path contain prefetch-like relations? If not, assume select_related.
+                # (More robust check could re-run refine_paths logic on subsequent path relative to related_model)
+                is_nested_select = True
+                current_nested_model = related_model
+                try:
+                    for part in subsequent_path.split(LOOKUP_SEP):
                          meta = _get_model_meta(current_nested_model)
-                         # Assume get_field works here
                          field = meta.get_field(part)
-                         # Check it *is* a select-compatible relation
                          if not isinstance(field, (ForeignKey, OneToOneField)):
-                             is_nested_select_path = False; break
+                             is_nested_select = False; break
+                         current_nested_model = field.remote_field.model
+                except Exception:
+                     is_nested_select = False
 
-                         next_model = field.remote_field.model if hasattr(field, 'remote_field') and field.remote_field else None
-                         if not next_model: # Should have been caught upstream if needed for path
-                            is_nested_select_path = False; break
+                if is_nested_select:
+                    prefetch_data[root_pf_path]['nested_selects'].add(subsequent_path)
+                else:
+                     logger.debug(f"Subsequent path '{subsequent_path}' for root '{root_pf_path}' is not purely select_related.")
 
-                         current_nested_model = next_model
-                         temp_nested_select_parts.append(part)
-                     except Exception: # Catch unexpected issues even here
-                         is_nested_select_path = False; break
-                if is_nested_select_path and temp_nested_select_parts:
-                    current_pf_info['nested_selects'].add(subsequent_path)
-
-        # --- Now, build the actual Prefetch objects from the aggregated data ---
-        prefetch_objects = []
+        # --- Now, build the actual Prefetch objects ---
         for root_pf_path, pf_info in prefetch_data.items():
-            related_model = pf_info['related_model']
-            if not related_model:
-                logger.warning(f"Cannot build Prefetch for '{root_pf_path}': related model unknown.")
+            # Avoid creating duplicate Prefetch objects for the same root
+            if root_pf_path in processed_prefetch_roots:
                 continue
 
-            inner_queryset = related_model._default_manager.all() # Start with default manager
+            related_model = pf_info['related_model']
+            inner_queryset = related_model._default_manager.all()
 
-            # Apply nested select_related if any were found
+            # Apply nested select_related if any were found for this root
             final_nested_selects = remove_redundant_paths(pf_info['nested_selects'])
             if final_nested_selects:
                 logger.debug(f"  Applying nested select_related({final_nested_selects}) within Prefetch('{root_pf_path}')")
                 inner_queryset = inner_queryset.select_related(*final_nested_selects)
 
-            # Create the final Prefetch object (NO .only() here)
+            # --- Apply .only() to the INNER queryset (the one *being* prefetched) ---
+            related_model_name = get_model_name(related_model)
+
+            related_fields_to_fetch = set()
+
+            if fields_map and related_model_name in fields_map:
+                related_fields_to_fetch.update(fields_map[related_model_name])
+            else:
+                # If no field restrictions are provided, get all fields
+                all_fields = [f.name for f in related_model._meta.get_fields() if f.concrete]
+                related_fields_to_fetch.update(all_fields)
+                logger.debug(f"No fields_map provided for {related_model_name}.  Fetching all fields.")
+
+            # Always add PK
+            related_fields_to_fetch.add(related_model._meta.pk.name)
+
+            if related_fields_to_fetch:
+                logger.debug(f"  Applying .only({related_fields_to_fetch}) to inner queryset for Prefetch('{root_pf_path}')")
+                try:
+                    inner_queryset = inner_queryset.only(*related_fields_to_fetch)
+                except FieldError as e:
+                    logger.error(f"FieldError applying .only({related_fields_to_fetch}) to {related_model_name} for prefetch: {e}")
+                    raise
+
+            # Create the final Prefetch object
             prefetch_obj = Prefetch(root_pf_path, queryset=inner_queryset)
             prefetch_objects.append(prefetch_obj)
+            processed_prefetch_roots.add(root_pf_path)
 
-            # Construct representation for logging (Simplified)
+            # Construct representation for logging
             qs_repr_parts = [f"{related_model.__name__}.objects"]
             if final_nested_selects:
                 qs_repr_parts.append(f".select_related({final_nested_selects})")
+            if related_fields_to_fetch:
+                qs_repr_parts.append(f".only({related_fields_to_fetch})")
             qs_repr = "".join(qs_repr_parts)
             logger.info(f"Prepared Prefetch('{root_pf_path}', queryset={qs_repr})")
 
         # Apply prefetch_related with the constructed objects
         if prefetch_objects:
             logger.info(f"Applying prefetch_related with {len(prefetch_objects)} optimized Prefetch objects.")
-            queryset = queryset.prefetch_related(*prefetch_objects)
+            queryset = queryset.prefetch_related(*prefetch_objects) # Apply unique prefetches
         else:
              logger.info("No prefetch_related paths requiring optimized Prefetch objects.")
 
-        # --- Apply .only() or .defer() for the ROOT queryset ---
-        apply_defer = bool(defer_fields)
+        # --- Apply .only() for the ROOT queryset IF use_only is True ---
+        # This section is restored to its state before use_only was removed
         apply_only = False
-        root_fields_to_fetch = set() # Define here for error logging scope
+        root_fields_to_fetch = set()
 
-        if use_only:
+        if use_only: # Check the parameter
             root_meta = _get_model_meta(model)
             pk_name = root_meta.pk.name
 
             # Add direct non-relational fields requested for the root model
-            # These are guaranteed to exist by generate_query_paths
             if '' in field_map:
                 for field_name in field_map.get('', set()):
-                    try: # Still good practice to handle unexpected field type issues
+                    try:
                         field_obj = root_meta.get_field(field_name)
                         if not field_obj.is_relation:
                            root_fields_to_fetch.add(field_name)
-                        # Also add FK fields if explicitly requested directly
                         elif isinstance(field_obj, (ForeignKey, OneToOneField)):
+                             # If FK/O2O itself is requested directly, include its id field
                              root_fields_to_fetch.add(field_obj.attname)
                     except FieldDoesNotExist: # Should not happen after validation
                         logger.error(f"Validated field '{field_name}' unexpectedly not found on root model {model.__name__} during .only() phase.")
@@ -479,14 +543,13 @@ def optimize_query(queryset, fields, use_only=True, defer_fields=None):
             # Always include the primary key if using .only()
             if pk_name: root_fields_to_fetch.add(pk_name)
 
-            # Add the foreign key fields required by top-level select_related paths
-            # These paths/fields are also guaranteed valid by generate_query_paths
+            # Add the foreign key fields (_id) required by top-level select_related paths
             if final_select_related:
                 for path in final_select_related:
-                    first_part = path.split('__')[0]
+                    first_part = path.split(LOOKUP_SEP)[0]
                     try:
                         field_obj = root_meta.get_field(first_part)
-                        # Only add FK attribute names (e.g., 'author_id')
+                        # Only add FK/O2O attribute names (e.g., 'author_id')
                         if isinstance(field_obj, (ForeignKey, OneToOneField)):
                             root_fields_to_fetch.add(field_obj.attname)
                     except FieldDoesNotExist: # Should not happen
@@ -496,47 +559,32 @@ def optimize_query(queryset, fields, use_only=True, defer_fields=None):
 
             # Determine if .only() should actually be applied
             if root_fields_to_fetch:
-                apply_only = True
-                apply_defer = False # .only() takes precedence if use_only=True
+                apply_only = True # Set flag to true only if use_only=True and fields were found
             else:
-                 # This case is unlikely if PK exists, but defensively:
                  apply_only = False
                  logger.warning(f"use_only=True but no root fields identified for .only() on {model.__name__}. Not applying .only().")
 
-        # Apply .only() or .defer()
+        # Apply .only() based on the apply_only flag (which depends on use_only)
         if apply_only:
             logger.info(f"Applying .only({root_fields_to_fetch}) to root queryset.")
-            queryset = queryset.only(*root_fields_to_fetch)
-        elif apply_defer:
-             # Validate defer fields again just in case they weren't checked earlier
-             # (e.g., if fields was empty but defer_fields was provided)
-             valid_defer_fields = []
-             root_meta = _get_model_meta(model)
-             for field_name in defer_fields:
-                 try:
-                     root_meta.get_field(field_name)
-                     valid_defer_fields.append(field_name)
-                 except FieldDoesNotExist:
-                      logger.warning(f"Field '{field_name}' specified in defer_fields not found on {model.__name__}. Skipping.")
-             if valid_defer_fields:
-                  logger.info(f"Applying .defer({valid_defer_fields}) to root queryset.")
-                  queryset = queryset.defer(*valid_defer_fields)
-             else:
-                  logger.warning("No valid fields found in defer_fields. Not applying .defer().")
+            try:
+                 queryset = queryset.only(*root_fields_to_fetch)
+            except FieldError as e:
+                 logger.error(f"FieldError applying .only({root_fields_to_fetch}) to {model.__name__}: {e}. Check for conflicts with annotations or ordering.")
+                 raise # Re-raise FieldError as it indicates a real problem
+        # No 'elif apply_defer' block anymore
         else:
-             logger.info("Not applying .only() or .defer() to root queryset.")
+             # This logs if use_only=False OR if use_only=True but no fields were calculated
+             logger.info("Not applying .only() to root queryset (use_only=False or no fields identified).")
 
     # --- Error Handling ---
     except FieldError as e:
-        # This might still occur if .only/.defer conflicts with internal Django needs
-        # for filtering/ordering not covered by our explicit fields.
-        logger.error(f"FieldError during optimization application: {e}. Possible conflict between only/defer and other queryset operations.")
-        logger.error(f"  Model: {model.__name__}")
-        logger.error(f"  Validated Fields requested: {fields}")
-        logger.error(f"  Select Related paths: {final_select_related}")
-        logger.error(f"  Prefetch Data Prepared: {prefetch_data}") # Log structure used
-        logger.error(f"  Calculated root .only() fields: {root_fields_to_fetch if 'root_fields_to_fetch' in locals() else 'Not Calculated'}")
-        logger.error(f"  Specified .defer() fields: {defer_fields}")
+        # Catch FieldErrors that might occur during select_related/prefetch_related too
+        logger.error(f"FieldError during optimization application: {e}.")
+        _clear_meta_cache()
+        raise e
+    except ValueError as e: # Catch validation errors
+        logger.error(f"Field validation or processing error: {e}")
         _clear_meta_cache()
         raise e
     except Exception as e:
@@ -548,45 +596,127 @@ def optimize_query(queryset, fields, use_only=True, defer_fields=None):
     logger.debug(f"--- Optimization finished for {model.__name__} ---")
     return queryset
 
-
 # ================================================================
-# generate_paths Helper (No Changes Needed)
+# generate_paths Helper (No changes needed from original provided)
 # ================================================================
 def generate_paths(model, depth, fields, get_model_name):
     """
-    Generates relationship paths up to a given depth for specified fields.
-    (No changes needed here, not directly related to the core optimization logic)
+    Generates relationship paths up to a given depth for specified fields dict.
     """
-    # ... (implementation remains the same) ...
     paths = set()
+    processed_models = set() # Avoid infinite loops
 
     def _traverse(current_model, current_path, current_depth):
-        if current_depth > depth:
+        model_identifier = (current_model, current_path)
+        if current_depth > depth or model_identifier in processed_models:
             return
+        processed_models.add(model_identifier)
 
         model_name = get_model_name(current_model)
+        current_meta = _get_model_meta(current_model)
 
-        # Add fields for the current model
         if model_name in fields:
-            for field in fields[model_name]:
-                full_path = current_path + ("__" if current_path else "") + field
-                paths.add(full_path) # Assumes field is valid on current_model here
+            model_fields_to_include = fields[model_name]
+            for field_name in model_fields_to_include:
+                try:
+                    field_obj = current_meta.get_field(field_name)
+                    full_path = current_path + (LOOKUP_SEP if current_path else "") + field_name
+                    paths.add(full_path) # Add the path ending here
 
-        # Traverse related fields *if they are also requested*
-        meta = _get_model_meta(current_model)  # Use the cached meta
-        for field in meta.get_fields():
-            # Check if it's a relation AND if the relation itself is listed in fields dict for current model
-            if field.concrete and field.is_relation and model_name in fields and field.name in fields[model_name]:
-                field_name = field.name
-                related_model = None
-                if hasattr(field, 'remote_field') and field.remote_field and field.remote_field.model:
-                    related_model = field.remote_field.model
-                elif hasattr(field, 'related_model') and field.related_model:
-                    related_model = field.related_model
-
-                if related_model:
-                    new_path = current_path + ("__" if current_path else "") + field_name
-                    _traverse(related_model, new_path, current_depth + 1)
+                    # If it's a relation and we should traverse further
+                    if field_obj.is_relation:
+                        related_model = getattr(field_obj, 'related_model', None) or \
+                                        (getattr(field_obj, 'remote_field', None) and getattr(field_obj.remote_field, 'model', None))
+                        if related_model and get_model_name(related_model) in fields:
+                             _traverse(related_model, full_path, current_depth + 1)
+                except FieldDoesNotExist:
+                     logger.warning(f"[generate_paths] Field '{field_name}' specified in 'fields' dict not found on model {model_name} at path '{current_path}'. Skipping.")
+                     continue
 
     _traverse(model, "", 0)
+    _clear_meta_cache()
+    logger.debug(f"[generate_paths] Generated paths: {paths}")
+    # Note: This generate_paths does basic path building based on the dict keys/values.
+    # It does *not* guarantee the same level of strict validation as the internal generate_query_paths.
+    # The main optimize_query function relies on its *internal* generate_query_paths for validation.
     return paths
+
+class DjangoQueryOptimizer(AbstractQueryOptimizer):
+    """
+    Concrete implementation of AbstractQueryOptimizer for Django QuerySets.
+    """
+    def __init__(
+        self,
+        depth: Optional[int] = None,
+        fields_per_model: Optional[Dict[str, Set[str]]] = None,
+        get_model_name_func: Optional[Callable[[Type[ORMModel]], str]] = None,
+        use_only: bool = True
+    ):
+        """
+        Initializes the optimizer with configuration parameters.
+
+        Args:
+            depth (Optional[int]): Maximum relationship traversal depth
+                if generating field paths automatically.
+            fields_per_model (Optional[Dict[str, Set[str]]]): Mapping of
+                model names (keys) to sets of required field/relationship names
+                (values), used if generating field paths automatically.
+            get_model_name_func (Optional[Callable]): Function to get a
+                consistent string name for a model class.
+            use_only (bool): Whether to use .only() on the root model.
+        """
+        super().__init__(depth, fields_per_model, get_model_name_func)
+        self.use_only = use_only
+        
+        # Validate configuration
+        if (fields_per_model or depth is not None) and not get_model_name_func:
+            raise ValueError("If 'fields_per_model' or 'depth' is provided, 'get_model_name_func' must also be provided.")
+        
+        if depth is not None and depth < 0:
+            raise ValueError("Depth cannot be negative.")
+
+    def optimize(
+        self,
+        queryset: QuerySet,
+        fields: Optional[List[str]] = None,
+        **kwargs: Any
+    ) -> QuerySet:
+        """
+        Optimizes the given Django QuerySet using preconfigured parameters.
+
+        Args:
+            queryset (QuerySet): The Django QuerySet to optimize.
+            fields (Optional[List[str]]): An explicit list of field paths to optimize for.
+                If provided, this overrides automatic path generation.
+            **kwargs: Optional overrides for depth, fields_map, get_model_name_func, or use_only.
+
+        Returns:
+            QuerySet: The optimized Django QuerySet.
+        """
+        # Handle optional overrides
+        depth = kwargs.get('depth', self.default_depth)
+        fields_map = kwargs.get('fields_map', self.default_fields_per_model)
+        get_model_name_func = kwargs.get('get_model_name_func', self.default_get_model_name_func)
+        use_only = kwargs.get('use_only', self.use_only)
+
+        try:
+            # Generate paths if fields not explicitly provided
+            if not fields and fields_map and depth is not None and get_model_name_func:
+                generated_paths = generate_paths(queryset.model, depth, fields_map, get_model_name_func)
+                fields = list(generated_paths)
+
+            # Core optimization call
+            optimized_queryset = optimize_query(
+                queryset,
+                fields=fields,
+                fields_map=fields_map,
+                depth=depth,
+                use_only=use_only,
+                get_model_name=get_model_name_func,
+            )
+
+            return optimized_queryset
+
+        except Exception as e:
+            logger.error(f"Error during query optimization: {e}")
+            raise  # Re-raise the exception to propagate it

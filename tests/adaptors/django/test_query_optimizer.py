@@ -3,6 +3,7 @@ from django.test import TestCase
 from django.db import connection, reset_queries
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from django.db.models import Q
 
 from tests.django_app.models import (
     Product, ProductCategory, Order, OrderItem,
@@ -10,7 +11,8 @@ from tests.django_app.models import (
     ComprehensiveModel
 )
 
-from ormbridge.adaptors.django.query_optimizer import optimize_query, generate_paths
+# Update imports to include DjangoQueryOptimizer
+from ormbridge.adaptors.django.query_optimizer import DjangoQueryOptimizer
 
 class QueryOptimizerTests(TestCase):
     """Tests for the query optimizer covering various scenarios."""
@@ -91,26 +93,46 @@ class QueryOptimizerTests(TestCase):
             # Update order total
             order.total = total
             order.save()
+        
+        cls.get_model_name = lambda model: model.__name__
     
-    def _test_optimization(self, model, fields, expected_max_queries, description, generate_paths_mode=False, depth=2, specific_fields=None):
+    def _test_optimization(self, model, fields, expected_max_queries, description, generate_paths_mode=False, depth=2, specific_fields=None, filter_condition=None, q_filter=None):
         """
         Shared test logic for all optimization tests.
         
         Tests:
         1. Query count is reduced
         2. Performance is improved 
-        3. Results are identical
+        3. Results are identical (both IDs and count)
+        
+        Args:
+            model: The model class to query
+            fields: List of fields to optimize for
+            expected_max_queries: Maximum number of queries expected after optimization
+            description: Description of the test for logging
+            generate_paths_mode: Whether to use generate_paths mode
+            depth: Depth for generate_paths
+            specific_fields: Fields per model for generate_paths
+            filter_condition: Optional filter condition as a dict
+            q_filter: Optional Q object filter
         """
+        # Create base queryset with filtering if provided
+        base_queryset = model.objects.all()
+        if filter_condition:
+            base_queryset = base_queryset.filter(**filter_condition)
+        if q_filter:
+            base_queryset = base_queryset.filter(q_filter)
+            
         # Get baseline results for comparison
-        baseline_queryset = model.objects.all()
-        baseline_ids = list(baseline_queryset.values_list('id', flat=True))
+        baseline_ids = list(base_queryset.values_list('id', flat=True))
+        baseline_count = len(baseline_ids)
         
         # Test unoptimized query
         reset_queries()
         start_time = time.time()
         with CaptureQueriesContext(connection) as context:
             # Get all objects
-            objects = list(baseline_queryset)
+            objects = list(base_queryset)
             
             # Access fields to trigger lazy loading
             for obj in objects:
@@ -123,18 +145,27 @@ class QueryOptimizerTests(TestCase):
         reset_queries()
         start_time = time.time()
         with CaptureQueriesContext(connection) as context:
+            # Create a new optimizer instance for each test
+            optimizer = DjangoQueryOptimizer(
+                depth=depth,
+                fields_per_model=specific_fields,
+                get_model_name_func=self.get_model_name,
+                use_only=True
+            )
+            
             # Optimize the query
             if generate_paths_mode:
-                def get_model_name(model):
-                    return model.__name__
-
-                generated_fields = generate_paths(model, depth, specific_fields, get_model_name)
-                optimized_qs = optimize_query(model.objects.all(), list(generated_fields))
-
+                optimized_qs = optimizer.optimize(
+                    base_queryset
+                )
             else:
-                optimized_qs = optimize_query(model.objects.all(), fields)
+                optimized_qs = optimizer.optimize(
+                    base_queryset,
+                    fields=fields
+                )
 
             objects = list(optimized_qs)
+            optimized_count = len(objects)
             
             # Access the same fields
             for obj in objects:
@@ -147,7 +178,12 @@ class QueryOptimizerTests(TestCase):
         optimized_ids = list(optimized_qs.values_list('id', flat=True))
         
         # Print performance metrics
-        print(f"\n{description} Results:")
+        filter_info = ""
+        if filter_condition or q_filter:
+            filter_info = " with filtering"
+        
+        print(f"\n{description}{filter_info} Results:")
+        print(f"Row count: {optimized_count}")
         print(f"Unoptimized: {unoptimized_query_count} queries, {unoptimized_time:.4f}s")
         print(f"Optimized: {optimized_query_count} queries, {optimized_time:.4f}s")
         print(f"Query reduction: {unoptimized_query_count - optimized_query_count} queries ({(1 - optimized_query_count / unoptimized_query_count) * 100:.1f}%)")
@@ -166,13 +202,19 @@ class QueryOptimizerTests(TestCase):
             f"Expected at most {expected_max_queries} queries, got {optimized_query_count}"
         )
         
-        # 3. Results should be identical
+        # 3. Results should be identical (IDs)
         self.assertEqual(
             optimized_ids, baseline_ids,
             "Optimized query returned different results than baseline"
         )
         
-        # 4. Time should be better or at least not significantly worse
+        # 4. Row counts should be identical
+        self.assertEqual(
+            optimized_count, baseline_count,
+            f"Optimized query returned different number of rows ({optimized_count}) than baseline ({baseline_count})"
+        )
+        
+        # 5. Time should be better or at least not significantly worse
         # (Using a tolerance factor since timing can vary)
         self.assertLessEqual(
             optimized_time, unoptimized_time * 1.2,
@@ -294,6 +336,64 @@ class QueryOptimizerTests(TestCase):
             description="Multiple Levels of Prefetch"
         )
     
+    def test_basic_filtering(self):
+        """Test optimization with basic field filtering."""
+        fields = [
+            'name',
+            'price',
+            'category__name'
+        ]
+        
+        filter_condition = {'price__gt': 20}
+        
+        self._test_optimization(
+            Product, 
+            fields, 
+            expected_max_queries=1,
+            description="Basic Filtering",
+            filter_condition=filter_condition
+        )
+    
+    def test_q_object_filtering(self):
+        """Test optimization with Q object filtering."""
+        fields = [
+            'name',
+            'price',
+            'category__name'
+        ]
+        
+        # Create a complex Q filter
+        q_filter = Q(price__lt=15) | Q(name__contains='1')
+        
+        self._test_optimization(
+            Product, 
+            fields, 
+            expected_max_queries=1,
+            description="Q Object Filtering",
+            q_filter=q_filter
+        )
+    
+    def test_complex_filtering(self):
+        """Test optimization with both basic and Q object filtering."""
+        fields = [
+            'name',
+            'price',
+            'category__name'
+        ]
+        
+        # Combine both filter types
+        filter_condition = {'category__name__contains': 'Category'}
+        q_filter = Q(price__gt=15) | Q(name__contains='2')
+        
+        self._test_optimization(
+            Product, 
+            fields, 
+            expected_max_queries=1,
+            description="Complex Filtering",
+            filter_condition=filter_condition,
+            q_filter=q_filter
+        )
+    
     def test_filtering_with_optimization(self):
         """Test that optimization works with filtering."""
         fields = [
@@ -301,16 +401,23 @@ class QueryOptimizerTests(TestCase):
             'price',
             'category__name'
         ]
+
+        fields_map = {
+            'Product': ['name', 'price', 'id'],
+            'Category': ['name', 'id']
+        }
         
         # Create a filtered queryset
         filtered_qs = Product.objects.filter(price__gt=20)
         filtered_ids = list(filtered_qs.values_list('id', flat=True))
+        filtered_count = len(filtered_ids)
         
         # Test unoptimized
         reset_queries()
         start_time = time.time()
         with CaptureQueriesContext(connection) as context:
             objects = list(filtered_qs)
+            unoptimized_count = len(objects)
             for obj in objects:
                 _ = obj.category.name
             unoptimized_query_count = len(context.captured_queries)
@@ -320,8 +427,21 @@ class QueryOptimizerTests(TestCase):
         reset_queries()
         start_time = time.time()
         with CaptureQueriesContext(connection) as context:
-            optimized_qs = optimize_query(filtered_qs, fields)
+            # Create a new optimizer instance
+            optimizer = DjangoQueryOptimizer(
+                fields_per_model=fields_map,
+                get_model_name_func=self.get_model_name,
+                use_only=True
+            )
+            
+            # Use the optimizer instance
+            optimized_qs = optimizer.optimize(
+                filtered_qs, 
+                fields=fields
+            )
             objects = list(optimized_qs)
+            optimized_count = len(objects)
+            
             for obj in objects:
                 _ = obj.category.name
             optimized_query_count = len(context.captured_queries)
@@ -332,12 +452,15 @@ class QueryOptimizerTests(TestCase):
         
         # Print metrics
         print(f"\nFiltering with Optimization Results:")
+        print(f"Row count: {optimized_count}")
         print(f"Unoptimized: {unoptimized_query_count} queries, {unoptimized_time:.4f}s")
         print(f"Optimized: {optimized_query_count} queries, {optimized_time:.4f}s")
         
         # Assertions
         self.assertLessEqual(optimized_query_count, unoptimized_query_count)
         self.assertEqual(optimized_ids, filtered_ids)
+        self.assertEqual(optimized_count, filtered_count)
+        self.assertEqual(optimized_count, unoptimized_count)
 
     def test_generate_paths_select_related(self):
         """Test generate_paths function with select_related scenario."""
@@ -371,3 +494,56 @@ class QueryOptimizerTests(TestCase):
             depth=2,
             specific_fields=specific_fields
         )
+
+    def test_use_only_parameter(self):
+        """Test the use_only parameter of the optimizer."""
+        fields = [
+            'name',
+            'category__name'
+        ]
+        
+        # Create optimizers with different use_only settings
+        optimizer_with_only = DjangoQueryOptimizer(
+            get_model_name_func=self.get_model_name,
+            use_only=True
+        )
+        
+        optimizer_without_only = DjangoQueryOptimizer(
+            get_model_name_func=self.get_model_name,
+            use_only=False
+        )
+        
+        # Test the optimizer with use_only=True
+        reset_queries()
+        with CaptureQueriesContext(connection) as context:
+            optimized_with_only = optimizer_with_only.optimize(
+                Product.objects.all(), 
+                fields=fields
+            )
+            objects = list(optimized_with_only)
+            count_with_only = len(objects)
+            queries_with_only = len(context.captured_queries)
+        
+        # Test the optimizer with use_only=False
+        reset_queries()
+        with CaptureQueriesContext(connection) as context:
+            optimized_without_only = optimizer_without_only.optimize(
+                Product.objects.all(), 
+                fields=fields
+            )
+            objects = list(optimized_without_only)
+            count_without_only = len(objects)
+            queries_without_only = len(context.captured_queries)
+        
+        # Both should work but might generate different queries
+        print(f"\nUse Only Parameter Test:")
+        print(f"Row count with use_only=True: {count_with_only}")
+        print(f"Row count with use_only=False: {count_without_only}")
+        print(f"With use_only=True: {queries_with_only} queries")
+        print(f"With use_only=False: {queries_without_only} queries")
+        
+        # Both should return the same results
+        with_only_ids = list(optimized_with_only.values_list('id', flat=True))
+        without_only_ids = list(optimized_without_only.values_list('id', flat=True))
+        self.assertEqual(with_only_ids, without_only_ids)
+        self.assertEqual(count_with_only, count_without_only)

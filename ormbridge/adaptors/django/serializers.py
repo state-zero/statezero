@@ -13,7 +13,7 @@ import logging
 from ormbridge.adaptors.django.config import config, registry
 from ormbridge.core.caching import CachingMixin
 from ormbridge.core.classes import ModelSummaryRepresentation
-from ormbridge.core.interfaces import AbstractDataSerializer
+from ormbridge.core.interfaces import AbstractDataSerializer, AbstractQueryOptimizer
 from ormbridge.core.types import RequestType
 
 logger = logging.getLogger(__name__)
@@ -383,6 +383,41 @@ class DRFDynamicSerializer(AbstractDataSerializer):
     collected throughout the serialization chain.
     """
 
+    def _optimize_queryset(self, data, model, depth, fields_map):
+        if isinstance(data, models.QuerySet) and config.query_optimizer is not None:
+            try:
+                query_optimizer: Type[AbstractQueryOptimizer] = config.query_optimizer(
+                    depth=depth,
+                    fields_per_model=fields_map,
+                    get_model_name_func=config.orm_provider.get_model_name,
+                )
+                
+                # Common kwargs for both optimization paths
+                optimization_kwargs = {
+                    'depth': depth,
+                    'fields_map': fields_map,
+                    'get_model_name_func': config.orm_provider.get_model_by_name
+                }
+                
+                if "requested-fields::" in fields_map:
+                    requested_fields = fields_map["requested-fields::"]
+                    data = query_optimizer.optimize(
+                        queryset=data,
+                        fields=requested_fields,
+                        **optimization_kwargs
+                    )
+                    logger.debug(f"Query optimized for {model.__name__} with fields: {requested_fields}")
+                else:
+                    data = query_optimizer.optimize(
+                        queryset=data,
+                        **optimization_kwargs
+                    )
+                    logger.debug(f"Query optimized for {model.__name__} with no explicit field selection")
+            except Exception as e:
+                logger.error(f"Error optimizing query for {model.__name__}: {e}")
+        
+        return data  # Make sure to return data regardless of optimization
+
     def _serialize(
         self,
         data: Any,
@@ -395,15 +430,12 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
 
-        # Optimize queryset if applicable
-        if isinstance(data, models.QuerySet) and config.selected_fields_query_optimizer is not None:
-            if "requested-fields::" in fields_map:
-                requested_fields = fields_map["requested-fields::"]
-                try:
-                    data = config.selected_fields_query_optimizer(data, requested_fields)
-                    logger.debug(f"Query optimized for {model.__name__} with fields: {requested_fields}")
-                except Exception as e:
-                    logger.error(f"Error optimizing query for {model.__name__}: {e}")
+        data = self._optimize_queryset(
+            data= data,
+            model= model,
+            depth= depth,
+            fields_map=fields_map
+        )
         
         # Create the serializer class with fields_map as a class attribute
         serializer_class = DynamicModelSerializer.for_model(

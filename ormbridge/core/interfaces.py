@@ -471,3 +471,70 @@ class AbstractSearchProvider(ABC):
             Filtered queryset with search applied
         """
         pass
+
+class AbstractQueryOptimizer(ABC):
+    """
+    Abstract Base Class for query optimizers.
+
+    Defines the essential interface for optimizing a query object,
+    potentially using configuration provided during initialization.
+    """
+
+    def __init__(
+        self,
+        depth: Optional[int] = None,
+        fields_per_model: Optional[Dict[str, Set[str]]] = None,
+        get_model_name_func: Optional[Callable[[Type[ORMModel]], str]] = None
+    ):
+        """
+        Initializes the optimizer with common configuration potentially
+        used for generating optimization parameters if not provided directly
+        to the optimize method.
+
+        Args:
+            depth (Optional[int]): Default maximum relationship traversal depth
+                if generating field paths automatically.
+            fields_per_model (Optional[Dict[str, Set[str]]]): Default mapping of
+                model names (keys) to sets of required field/relationship names
+                (values), used if generating field paths automatically.
+            get_model_name_func (Optional[Callable]): Default function to get a
+                consistent string name for a model class, used with
+                fields_per_model if generating field paths automatically.
+        """
+        self.default_depth = depth
+        self.default_fields_per_model = fields_per_model
+        self.default_get_model_name_func = get_model_name_func
+        # Basic validation for depth if provided
+        if self.default_depth is not None and self.default_depth < 0:
+            raise ValueError("Depth cannot be negative.")
+
+    @abstractmethod
+    def optimize(
+        self,
+        queryset: Any,
+        fields: Optional[List[str]] = None,
+        **kwargs: Any
+    ) -> Any:
+        """
+        Optimizes the given query object.
+
+        Concrete implementations will use the provided queryset and potentially
+        the 'fields' list or the configuration from __init__ to apply
+        optimizations.
+
+        Args:
+            queryset (Any): The query object to optimize (e.g., a Django QuerySet).
+            fields (Optional[List[str]]): An explicit list of field paths to optimize for.
+                                         If provided, this typically overrides any
+                                         automatic path generation based on init config.
+            **kwargs: Additional optimization-specific parameters.
+
+        Returns:
+            Any: The optimized query object.
+
+        Raises:
+            NotImplementedError: If the concrete class doesn't implement this.
+            ValueError: If required parameters (like 'fields' or init config
+                        for generation) are missing.
+        """
+        raise NotImplementedError
