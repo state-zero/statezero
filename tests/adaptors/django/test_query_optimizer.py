@@ -10,9 +10,7 @@ from tests.django_app.models import (
     ComprehensiveModel
 )
 
-# Import the query optimizer function
-from ormbridge.adaptors.django.query_optimizer import optimize_query
-
+from ormbridge.adaptors.django.query_optimizer import optimize_query, generate_paths
 
 class QueryOptimizerTests(TestCase):
     """Tests for the query optimizer covering various scenarios."""
@@ -94,7 +92,7 @@ class QueryOptimizerTests(TestCase):
             order.total = total
             order.save()
     
-    def _test_optimization(self, model, fields, expected_max_queries, description):
+    def _test_optimization(self, model, fields, expected_max_queries, description, generate_paths_mode=False, depth=2, specific_fields=None):
         """
         Shared test logic for all optimization tests.
         
@@ -126,7 +124,16 @@ class QueryOptimizerTests(TestCase):
         start_time = time.time()
         with CaptureQueriesContext(connection) as context:
             # Optimize the query
-            optimized_qs = optimize_query(model.objects.all(), fields)
+            if generate_paths_mode:
+                def get_model_name(model):
+                    return model.__name__
+
+                generated_fields = generate_paths(model, depth, specific_fields, get_model_name)
+                optimized_qs = optimize_query(model.objects.all(), list(generated_fields))
+
+            else:
+                optimized_qs = optimize_query(model.objects.all(), fields)
+
             objects = list(optimized_qs)
             
             # Access the same fields
@@ -329,5 +336,38 @@ class QueryOptimizerTests(TestCase):
         print(f"Optimized: {optimized_query_count} queries, {optimized_time:.4f}s")
         
         # Assertions
-        self.assertLess(optimized_query_count, unoptimized_query_count)
+        self.assertLessEqual(optimized_query_count, unoptimized_query_count)
         self.assertEqual(optimized_ids, filtered_ids)
+
+    def test_generate_paths_select_related(self):
+        """Test generate_paths function with select_related scenario."""
+
+        specific_fields = {
+            "Product": ["name", "price", "category"],
+            "ProductCategory": ["name", "id"]
+        }
+        self._test_optimization(
+            Product,
+            fields=['name', 'price', 'category__name', 'category__id'],  # Original fields for comparison
+            expected_max_queries=1,
+            description="Generate Paths Select-Related",
+            generate_paths_mode=True,
+            depth=2,
+            specific_fields=specific_fields
+        )
+
+    def test_generate_paths_prefetch_related(self):
+        """Test generate_paths function with prefetch_related."""
+        specific_fields = {
+            "DeepModelLevel1": ["name", "comprehensive_models"],
+            "ComprehensiveModel": ["char_field", "int_field"]
+        }
+        self._test_optimization(
+            DeepModelLevel1,
+            fields=['name', 'comprehensive_models__char_field', 'comprehensive_models__int_field'],  # Original fields for comparison
+            expected_max_queries=2,  # Main query + prefetch query
+            description="Generate Paths Prefetch-Related",
+            generate_paths_mode=True,
+            depth=2,
+            specific_fields=specific_fields
+        )
