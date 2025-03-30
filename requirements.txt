@@ -1,3 +1,4 @@
+Django==5.1.6
 django_money==3.4.1
 djangorestframework==3.15.2
 fakeredis==2.27.0
