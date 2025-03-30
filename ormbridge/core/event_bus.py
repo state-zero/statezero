@@ -1,9 +1,9 @@
 import logging
 from typing import Any, Type, Union, List
 
-from ormbridge.core.caching import CacheInvalidationEmitter
-from ormbridge.core.interfaces import AbstractEventEmitter, AbstractORMProvider
-from ormbridge.core.types import ActionType, ORMModel, ORMQuerySet
+from statezero.core.caching import CacheInvalidationEmitter
+from statezero.core.interfaces import AbstractEventEmitter, AbstractORMProvider
+from statezero.core.types import ActionType, ORMModel, ORMQuerySet
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class EventBus:
 
     def set_registry(self, registry):
         """Set the model registry after initialization if needed."""
-        from ormbridge.core.config import Registry
+        from statezero.core.config import Registry
         self.registry: Registry = registry
 
     def emit_event(self, action_type: ActionType, instance: Any) -> None:

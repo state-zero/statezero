@@ -3,13 +3,13 @@ import unittest
 import networkx as nx
 from django.test import TestCase
 
-from ormbridge.adaptors.django.config import registry
-from ormbridge.adaptors.django.orm import DjangoORMAdapter
-from ormbridge.core.ast_validator import ASTValidator
-from ormbridge.core.config import ModelConfig
-from ormbridge.core.exceptions import PermissionDenied
-from ormbridge.core.interfaces import AbstractPermission
-from ormbridge.core.types import ActionType
+from statezero.adaptors.django.config import registry
+from statezero.adaptors.django.orm import DjangoORMAdapter
+from statezero.core.ast_validator import ASTValidator
+from statezero.core.config import ModelConfig
+from statezero.core.exceptions import PermissionDenied
+from statezero.core.interfaces import AbstractPermission
+from statezero.core.types import ActionType
 # Import your test models.
 from tests.django_app.models import (ComprehensiveModel, DeepModelLevel1,
                                      DeepModelLevel2, DeepModelLevel3,

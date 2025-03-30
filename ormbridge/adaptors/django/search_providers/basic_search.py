@@ -1,6 +1,6 @@
 from typing import Set
 from django.db.models import QuerySet, Q
-from ormbridge.core.interfaces import AbstractSearchProvider
+from statezero.core.interfaces import AbstractSearchProvider
 
 class BasicSearchProvider(AbstractSearchProvider):
     """Simple search provider using basic Django field lookups."""

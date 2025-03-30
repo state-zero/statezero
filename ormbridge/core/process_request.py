@@ -3,15 +3,15 @@ from typing import Any, Dict, Optional, Set, Type
 
 from fastapi.encoders import jsonable_encoder
 
-from ormbridge.core import AppConfig, ModelConfig, Registry
-from ormbridge.core.ast_parser import ASTParser
-from ormbridge.core.ast_validator import ASTValidator
+from statezero.core import AppConfig, ModelConfig, Registry
+from statezero.core.ast_parser import ASTParser
+from statezero.core.ast_validator import ASTValidator
 
-from ormbridge.core.exceptions import PermissionDenied, ValidationError
-from ormbridge.core.interfaces import (AbstractDataSerializer,
+from statezero.core.exceptions import PermissionDenied, ValidationError
+from statezero.core.interfaces import (AbstractDataSerializer,
                                        AbstractORMProvider,
                                        AbstractSchemaGenerator)
-from ormbridge.core.types import ActionType
+from statezero.core.types import ActionType
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

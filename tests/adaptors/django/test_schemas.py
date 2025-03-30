@@ -15,10 +15,10 @@ from hypothesis import HealthCheck, given
 from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
 
-from ormbridge.adaptors.django.config import config, registry
+from statezero.adaptors.django.config import config, registry
 # Import the schema generator and necessary classes.
-from ormbridge.adaptors.django.schemas import DjangoSchemaGenerator
-from ormbridge.core.classes import (AdditionalField, FieldFormat, FieldType,
+from statezero.adaptors.django.schemas import DjangoSchemaGenerator
+from statezero.core.classes import (AdditionalField, FieldFormat, FieldType,
                                     ModelSchemaMetadata, SchemaFieldMetadata)
 
 

@@ -11,11 +11,11 @@ from contextlib import contextmanager
 import logging
 from zen_queries import queries_disabled
 
-from ormbridge.adaptors.django.config import config, registry
-from ormbridge.core.caching import CachingMixin
-from ormbridge.core.classes import ModelSummaryRepresentation
-from ormbridge.core.interfaces import AbstractDataSerializer, AbstractQueryOptimizer
-from ormbridge.core.types import RequestType
+from statezero.adaptors.django.config import config, registry
+from statezero.core.caching import CachingMixin
+from statezero.core.classes import ModelSummaryRepresentation
+from statezero.core.interfaces import AbstractDataSerializer, AbstractQueryOptimizer
+from statezero.core.types import RequestType
 
 logger = logging.getLogger(__name__)
 

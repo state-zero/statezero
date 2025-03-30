@@ -3,9 +3,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, Literal
 
-from ormbridge.core.classes import ModelSchemaMetadata, SchemaFieldMetadata
-from ormbridge.core.exceptions import PermissionDenied
-from ormbridge.core.types import (ActionType, ORMField, ORMModel, ORMQuerySet,
+from statezero.core.classes import ModelSchemaMetadata, SchemaFieldMetadata
+from statezero.core.exceptions import PermissionDenied
+from statezero.core.types import (ActionType, ORMField, ORMModel, ORMQuerySet,
                                   RequestType)
 
 

@@ -4,8 +4,8 @@ from django.db.models import QuerySet
 from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank
 from django.db import connection
 
-from ormbridge.core.interfaces import AbstractSearchProvider
-from ormbridge.adaptors.django.config import registry
+from statezero.core.interfaces import AbstractSearchProvider
+from statezero.adaptors.django.config import registry
 
 logger = logging.getLogger(__name__)
 

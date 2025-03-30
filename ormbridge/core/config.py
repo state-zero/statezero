@@ -5,13 +5,13 @@ from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 import networkx as nx
 
 
-from ormbridge.core.classes import AdditionalField
-from ormbridge.core.event_bus import EventBus
-from ormbridge.core.interfaces import (AbstractCustomQueryset,
+from statezero.core.classes import AdditionalField
+from statezero.core.event_bus import EventBus
+from statezero.core.interfaces import (AbstractCustomQueryset,
                                        AbstractDataSerializer,
                                        AbstractORMProvider, AbstractPermission,
                                        AbstractSchemaGenerator, AbstractSearchProvider, AbstractQueryOptimizer)
-from ormbridge.core.types import ORMField
+from statezero.core.types import ORMField
 
 NamespaceResolver = Callable[[Any, str], Union[str, List[str], None]]
 

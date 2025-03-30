@@ -6,7 +6,7 @@ from django.apps import AppConfig as DjangoAppConfig
 from django.apps import apps
 from django.conf import settings
 
-from ormbridge.adaptors.django.config import config, registry
+from statezero.adaptors.django.config import config, registry
 
 # Attempt to import Rich for nicer console output.
 try:
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class ORMBridgeDjangoConfig(DjangoAppConfig):
-    name = "ormbridge.adaptors.django"
+    name = "statezero.adaptors.django"
     verbose_name = "ORMBridge Django Integration"
 
     def ready(self):
@@ -56,12 +56,12 @@ class ORMBridgeDjangoConfig(DjangoAppConfig):
 
             if published_models:
                 base_message = (
-                    "[bold green]ORMBridge is exposing models:[/bold green] [bold yellow]"
+                    "[bold green]ORM Bridge is exposing models:[/bold green] [bold yellow]"
                     + ", ".join(published_models)
                     + "[/bold yellow]"  
                 )
             else:
-                base_message = "[bold yellow]ORMBridge is running but no models are registered.[/bold yellow]"
+                base_message = "[bold yellow]ORM Bridge is running but no models are registered.[/bold yellow]"
 
             # Append the npm command instruction only in debug mode.
             if published_models and settings.DEBUG:

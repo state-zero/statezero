@@ -46,7 +46,7 @@ class FilterAndExcludeIntegrationTest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", [])
@@ -70,7 +70,7 @@ class FilterAndExcludeIntegrationTest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", [])
@@ -96,7 +96,7 @@ class FilterAndExcludeIntegrationTest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", [])
@@ -123,7 +123,7 @@ class FilterAndExcludeIntegrationTest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", [])
@@ -154,7 +154,7 @@ class FilterAndExcludeIntegrationTest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", [])
@@ -185,7 +185,7 @@ class FilterAndExcludeIntegrationTest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", [])
@@ -217,7 +217,7 @@ class FilterAndExcludeIntegrationTest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", [])
@@ -247,7 +247,7 @@ class FilterAndExcludeIntegrationTest(APITestCase):
                 },
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DeepModelLevel1"])
+        url = reverse("statezero:model_view", args=["django_app.DeepModelLevel1"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", [])

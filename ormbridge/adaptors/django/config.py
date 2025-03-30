@@ -6,9 +6,9 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 import warnings
 
-from ormbridge.adaptors.django.query_optimizer import DjangoQueryOptimizer
-from ormbridge.adaptors.django.context_manager import query_timeout
-from ormbridge.core.config import AppConfig, Registry
+from statezero.adaptors.django.query_optimizer import DjangoQueryOptimizer
+from statezero.adaptors.django.context_manager import query_timeout
+from statezero.core.config import AppConfig, Registry
 
 logger = logging.getLogger(__name__)
 
@@ -17,19 +17,19 @@ class DjangoLocalConfig(AppConfig):
         self.DEBUG = settings.DEBUG
 
     def initialize(self):
-        from ormbridge.adaptors.django.event_emitters import \
+        from statezero.adaptors.django.event_emitters import \
             DjangoPusherEventEmitter, DjangoConsoleEventEmitter
-        from ormbridge.adaptors.django.extensions.custom_field_serializers.money_field import (
+        from statezero.adaptors.django.extensions.custom_field_serializers.money_field import (
             MoneyFieldSchema, MoneyFieldSerializer)
-        from ormbridge.adaptors.django.orm import DjangoORMAdapter
-        from ormbridge.adaptors.django.schemas import DjangoSchemaGenerator
-        from ormbridge.adaptors.django.serializers import DRFDynamicSerializer
-        from ormbridge.adaptors.django.search_providers.basic_search import BasicSearchProvider
-        from ormbridge.adaptors.django.caching import DjangoCacheBackend, DjangoDependencyStore
-        from ormbridge.core.caching import (CacheInvalidationEmitter,
+        from statezero.adaptors.django.orm import DjangoORMAdapter
+        from statezero.adaptors.django.schemas import DjangoSchemaGenerator
+        from statezero.adaptors.django.serializers import DRFDynamicSerializer
+        from statezero.adaptors.django.search_providers.basic_search import BasicSearchProvider
+        from statezero.adaptors.django.caching import DjangoCacheBackend, DjangoDependencyStore
+        from statezero.core.caching import (CacheInvalidationEmitter,
                                             RedisCacheBackend,
                                             RedisDependencyStore)
-        from ormbridge.core.event_bus import EventBus
+        from statezero.core.event_bus import EventBus
 
         # Initialize serializer, schema generator, and ORM adapter.
         self.serializer = DRFDynamicSerializer()
@@ -52,7 +52,7 @@ class DjangoLocalConfig(AppConfig):
             # Fall back to fakeredis if the specified cache is not configured
             logger.warning(f"Django cache '{cache_name}' not configured, falling back to fakeredis")
             import fakeredis
-            from ormbridge.core.caching import RedisCacheBackend, RedisDependencyStore
+            from statezero.core.caching import RedisCacheBackend, RedisDependencyStore
             
             redis_client = fakeredis.FakeStrictRedis()
             self.cache_backend = RedisCacheBackend(redis_client, default_ttl=default_ttl)

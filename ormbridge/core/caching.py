@@ -7,10 +7,10 @@ from typing import Any, Callable, Dict, Optional, Set, Type, List
 
 import orjson
 
-from ormbridge.core.interfaces import (AbstractCacheBackend,
+from statezero.core.interfaces import (AbstractCacheBackend,
                                        AbstractDependencyStore,
                                        AbstractEventEmitter)
-from ormbridge.core.types import (ActionType, ORMModel,  # type: ignore
+from statezero.core.types import (ActionType, ORMModel,  # type: ignore
                                   RequestType)
 
 logger = logging.getLogger(__name__)

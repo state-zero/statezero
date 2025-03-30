@@ -1,5 +1,5 @@
-from ormbridge.adaptors.django.config import config, registry
-from ormbridge.core.config import ModelConfig
+from statezero.adaptors.django.config import config, registry
+from statezero.core.config import ModelConfig
 from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      DeepModelLevel1, DeepModelLevel2,
                                      DeepModelLevel3, DummyModel,
@@ -9,8 +9,8 @@ from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      ProductCategory, Order, OrderItem)
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
-from ormbridge.core.classes import AdditionalField
-from ormbridge.adaptors.django.permissions import AllowAllPermission
+from statezero.core.classes import AdditionalField
+from statezero.adaptors.django.permissions import AllowAllPermission
 from django.db import models
 
 # Register DummyRelatedModel
@@ -21,7 +21,7 @@ registry.register(
         filterable_fields={"name"},
         searchable_fields={"name"},
         ordering_fields={"name"},
-        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )
 
@@ -33,7 +33,7 @@ registry.register(
         filterable_fields={"name", "value"},
         searchable_fields={"name"},
         ordering_fields={"value"},
-        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )
 
@@ -45,7 +45,7 @@ registry.register(
         filterable_fields={"name"},
         searchable_fields={"name"},
         ordering_fields={"name"},
-        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )
 
@@ -57,7 +57,7 @@ registry.register(
         filterable_fields={"name"},
         searchable_fields={"name"},
         ordering_fields={"name"},
-        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )
 
@@ -69,7 +69,7 @@ registry.register(
         filterable_fields={"name"},
         searchable_fields={"name"},
         ordering_fields={"name"},
-        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )
 
@@ -81,7 +81,7 @@ registry.register(
         filterable_fields={"char_field", "int_field"},
         searchable_fields={"char_field", "text_field"},
         ordering_fields={"int_field"},
-        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )
 
@@ -131,7 +131,7 @@ registry.register(
         filterable_fields="__all__",
         searchable_fields={"name"},
         ordering_fields={"name"},
-        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )
 
@@ -175,7 +175,7 @@ registry.register(
         filterable_fields="__all__",
         searchable_fields={"order_number", "customer_name"},
         ordering_fields={"created_at", "total"},
-        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
         # Use pre and post hooks
         pre_hooks=[normalize_email],
         post_hooks=[generate_order_number],
@@ -195,7 +195,7 @@ registry.register(
         filterable_fields="__all__",
         searchable_fields={},
         ordering_fields={"price", "quantity"},
-        permissions=["ormbridge.adaptors.django.permissions.AllowAllPermission"],
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
         # Add additional computed field
         additional_fields=[
             AdditionalField(

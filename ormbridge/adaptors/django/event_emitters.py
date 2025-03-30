@@ -6,10 +6,10 @@ from django.conf import settings
 from rest_framework.request import Request
 from django.utils.module_loading import import_string
 
-from ormbridge.adaptors.django.config import config
-from ormbridge.core.event_emitters import (ConsoleEventEmitter,
+from statezero.adaptors.django.config import config
+from statezero.core.event_emitters import (ConsoleEventEmitter,
                                            PusherEventEmitter)
-from ormbridge.core.types import ActionType, ORMModel
+from statezero.core.types import ActionType, ORMModel
 
 logger = logging.getLogger(__name__)
 

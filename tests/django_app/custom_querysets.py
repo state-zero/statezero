@@ -1,4 +1,4 @@
-from ormbridge.core.interfaces import AbstractCustomQueryset
+from statezero.core.interfaces import AbstractCustomQueryset
 from tests.django_app.models import Product, Order
 
 class ActiveProductsQuerySet(AbstractCustomQueryset):

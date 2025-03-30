@@ -10,7 +10,7 @@ from django.core.exceptions import FieldDoesNotExist, FieldError
 from django.db.models.constants import LOOKUP_SEP
 from contextvars import ContextVar
 
-from ormbridge.core.interfaces import AbstractQueryOptimizer
+from statezero.core.interfaces import AbstractQueryOptimizer
 
 logger = logging.getLogger(__name__)
 

@@ -4,9 +4,9 @@ from collections import deque
 import networkx as nx
 
 
-from ormbridge.core.config import AppConfig, Registry
-from ormbridge.core.interfaces import AbstractDataSerializer, AbstractPermission, AbstractORMProvider
-from ormbridge.core.types import ActionType, ORMModel, RequestType
+from statezero.core.config import AppConfig, Registry
+from statezero.core.interfaces import AbstractDataSerializer, AbstractPermission, AbstractORMProvider
+from statezero.core.types import ActionType, ORMModel, RequestType
 
 
 class ResponseType(Enum):

@@ -4,7 +4,7 @@ from typing import Any, Optional, Set
 
 from django.core.cache import caches
 
-from ormbridge.core.interfaces import AbstractCacheBackend, AbstractDependencyStore
+from statezero.core.interfaces import AbstractCacheBackend, AbstractDependencyStore
 
 logger = logging.getLogger(__name__)
 

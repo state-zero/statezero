@@ -6,8 +6,8 @@ from djmoney.contrib.django_rest_framework.fields import MoneyField
 from djmoney.money import Money
 from rest_framework import serializers
 
-from ormbridge.core.classes import FieldFormat, FieldType, SchemaFieldMetadata
-from ormbridge.core.interfaces import AbstractSchemaOverride
+from statezero.core.classes import FieldFormat, FieldType, SchemaFieldMetadata
+from statezero.core.interfaces import AbstractSchemaOverride
 
 
 class MoneyFieldSerializer(serializers.Field):

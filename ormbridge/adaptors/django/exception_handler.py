@@ -18,7 +18,7 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
 # Import your custom ORMBridge exception types.
-from ormbridge.core.exceptions import (ErrorDetail, ORMBridgeError,
+from statezero.core.exceptions import (ErrorDetail, ORMBridgeError,
                                        MultipleObjectsReturned, NotFound,
                                        PermissionDenied, ValidationError)
 

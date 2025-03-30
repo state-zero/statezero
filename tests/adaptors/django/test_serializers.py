@@ -17,8 +17,8 @@ from django.test import TestCase
 from rest_framework import serializers
 
 
-from ormbridge.adaptors.django.config import config, registry
-from ormbridge.adaptors.django.serializers import (DRFDynamicSerializer,
+from statezero.adaptors.django.config import config, registry
+from statezero.adaptors.django.serializers import (DRFDynamicSerializer,
                                                    DynamicModelSerializer,
                                                    RelatedFieldWithRepr,
                                                    get_custom_serializer)

@@ -5,8 +5,8 @@
 Connect your Django backend to React/Vue frontends with 90% less code.  
 No repetitive serializers, views or tight coupling.
 
-[Get Started](https://www.ormbridge.com/walkthrough/) | 
-[Documentation](https://ormbridge.com)
+[Get Started](https://www.statezero.com/walkthrough/) | 
+[Documentation](https://statezero.com)
 
 ## The Python-JavaScript Disconnect
 
@@ -35,7 +35,7 @@ Developers know this painful truth:
 
 ```python
 # Register your existing Django models with ORMBridge
-from ormbridge.adaptors.django.config import registry
+from statezero.adaptors.django.config import registry
 
 registry.register(model=Post)
 ```
@@ -69,7 +69,7 @@ const [posts, query, loading] = useReactLiveView(
 
 ```bash
 pip install django djangorestframework
-pip install git+https://github.com/ormbridge/ormbridge
+pip install git+https://github.com/statezero/statezero
 pip install django-cors-headers pusher
 ```
 
@@ -77,7 +77,7 @@ pip install django-cors-headers pusher
 
 ```bash
 # In your React/Vue project
-npm install https://github.com/ormbridge/ormbridge-client
+npm install https://github.com/statezero/statezero-client
 ```
 
 ### 3. Generate TypeScript Models
@@ -91,7 +91,7 @@ python manage.py runserver
 And run:
 
 ```bash
-npx ormbridge sync-models
+npx statezero sync-models
 ```
 
 ## Why Choose ORMBridge?
@@ -129,7 +129,7 @@ const featuredTechPosts = await Post.objects.filter({
 
 For complete setup instructions, advanced usage, and API references, visit:
 
-📖 [ormbridge.com](https://ormbridge.com)
+📖 [statezero.com](https://statezero.com)
 
 ## License
 

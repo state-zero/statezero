@@ -6,7 +6,7 @@ import jsonschema
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
-from ormbridge.core.types import ORMField
+from statezero.core.types import ORMField
 
 
 class ValidatorType(str, Enum):

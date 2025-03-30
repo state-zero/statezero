@@ -8,8 +8,8 @@ from django.utils.module_loading import import_string
 from rest_framework.permissions import AllowAny, BasePermission
 
 
-from ormbridge.core.interfaces import AbstractPermission
-from ormbridge.core.types import ActionType, ORMModel, RequestType
+from statezero.core.interfaces import AbstractPermission
+from statezero.core.types import ActionType, ORMModel, RequestType
 
 logger = logging.getLogger(__name__)
 
@@ -202,8 +202,8 @@ class ORMBridgeViewAccessGate(BasePermission):
         logger.debug("Evaluating has_permission for path: %s", request.path)
 
         # Only apply custom access for schema and model list endpoints.
-        if request.path.startswith("/ormbridge/"):
-            logger.debug("Path matches ormbridge endpoints. DEBUG=%s", settings.DEBUG)
+        if request.path.startswith("/statezero/"):
+            logger.debug("Path matches statezero endpoints. DEBUG=%s", settings.DEBUG)
             if settings.DEBUG:
                 # In development mode, try to set a default user if one is provided.
                 default_user_func_path = getattr(
@@ -245,9 +245,9 @@ class ORMBridgeViewAccessGate(BasePermission):
 
         # For endpoints outside our gate's scope, delegate to the default permission logic.
         logger.debug(
-            "Path does not match ormbridge endpoints; delegating permission check to %s",
+            "Path does not match statezero endpoints; delegating permission check to %s",
             self.view_access.__class__.__name__,
         )
         permission = self.view_access.has_permission(request, view)
-        logger.debug("Non-ormbridge endpoint permission result: %s", permission)
+        logger.debug("Non-statezero endpoint permission result: %s", permission)
         return permission

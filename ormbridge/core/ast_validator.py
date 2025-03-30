@@ -3,11 +3,11 @@ from typing import Any, Callable, Dict, List, Set, Type
 
 import networkx as nx
 
-from ormbridge.core.config import Registry
+from statezero.core.config import Registry
 
-from ormbridge.core.exceptions import PermissionDenied
-from ormbridge.core.interfaces import AbstractPermission
-from ormbridge.core.types import ActionType, ORMModel, RequestType
+from statezero.core.exceptions import PermissionDenied
+from statezero.core.interfaces import AbstractPermission
+from statezero.core.types import ActionType, ORMModel, RequestType
 
 class ASTValidator:
     def __init__(

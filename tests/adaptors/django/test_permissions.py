@@ -4,9 +4,9 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework.test import APITestCase
 
-from ormbridge.adaptors.django.permissions import AllowAllPermission
+from statezero.adaptors.django.permissions import AllowAllPermission
 
-from ormbridge.core.types import ActionType
+from statezero.core.types import ActionType
 from tests.django_app.models import (CustomPKModel, DummyModel,
                                      DummyRelatedModel,
                                      ModelWithCustomPKRelation)
@@ -40,7 +40,7 @@ class PermissionsTest(APITestCase):
 
     def test_allow_all_permission_update(self):
         """Test update with AllowAllPermission works correctly."""
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
 
         update_payload = {
             "ast": {
@@ -64,7 +64,7 @@ class PermissionsTest(APITestCase):
 
     def test_readonly_permission_update_denied(self):
         """Test update with ReadOnlyPermission is denied."""
-        url = reverse("ormbridge:model_view", args=["django_app.CustomPKModel"])
+        url = reverse("statezero:model_view", args=["django_app.CustomPKModel"])
 
         update_payload = {
             "ast": {
@@ -96,7 +96,7 @@ class PermissionsTest(APITestCase):
     def test_restricted_fields_permission(self):
         """Test that RestrictedFieldsPermission enforces field-level restrictions."""
         url = reverse(
-            "ormbridge:model_view", args=["django_app.ModelWithCustomPKRelation"]
+            "statezero:model_view", args=["django_app.ModelWithCustomPKRelation"]
         )
 
         # Create a valid update payload (only name field should be allowed)
@@ -171,14 +171,14 @@ class PermissionsTest(APITestCase):
                 }
 
         # Override permissions temporarily for testing using the class instead of an instance
-        from ormbridge.adaptors.django.config import registry
+        from statezero.adaptors.django.config import registry
 
         original_config = registry.get_config(DummyModel)
         original_permissions = original_config._permissions
         original_config._permissions = [ActionTypeTestPermission]
 
         try:
-            url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+            url = reverse("statezero:model_view", args=["django_app.DummyModel"])
 
             # Execute an update operation
             update_payload = {
@@ -208,7 +208,7 @@ class PermissionsTest(APITestCase):
 
     def test_editable_fields_enforced(self):
         """Test that the editable_fields from permissions are properly enforced."""
-        from ormbridge.adaptors.django.config import registry
+        from statezero.adaptors.django.config import registry
 
         # Define a custom permission class with specific field restrictions
         class EditableFieldsTestPermission(AllowAllPermission):
@@ -236,7 +236,7 @@ class PermissionsTest(APITestCase):
         original_config._permissions = [EditableFieldsTestPermission]
 
         try:
-            url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+            url = reverse("statezero:model_view", args=["django_app.DummyModel"])
 
             # Test updating an allowed field (name)
             allowed_update = {

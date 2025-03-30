@@ -1,6 +1,6 @@
 from django.utils.deprecation import MiddlewareMixin
 
-from ormbridge.core.context_storage import current_operation_id
+from statezero.core.context_storage import current_operation_id
 
 
 class OperationIDMiddleware(MiddlewareMixin):

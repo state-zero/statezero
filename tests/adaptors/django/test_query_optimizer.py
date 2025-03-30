@@ -12,7 +12,7 @@ from tests.django_app.models import (
 )
 
 # Update imports to include DjangoQueryOptimizer
-from ormbridge.adaptors.django.query_optimizer import DjangoQueryOptimizer
+from statezero.adaptors.django.query_optimizer import DjangoQueryOptimizer
 
 class QueryOptimizerTests(TestCase):
     """Tests for the query optimizer covering various scenarios."""

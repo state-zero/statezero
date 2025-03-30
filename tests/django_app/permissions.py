@@ -1,8 +1,8 @@
 from typing import Any, Set, Type
 
 
-from ormbridge.core.interfaces import AbstractPermission
-from ormbridge.core.types import ActionType, ORMModel, RequestType
+from statezero.core.interfaces import AbstractPermission
+from statezero.core.types import ActionType, ORMModel, RequestType
 
 
 # A permission class that only allows read operations unless the user is an admin.

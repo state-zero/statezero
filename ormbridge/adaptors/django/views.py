@@ -7,12 +7,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.utils.module_loading import import_string
 
-from ormbridge.adaptors.django.config import config, registry
-from ormbridge.adaptors.django.exception_handler import \
+from statezero.adaptors.django.config import config, registry
+from statezero.adaptors.django.exception_handler import \
     explicit_exception_handler
-from ormbridge.adaptors.django.permissions import ORMBridgeViewAccessGate
-from ormbridge.core.interfaces import AbstractEventEmitter
-from ormbridge.core.process_request import RequestProcessor
+from statezero.adaptors.django.permissions import ORMBridgeViewAccessGate
+from statezero.core.interfaces import AbstractEventEmitter
+from statezero.core.process_request import RequestProcessor
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

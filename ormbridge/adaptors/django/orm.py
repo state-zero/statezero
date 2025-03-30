@@ -14,18 +14,18 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 
-from ormbridge.adaptors.django.config import config, registry
-from ormbridge.core.ast_parser import ASTParser
-from ormbridge.core.classes import FieldNode, ModelNode
-from ormbridge.core.event_bus import EventBus
-from ormbridge.core.exceptions import (ORMBridgeError, MultipleObjectsReturned,
+from statezero.adaptors.django.config import config, registry
+from statezero.core.ast_parser import ASTParser
+from statezero.core.classes import FieldNode, ModelNode
+from statezero.core.event_bus import EventBus
+from statezero.core.exceptions import (ORMBridgeError, MultipleObjectsReturned,
                                        NotFound, PermissionDenied,
                                        ValidationError)
-from ormbridge.core.interfaces import (AbstractCustomQueryset,
+from statezero.core.interfaces import (AbstractCustomQueryset,
                                        AbstractEventEmitter,
                                        AbstractEventHandler,
                                        AbstractORMProvider, AbstractPermission)
-from ormbridge.core.types import ActionType, ORMModel, RequestType
+from statezero.core.types import ActionType, ORMModel, RequestType
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -754,7 +754,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         
         # Add additional (computed) fields from the model's configuration.
         try:
-            from ormbridge.adaptors.django.config import registry
+            from statezero.adaptors.django.config import registry
             
             config = registry.get_config(model)
             for additional_field in config.additional_fields:
@@ -801,12 +801,12 @@ class DjangoORMAdapter(AbstractORMProvider):
                     "Error emitting DELETE event for instance %s: %s", instance, e
                 )
 
-        from ormbridge.adaptors.django.config import config, registry
+        from statezero.adaptors.django.config import config, registry
 
         for model in registry._models_config.keys():
             model_name = config.orm_provider.get_model_name(model)
-            uid_save = f"ormbridge:{model_name}:post_save"
-            uid_delete = f"ormbridge:{model_name}:post_delete"
+            uid_save = f"statezero:{model_name}:post_save"
+            uid_delete = f"statezero:{model_name}:post_delete"
             post_save.disconnect(sender=model, dispatch_uid=uid_save)
             post_delete.disconnect(sender=model, dispatch_uid=uid_delete)
             receiver(post_save, sender=model, weak=False, dispatch_uid=uid_save)(

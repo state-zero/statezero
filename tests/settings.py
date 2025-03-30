@@ -40,7 +40,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "tests.django_app",
-    "ormbridge.adaptors.django",
+    "statezero.adaptors.django",
     "corsheaders",
 ]
 
@@ -55,7 +55,7 @@ DATABASES = {
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',  # Fast in-memory cache
-        'LOCATION': 'ormbridge-cache',
+        'LOCATION': 'statezero-cache',
     },
     # For production with Redis:
     'redis': {
@@ -86,7 +86,7 @@ ORMBRIDGE_PUSHER = {
     "CLUSTER": os.getenv('PUSHER_CLUSTER'),
 }
 
-ZEN_STRICT_SERIALIZATION = False # Used for testing ormbridge
+ZEN_STRICT_SERIALIZATION = False # Used for testing statezero
 
 ORMBRIDGE_QUERY_TIMEOUT_MS = 1000  # Important, prevents trivial Ddos
 
@@ -100,7 +100,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
-    "ormbridge.adaptors.django.middleware.OperationIDMiddleware",
+    "statezero.adaptors.django.middleware.OperationIDMiddleware",
 ]
 
 REST_FRAMEWORK = {

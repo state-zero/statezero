@@ -70,7 +70,7 @@ class ORMBridgeE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
 
@@ -136,7 +136,7 @@ class ORMBridgeE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
         created_instance = create_response.data.get("data", {})
@@ -199,7 +199,7 @@ class ORMBridgeE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
 
@@ -233,7 +233,7 @@ class ORMBridgeE2ETest(APITestCase):
             DummyModel.objects.get(id=instance_id)
 
     def test_schema_endpoint_for_dummy_model(self):
-        url = reverse("ormbridge:schema_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:schema_view", args=["django_app.DummyModel"])
         response = self.client.generic(
             "GET", url, data="{}", content_type="application/json"
         )
@@ -256,7 +256,7 @@ class ORMBridgeE2ETest(APITestCase):
     def test_get_dummy_model(self):
         # Send a GET with an explicit AST for a read operation.
         payload = {"ast": {"query": {"type": "read"}}}
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         # Expect a dict with "data" and "metadata".
@@ -278,13 +278,13 @@ class ORMBridgeE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(DummyModel.objects.filter(name="NewDummy").exists())
 
     def test_schema_endpoint_for_comprehensive_model(self):
-        url = reverse("ormbridge:schema_view", args=["django_app.ComprehensiveModel"])
+        url = reverse("statezero:schema_view", args=["django_app.ComprehensiveModel"])
         response = self.client.generic(
             "GET", url, data="{}", content_type="application/json"
         )
@@ -305,7 +305,7 @@ class ORMBridgeE2ETest(APITestCase):
         self.assertIn("json_field", properties)
 
     def test_events_auth(self):
-        url = reverse("ormbridge:events_auth")
+        url = reverse("statezero:events_auth")
         payload = {"channel_name": "private-django_app", "socket_id": "123.456"}
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
@@ -313,7 +313,7 @@ class ORMBridgeE2ETest(APITestCase):
         self.assertEqual(1, len(response.data))
 
     def test_deep_model_schema(self):
-        url = reverse("ormbridge:schema_view", args=["django_app.DeepModelLevel1"])
+        url = reverse("statezero:schema_view", args=["django_app.DeepModelLevel1"])
         response = self.client.generic(
             "GET", url, data="{}", content_type="application/json"
         )
@@ -332,7 +332,7 @@ class ORMBridgeE2ETest(APITestCase):
     def test_deep_model_get(self):
         # Send a GET with an explicit AST for a read operation.
         payload = {"ast": {"query": {"type": "read"}}}
-        url = reverse("ormbridge:model_view", args=["django_app.DeepModelLevel1"])
+        url = reverse("statezero:model_view", args=["django_app.DeepModelLevel1"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", None)
@@ -370,7 +370,7 @@ class ORMBridgeE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
 
@@ -455,7 +455,7 @@ class ORMBridgeE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
 
@@ -524,7 +524,7 @@ class ORMBridgeE2ETest(APITestCase):
                 }
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
 
@@ -608,7 +608,7 @@ class ORMBridgeE2ETest(APITestCase):
             }
         }
 
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         get_existing_response = self.client.post(
             url, data=get_existing_payload, format="json"
         )
@@ -772,7 +772,7 @@ class ORMBridgeE2ETest(APITestCase):
             name=f"{unique_prefix}_ExistingTest", value=10, related=related
         )
 
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
 
         # 1. Test updating an existing instance.
         update_existing_payload = {
@@ -909,7 +909,7 @@ class ORMBridgeE2ETest(APITestCase):
             }
         }
 
-        url = reverse("ormbridge:model_view", args=["django_app.ComprehensiveModel"])
+        url = reverse("statezero:model_view", args=["django_app.ComprehensiveModel"])
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -949,7 +949,7 @@ class ORMBridgeE2ETest(APITestCase):
             }
         }
 
-        url = reverse("ormbridge:model_view", args=["django_app.ComprehensiveModel"])
+        url = reverse("statezero:model_view", args=["django_app.ComprehensiveModel"])
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -987,7 +987,7 @@ class ORMBridgeE2ETest(APITestCase):
             }
         }
 
-        url = reverse("ormbridge:model_view", args=["django_app.ComprehensiveModel"])
+        url = reverse("statezero:model_view", args=["django_app.ComprehensiveModel"])
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -1026,7 +1026,7 @@ class ORMBridgeE2ETest(APITestCase):
             }
         }
 
-        url = reverse("ormbridge:model_view", args=["django_app.DummyModel"])
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -1062,7 +1062,7 @@ class ORMBridgeE2ETest(APITestCase):
             }
         }
 
-        url = reverse("ormbridge:model_view", args=["django_app.ComprehensiveModel"])
+        url = reverse("statezero:model_view", args=["django_app.ComprehensiveModel"])
         response = self.client.post(url, data=payload, format="json")
 
         # The behavior might vary - either return all fields or return an error
@@ -1091,7 +1091,7 @@ class ORMBridgeE2ETest(APITestCase):
                 },
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DeepModelLevel1"])
+        url = reverse("statezero:model_view", args=["django_app.DeepModelLevel1"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", {})
@@ -1130,7 +1130,7 @@ class ORMBridgeE2ETest(APITestCase):
                 },
             }
         }
-        url = reverse("ormbridge:model_view", args=["django_app.DeepModelLevel1"])
+        url = reverse("statezero:model_view", args=["django_app.DeepModelLevel1"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         data = response.data.get("data", {})

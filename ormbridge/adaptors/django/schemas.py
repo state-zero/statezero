@@ -4,13 +4,13 @@ from django.apps import apps
 from django.db import models
 from djmoney.models.fields import MoneyField
 
-from ormbridge.adaptors.django.config import config, registry
-from ormbridge.core.classes import (FieldFormat, FieldType,
+from statezero.adaptors.django.config import config, registry
+from statezero.core.classes import (FieldFormat, FieldType,
                                     ModelSchemaMetadata, SchemaFieldMetadata)
 
-from ormbridge.core.interfaces import (AbstractSchemaGenerator,
+from statezero.core.interfaces import (AbstractSchemaGenerator,
                                        AbstractSchemaOverride)
-from ormbridge.core.types import ORMField
+from statezero.core.types import ORMField
 
 
 class DjangoSchemaGenerator(AbstractSchemaGenerator):

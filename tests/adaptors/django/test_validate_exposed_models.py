@@ -2,9 +2,9 @@ from django.test import TestCase
 from django.db import models
 import uuid
 
-from ormbridge.core.config import ModelConfig, Registry
-from ormbridge.adaptors.django.config import config, registry
-from ormbridge.adaptors.django.permissions import AllowAllPermission
+from statezero.core.config import ModelConfig, Registry
+from statezero.adaptors.django.config import config, registry
+from statezero.adaptors.django.permissions import AllowAllPermission
 
 
 # Test models with unique names to avoid conflicts

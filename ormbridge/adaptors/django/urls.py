@@ -2,7 +2,7 @@ from django.urls import path
 
 from .views import EventsAuthView, ModelListView, ModelView, SchemaView
 
-app_name = "ormbridge"
+app_name = "statezero"
 
 urlpatterns = [
     path("models/", ModelListView.as_view(), name="model_list"),

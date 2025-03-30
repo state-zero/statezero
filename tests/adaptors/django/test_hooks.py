@@ -47,7 +47,7 @@ class HookApplicationTests(APITestCase):
             }
         }
         
-        url = reverse("ormbridge:model_view", args=["django_app.Product"])
+        url = reverse("statezero:model_view", args=["django_app.Product"])
         response = self.client.post(url, data=payload, format="json")
         
         # Verify the request was successful
@@ -86,7 +86,7 @@ class HookApplicationTests(APITestCase):
             }
         }
         
-        url = reverse("ormbridge:model_view", args=["django_app.Product"])
+        url = reverse("statezero:model_view", args=["django_app.Product"])
         response = self.client.post(url, data=payload, format="json")
         
         # Verify the request was successful
@@ -126,7 +126,7 @@ class HookApplicationTests(APITestCase):
             }
         }
         
-        url = reverse("ormbridge:model_view", args=["django_app.Order"])
+        url = reverse("statezero:model_view", args=["django_app.Order"])
         response = self.client.post(url, data=payload, format="json")
         
         # Verify the request was successful
@@ -176,7 +176,7 @@ class HookApplicationTests(APITestCase):
             }
         }
         
-        url = reverse("ormbridge:model_view", args=["django_app.Order"])
+        url = reverse("statezero:model_view", args=["django_app.Order"])
         response = self.client.post(url, data=payload, format="json")
         
         # Verify the request was successful
@@ -234,7 +234,7 @@ class HookApplicationTests(APITestCase):
             }
         }
         
-        url = reverse("ormbridge:model_view", args=["django_app.Order"])
+        url = reverse("statezero:model_view", args=["django_app.Order"])
         response = self.client.post(url, data=payload, format="json")
         
         # Verify the request was successful

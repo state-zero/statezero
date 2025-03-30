@@ -2,9 +2,9 @@ import json
 import logging
 from typing import Callable, Type, Dict, List
 
-from ormbridge.core.context_storage import current_operation_id
-from ormbridge.core.interfaces import AbstractEventEmitter
-from ormbridge.core.types import ActionType, ORMModel, RequestType
+from statezero.core.context_storage import current_operation_id
+from statezero.core.interfaces import AbstractEventEmitter
+from statezero.core.types import ActionType, ORMModel, RequestType
 
 logger = logging.getLogger(__name__)
 
