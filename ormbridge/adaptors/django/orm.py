@@ -361,9 +361,12 @@ class DjangoORMAdapter(AbstractORMProvider):
             qs = qs.filter(q_obj)
 
         check_bulk_permissions(req, qs, ActionType.UPDATE, permissions, self.model)
+
+        # TODO: this should be a values list, but we need to check the bulk event emitter code
         model = qs.model
         pk_field_name = model._meta.pk.name
         instances = list(qs.only(pk_field_name))
+        
         rows_updated = qs.update(**data)
 
         # Triggers cache invalidation and broadcast to the frontend
@@ -387,9 +390,12 @@ class DjangoORMAdapter(AbstractORMProvider):
             qs = qs.filter(q_obj)
 
         check_bulk_permissions(req, qs, ActionType.DELETE, permissions, self.model)
+        
+        # TODO: this should be a values list, but we need to check the bulk event emitter code
         model = qs.model
         pk_field_name = model._meta.pk.name
         instances = list(qs.only(pk_field_name))
+        
         deleted, _ = qs.delete()
 
         # Triggers cache invalidation and broadcast to the frontend
