@@ -26,7 +26,7 @@ STATIC_URL = "/static/"
 SECRET_KEY = "fake-key"
 DEBUG = True
 
-ORMBRIDGE_E2E_TESTING = False
+STATEZERO_E2E_TESTING = False
 
 TEST_DB_PATH = ""
 
@@ -74,7 +74,7 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
 ]
 
 # Then configure StateZero to use one of these caches
-ORMBRIDGE_CACHE = {
+STATEZERO_CACHE = {
     'NAME': 'default',
     'DEFAULT_TTL': 3600,
 }
@@ -88,12 +88,12 @@ STATEZERO_PUSHER = {
 
 ZEN_STRICT_SERIALIZATION = False # Used for testing statezero
 
-ORMBRIDGE_QUERY_TIMEOUT_MS = 1000  # Important, prevents trivial Ddos
+STATEZERO_QUERY_TIMEOUT_MS = 1000  # Important, prevents trivial Ddos
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 STATEZERO_VIEW_ACCESS_CLASS = "rest_framework.permissions.IsAuthenticated"
-ORMBRIDGE_DEFAULT_USER_FUNC = "tests.django_app.test_user.get_or_create_test_user"
+STATEZERO_DEFAULT_USER_FUNC = "tests.django_app.test_user.get_or_create_test_user"
 
 MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",

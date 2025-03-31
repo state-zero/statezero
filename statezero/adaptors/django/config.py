@@ -39,7 +39,7 @@ class DjangoLocalConfig(AppConfig):
         self.query_optimizer = DjangoQueryOptimizer
 
         # Set up cache backends based on settings
-        cache_config = getattr(settings, 'ORMBRIDGE_CACHE', {})
+        cache_config = getattr(settings, 'STATEZERO_CACHE', {})
         cache_name = cache_config.get('NAME', 'default')
         default_ttl = cache_config.get('DEFAULT_TTL', None)
         
@@ -99,12 +99,12 @@ class DjangoLocalConfig(AppConfig):
 
 
 # Create the singleton instances.
-custom_config_path = getattr(settings, "ORMBRIDGE_CUSTOM_CONFIG", None)
+custom_config_path = getattr(settings, "STATEZERO_CUSTOM_CONFIG", None)
 if custom_config_path:
     custom_config_class = import_string(custom_config_path)
     if not issubclass(custom_config_class, AppConfig):
         raise ImproperlyConfigured(
-            "ORMBRIDGE_CUSTOM_CONFIG must be a subclass of AppConfig"
+            "STATEZERO_CUSTOM_CONFIG must be a subclass of AppConfig"
         )
     config = custom_config_class()
 else:

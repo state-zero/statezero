@@ -207,7 +207,7 @@ class ORMBridgeViewAccessGate(BasePermission):
             if settings.DEBUG:
                 # In development mode, try to set a default user if one is provided.
                 default_user_func_path = getattr(
-                    settings, "ORMBRIDGE_DEFAULT_USER_FUNC", None
+                    settings, "STATEZERO_DEFAULT_USER_FUNC", None
                 )
                 if default_user_func_path:
                     logger.debug(

@@ -29,7 +29,7 @@ class Command(BaseCommand):
             }
         )
 
-        settings.ORMBRIDGE_E2E_TESTING = True
+        settings.STATEZERO_E2E_TESTING = True
 
         # Run migrations on clean database
         call_command("migrate")

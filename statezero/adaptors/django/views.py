@@ -89,7 +89,7 @@ class ModelView(APIView):
     @transaction.atomic
     def post(self, request, model_name):
         processor = RequestProcessor(config=config, registry=registry)
-        timeout_ms = getattr(settings, 'ORMBRIDGE_QUERY_TIMEOUT_MS', 1000)
+        timeout_ms = getattr(settings, 'STATEZERO_QUERY_TIMEOUT_MS', 1000)
         try:
             with config.context_manager(timeout_ms):
                 result = processor.process_request(req=request)
