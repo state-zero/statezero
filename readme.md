@@ -5,8 +5,8 @@
 Connect your Django backend to React/Vue frontends with 90% less code.  
 No repetitive serializers, views or tight coupling.
 
-[Get Started](https://www.statezero.com/walkthrough/) | 
-[Documentation](https://statezero.com)
+[Get Started](https://www.statezero.dev/walkthrough/) | 
+[Documentation](https://statezero.dev)
 
 ## The Python-JavaScript Disconnect
 
@@ -69,7 +69,7 @@ const [posts, query, loading] = useReactLiveView(
 
 ```bash
 pip install django djangorestframework
-pip install git+https://github.com/statezero/statezero
+pip install git+https://github.com/state-zero/statezero
 pip install django-cors-headers pusher
 ```
 
@@ -77,7 +77,7 @@ pip install django-cors-headers pusher
 
 ```bash
 # In your React/Vue project
-npm install https://github.com/statezero/statezero-client
+npm install https://github.com/state-zero/statezero-client
 ```
 
 ### 3. Generate TypeScript Models
@@ -129,7 +129,7 @@ const featuredTechPosts = await Post.objects.filter({
 
 For complete setup instructions, advanced usage, and API references, visit:
 
-📖 [statezero.com](https://statezero.com)
+📖 [statezero.dev](https://statezero.dev)
 
 ## License
 
