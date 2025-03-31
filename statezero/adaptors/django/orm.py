@@ -5,7 +5,7 @@ import networkx as nx
 from django.apps import apps
 from django.db import models
 from django.db.models import Avg, Count, Max, Min, Q, Sum, QuerySet
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.forms.models import model_to_dict
 from django.urls import path
@@ -784,6 +784,18 @@ class DjangoORMAdapter(AbstractORMProvider):
         return model_graph
 
     def register_event_signals(self, event_bus: EventBus) -> None:
+        def pre_save_receiver(sender, instance, **kwargs):
+            if not instance.pk:
+                return # It can't be used for cache invalidation, cause there's no pk
+            
+            action = ActionType.PRE_UPDATE
+            try:
+                event_bus.emit_event(action, instance)
+            except Exception as e:
+                logger.exception(
+                    "Error emitting event %s for instance %s: %s", action, instance, e
+                )
+
         def post_save_receiver(sender, instance, created, **kwargs):
             action = ActionType.CREATE if created else ActionType.UPDATE
             try:
@@ -791,6 +803,15 @@ class DjangoORMAdapter(AbstractORMProvider):
             except Exception as e:
                 logger.exception(
                     "Error emitting event %s for instance %s: %s", action, instance, e
+                )
+                
+        def pre_delete_receiver(sender, instance, **kwargs):
+            try:
+                # Use PRE_DELETE action type for cache invalidation before DB operation
+                event_bus.emit_event(ActionType.PRE_DELETE, instance)
+            except Exception as e:
+                logger.exception(
+                    "Error emitting PRE_DELETE event for instance %s: %s", instance, e
                 )
 
         def post_delete_receiver(sender, instance, **kwargs):
@@ -805,13 +826,31 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         for model in registry._models_config.keys():
             model_name = config.orm_provider.get_model_name(model)
+            
+            # Register pre_save signals (new)
+            uid_pre_save = f"statezero:{model_name}:pre_save"
+            pre_save.disconnect(sender=model, dispatch_uid=uid_pre_save)
+            receiver(pre_save, sender=model, weak=False, dispatch_uid=uid_pre_save)(
+                pre_save_receiver
+            )
+            
+            # Register post_save signals
             uid_save = f"statezero:{model_name}:post_save"
-            uid_delete = f"statezero:{model_name}:post_delete"
             post_save.disconnect(sender=model, dispatch_uid=uid_save)
-            post_delete.disconnect(sender=model, dispatch_uid=uid_delete)
             receiver(post_save, sender=model, weak=False, dispatch_uid=uid_save)(
                 post_save_receiver
             )
+            
+            # Register pre_delete signals
+            uid_pre_delete = f"statezero:{model_name}:pre_delete"
+            pre_delete.disconnect(sender=model, dispatch_uid=uid_pre_delete)
+            receiver(pre_delete, sender=model, weak=False, dispatch_uid=uid_pre_delete)(
+                pre_delete_receiver
+            )
+            
+            # Register post_delete signals
+            uid_delete = f"statezero:{model_name}:post_delete"
+            post_delete.disconnect(sender=model, dispatch_uid=uid_delete)
             receiver(post_delete, sender=model, weak=False, dispatch_uid=uid_delete)(
                 post_delete_receiver
             )

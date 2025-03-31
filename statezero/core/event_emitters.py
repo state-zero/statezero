@@ -26,6 +26,7 @@ class ConsoleEventEmitter(AbstractEventEmitter):
     def emit(
         self, namespace: str, event_type: ActionType, instance: Type[ORMModel]
     ) -> None:  # type:ignore
+        
         model_name = self.get_model_name(instance)
         # Get the actual primary key field name
         pk_field_name = instance._meta.pk.name

@@ -228,6 +228,55 @@ class TestCacheInvalidationForDeleteEvents(unittest.TestCase):
         self.assertIsNone(self.cache_backend.get(self.cache_key))
         self.assertIsNone(self.cache_backend.get(query_key))
 
+    def test_pre_delete_signal_invalidation(self):
+        """
+        Test that cache invalidation correctly occurs when a PRE_DELETE signal is emitted.
+        """
+        # First verify the value is in the cache
+        self.assertEqual(self.cache_backend.get(self.cache_key), self.value)
+
+        # Verify that the dependency store has recorded the cache key
+        keys = self.dependency_store.get_cache_keys(
+            dummy_get_model_name(self.instance), self.instance.pk
+        )
+        self.assertIn(self.cache_key, keys)
+
+        # Simulate PRE_DELETE signal by calling the emitter's emit method
+        self.emitter.emit(ActionType.PRE_DELETE, self.instance)
+
+        # The cache key should be invalidated
+        self.assertIsNone(self.cache_backend.get(self.cache_key))
+
+        # The dependency store should be cleared for this instance
+        keys = self.dependency_store.get_cache_keys(
+            dummy_get_model_name(self.instance), self.instance.pk
+        )
+        self.assertEqual(len(keys), 0)
+
+    def test_pre_update_signal_invalidation(self):
+        """
+        Test that cache invalidation correctly occurs when a PRE_UPDATE signal is emitted.
+        """
+        # First verify the value is in the cache
+        self.assertEqual(self.cache_backend.get(self.cache_key), self.value)
+
+        # Verify that the dependency store has recorded the cache key
+        keys = self.dependency_store.get_cache_keys(
+            dummy_get_model_name(self.instance), self.instance.pk
+        )
+        self.assertIn(self.cache_key, keys)
+
+        # Simulate PRE_UPDATE signal by calling the emitter's emit method
+        self.emitter.emit(ActionType.PRE_UPDATE, self.instance)
+
+        # The cache key should be invalidated
+        self.assertIsNone(self.cache_backend.get(self.cache_key))
+
+        # The dependency store should be cleared for this instance
+        keys = self.dependency_store.get_cache_keys(
+            dummy_get_model_name(self.instance), self.instance.pk
+        )
+        self.assertEqual(len(keys), 0)
 
 if __name__ == "__main__":
     unittest.main()

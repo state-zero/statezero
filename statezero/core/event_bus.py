@@ -67,6 +67,10 @@ class EventBus:
                 e,
             )
 
+        # Check if its an event that's just for the cache
+        if action_type in (ActionType.PRE_DELETE, ActionType.PRE_UPDATE):
+            pass 
+
         # Then handle broadcast with namespace resolution
         if not self.broadcast_emitter or not self.orm_provider:
             return

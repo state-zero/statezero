@@ -54,3 +54,6 @@ class ActionType(Enum):
     DELETE = "delete"
     BULK_UPDATE = "bulk_update"
     BULK_DELETE = "bulk_delete"
+    # new pre-operation types
+    PRE_UPDATE = "pre_update"
+    PRE_DELETE = "pre_delete"
