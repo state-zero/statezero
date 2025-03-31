@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 default_permission = "rest_framework.permissions.AllowAny"
-permission_class = import_string(getattr(settings, "ORMBRIDGE_VIEW_ACCESS_CLASS", default_permission))
+permission_class = import_string(getattr(settings, "STATEZERO_VIEW_ACCESS_CLASS", default_permission))
 
 class EventsAuthView(APIView):
     """

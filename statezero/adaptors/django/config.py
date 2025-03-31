@@ -59,10 +59,10 @@ class DjangoLocalConfig(AppConfig):
             self.dependency_store = RedisDependencyStore(redis_client)
 
         # Instantiate emitters by injecting only the necessary functions.
-        if hasattr(settings, 'ORMBRIDGE_PUSHER'):
+        if hasattr(settings, 'STATEZERO_PUSHER'):
             event_emitter = DjangoPusherEventEmitter()
         else:
-            warnings.warn("You have not added ORMBRIDGE_PUSHER to your settings.py. Live model changes will not be broadcast")
+            warnings.warn("You have not added STATEZERO_PUSHER to your settings.py. Live model changes will not be broadcast")
             event_emitter = DjangoConsoleEventEmitter()
         
         

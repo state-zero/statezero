@@ -79,7 +79,7 @@ ORMBRIDGE_CACHE = {
     'DEFAULT_TTL': 3600,
 }
 
-ORMBRIDGE_PUSHER = {
+STATEZERO_PUSHER = {
     "APP_ID": os.getenv('PUSHER_APP_ID'),
     "KEY": os.getenv('PUSHER_KEY'),
     "SECRET": os.getenv('PUSHER_SECRET'),
@@ -92,7 +92,7 @@ ORMBRIDGE_QUERY_TIMEOUT_MS = 1000  # Important, prevents trivial Ddos
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-ORMBRIDGE_VIEW_ACCESS_CLASS = "rest_framework.permissions.IsAuthenticated"
+STATEZERO_VIEW_ACCESS_CLASS = "rest_framework.permissions.IsAuthenticated"
 ORMBRIDGE_DEFAULT_USER_FUNC = "tests.django_app.test_user.get_or_create_test_user"
 
 MIDDLEWARE = [

@@ -186,7 +186,7 @@ class ORMBridgeViewAccessGate(BasePermission):
     def __init__(self):
         access_class_path = getattr(
             settings,
-            "ORMBRIDGE_VIEW_ACCESS_CLASS",
+            "STATEZERO_VIEW_ACCESS_CLASS",
             "rest_framework.permissions.AllowAny",
         )
         try:

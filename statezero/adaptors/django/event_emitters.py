@@ -25,7 +25,7 @@ class DjangoConsoleEventEmitter(ConsoleEventEmitter):
         # Get permission class from settings with a default fallback
         permission_class_path = getattr(
             settings,
-            "ORMBRIDGE_VIEW_ACCESS_CLASS",
+            "STATEZERO_VIEW_ACCESS_CLASS",
             "rest_framework.permissions.IsAuthenticated",
         )
         try:
@@ -56,10 +56,10 @@ class DjangoPusherEventEmitter(PusherEventEmitter):
         Instantiate the Django Pusher emitter by resolving credentials from parameters or settings
         and injecting the Django-specific get_model_name and get_namespace functions.
         """
-        app_id = app_id or settings.ORMBRIDGE_PUSHER.get("APP_ID")
-        key = key or settings.ORMBRIDGE_PUSHER.get("KEY")
-        secret = secret or settings.ORMBRIDGE_PUSHER.get("SECRET")
-        cluster = cluster or settings.ORMBRIDGE_PUSHER.get("CLUSTER")
+        app_id = app_id or settings.STATEZERO_PUSHER.get("APP_ID")
+        key = key or settings.STATEZERO_PUSHER.get("KEY")
+        secret = secret or settings.STATEZERO_PUSHER.get("SECRET")
+        cluster = cluster or settings.STATEZERO_PUSHER.get("CLUSTER")
         if not all([app_id, key, secret, cluster]):
             raise ValueError(
                 "Pusher credentials must be provided via parameters or defined in settings as "
@@ -80,7 +80,7 @@ class DjangoPusherEventEmitter(PusherEventEmitter):
         # Get permission class from settings with a default fallback
         permission_class_path = getattr(
             settings,
-            "ORMBRIDGE_VIEW_ACCESS_CLASS",
+            "STATEZERO_VIEW_ACCESS_CLASS",
             "rest_framework.permissions.IsAuthenticated",
         )
         try:
