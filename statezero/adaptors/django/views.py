@@ -160,7 +160,6 @@ class BatchView(APIView):
             "details": { ... error details ... }
         }
         """
-        print("DEBUG: BATCH VIEW CALLED")
         operations = request.data.get("operations", [])
         if not operations:
             return Response(
