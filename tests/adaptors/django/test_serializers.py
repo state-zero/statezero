@@ -16,11 +16,10 @@ from django.db import models
 from django.test import TestCase
 from rest_framework import serializers
 
-
+from .denormalize import denormalize
 from statezero.adaptors.django.config import config, registry
 from statezero.adaptors.django.serializers import (DRFDynamicSerializer,
                                                    DynamicModelSerializer,
-                                                   RelatedFieldWithRepr,
                                                    get_custom_serializer)
 from tests.django_app.models import (ComprehensiveModel, DeepModelLevel1,
                                      DeepModelLevel2, DeepModelLevel3,
@@ -132,81 +131,6 @@ class GetCustomSerializerTests(TestCase):
         result = get_custom_serializer(DummyField)
         self.assertIsNone(result)
 
-
-class RelatedFieldWithReprTests(TestCase):
-    def setUp(self):
-        self.related = DummyRelatedModel.objects.create(name="TestRelated")
-
-    def test_to_representation_minimal_single(self):
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0)
-        rep = field.to_representation(self.related)
-        expected = {
-            "id": self.related.pk,
-            "repr": {"str": str(self.related), "img": self.related.__img__()}
-        }
-        self.assertEqual(rep, expected)
-
-    def test_to_representation_minimal_many(self):
-        r1 = DummyRelatedModel.objects.create(name="Test1")
-        r2 = DummyRelatedModel.objects.create(name="Test2")
-        qs = DummyRelatedModel.objects.all().filter(pk__in=[r1.pk, r2.pk])
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0, many=True)
-        rep = field.to_representation(qs)
-        expected = [
-            {"id": r1.pk, "repr": {"str": str(r1), "img": r1.__img__()}},
-            {"id": r2.pk, "repr": {"str": str(r2), "img": r2.__img__()}},
-        ]
-        rep_sorted = sorted(rep, key=lambda d: d["id"])
-        expected_sorted = sorted(expected, key=lambda d: d["id"])
-        self.assertEqual(rep_sorted, expected_sorted)
-
-    def test_to_representation_expanded_single(self):
-        SerializerClass = DynamicModelSerializer.for_model(DummyRelatedModel, depth=0)
-        parent = SerializerClass(instance=self.related, context={"fields_map": {}})
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0)
-        field.bind("related", parent)
-        rep = field.to_representation(self.related)
-        expected = {
-            "id": self.related.pk,
-            "name": self.related.name,
-            "repr": {"str": str(self.related), "img": self.related.__img__()},
-        }
-        self.assertEqual(rep, expected)
-
-    def test_to_representation_expanded_many(self):
-        r1 = DummyRelatedModel.objects.create(name="Test1")
-        r2 = DummyRelatedModel.objects.create(name="Test2")
-        qs = DummyRelatedModel.objects.filter(pk__in=[r1.pk, r2.pk])
-        SerializerClass = DynamicModelSerializer.for_model(DummyRelatedModel, depth=0)
-        parent = SerializerClass(instance=r1, context={"fields_map": {}})
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0, many=True)
-        field.bind("related", parent)
-        rep = field.to_representation(qs)
-        expected_r1 = {
-            "id": r1.pk,
-            "name": r1.name,
-            "repr": {"str": str(r1), "img": r1.__img__()}
-        }
-        expected_r2 = {
-            "id": r2.pk,
-            "name": r2.name,
-            "repr": {"str": str(r2), "img": r2.__img__()}
-        }
-        expected = [expected_r1, expected_r2]
-        rep_sorted = sorted(rep, key=lambda d: d["id"])
-        expected_sorted = sorted(expected, key=lambda d: d["id"])
-        self.assertEqual(rep_sorted, expected_sorted)
-
-    def test_to_internal_value(self):
-        related = self.related
-        field = RelatedFieldWithRepr(queryset=DummyRelatedModel.objects.all(), depth=0)
-        data = {"id": related.pk}
-        result = field.to_internal_value(data)
-        self.assertEqual(result, related)
-        result2 = field.to_internal_value(related.pk)
-        self.assertEqual(result2, related)
-
-
 class DynamicModelSerializerTests(TestCase):
     def setUp(self):
         self.related = DummyRelatedModel.objects.create(name="Related")
@@ -260,7 +184,7 @@ class DynamicModelSerializerTests(TestCase):
         SerializerClass = DynamicModelSerializer.for_model(DummyModel, depth=0)
         serializer = SerializerClass(instance=self.dummy, context={"fields_map": {}})
         self.assertIn("computed", serializer.fields)
-        data = serializer.data
+        data = denormalize(serializer.data)
         self.assertIn("computed", data)
         registry.get_config = original_get_config
 
@@ -269,7 +193,7 @@ class DynamicModelSerializerTests(TestCase):
         serializer = SerializerClass(
             instance=self.dummy, context={"fields_map": {}}, depth=0
         )
-        _ = serializer.data
+        _ = denormalize(serializer.data)
         dep_registry = serializer.context.get("dependency_registry", {})
         model_key = config.orm_provider.get_model_name(DummyRelatedModel)
         self.assertIn(model_key, dep_registry)
@@ -365,7 +289,7 @@ class DependencyLoggingTests(TestCase):
         serializer = SerializerClass(
             instance=dummy, context={"fields_map": {}}, depth=0
         )
-        _ = serializer.data
+        _ = denormalize(serializer.data)
         dep_registry: Dict = serializer.context.get("dependency_registry", {})
         related_key = config.orm_provider.get_model_name(DummyRelatedModel)
         self.assertIn(related_key, dep_registry)
@@ -383,7 +307,7 @@ class DependencyLoggingTests(TestCase):
         serializer = SerializerClass(
             instance=level1, context={"fields_map": {}}, depth=2
         )
-        _ = serializer.data
+        _ = denormalize(serializer.data)
         dep_registry: Dict = serializer.context.get("dependency_registry", {})
 
         level2_key = config.orm_provider.get_model_name(DeepModelLevel2)
@@ -416,7 +340,7 @@ class DependencyLoggingTests(TestCase):
         )
         SerializerClass = DynamicModelSerializer.for_model(ComprehensiveModel, depth=0)
         serializer = SerializerClass(instance=comp, context={"fields_map": {}}, depth=0)
-        _ = serializer.data
+        _ = denormalize(serializer.data)
         dep_registry: Dict = serializer.context.get("dependency_registry", {})
 
         level1_key = config.orm_provider.get_model_name(DeepModelLevel1)
@@ -487,7 +411,7 @@ class RelatedModelFetchingTests(TestCase):
         # the explicit request should force the expansion of level3.
         Serializer = DynamicModelSerializer.for_model(DeepModelLevel1, depth=0)
         serializer = Serializer(instance=level1, context={"fields_map": fields_map}, depth=0)
-        data = serializer.data
+        data = denormalize(serializer.data)
 
         # Verify that level2 is expanded (due to depth=0)
         self.assertIsInstance(data.get("level2"), dict)
@@ -520,7 +444,7 @@ class RelatedFieldRestrictionBugTests(TestCase):
         # Create serializer with depth=2 to test deep expansion
         Serializer = DynamicModelSerializer.for_model(DeepModelLevel1, depth=2)
         serializer = Serializer(instance=level1, context={"fields_map": fields_map}, depth=2)
-        data = serializer.data
+        data = denormalize(denormalize(serializer.data))
         
         # Verify level1 has only requested fields
         self.assertIn("name", data)

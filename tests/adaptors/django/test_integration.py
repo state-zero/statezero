@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
+from .denormalize import denormalize
 from tests.django_app.models import (ComprehensiveModel, DeepModelLevel1,
                                      DeepModelLevel2, DeepModelLevel3,
                                      DummyModel, DummyRelatedModel)
@@ -75,7 +76,7 @@ class ORMBridgeE2ETest(APITestCase):
         self.assertEqual(create_response.status_code, 200)
 
         # Get the ID of the created model.
-        created_instance = create_response.data.get("data", {})
+        created_instance = denormalize((create_response.data.get("data", {})))
         instance_id = created_instance.get("id")
         self.assertIsNotNone(instance_id)
 
@@ -115,7 +116,7 @@ class ORMBridgeE2ETest(APITestCase):
         }
         get_response = self.client.post(url, data=get_payload, format="json")
 
-        get_data = get_response.data.get("data", {})
+        get_data = denormalize(get_response.data.get("data", {}))
         self.assertEqual(get_data.get("value"), 200)
 
     def test_update_instance_dummy_model_full_payload(self):
@@ -139,7 +140,7 @@ class ORMBridgeE2ETest(APITestCase):
         url = reverse("statezero:model_view", args=["django_app.DummyModel"])
         create_response = self.client.post(url, data=initial_payload, format="json")
         self.assertEqual(create_response.status_code, 200)
-        created_instance = create_response.data.get("data", {})
+        created_instance = denormalize(create_response.data.get("data", {}))
         instance_id = created_instance.get("id")
         self.assertIsNotNone(instance_id)
 
@@ -181,7 +182,7 @@ class ORMBridgeE2ETest(APITestCase):
             }
         }
         get_response = self.client.post(url, data=get_payload, format="json")
-        get_data = get_response.data.get("data", {})
+        get_data = denormalize(get_response.data.get("data", {}))
         self.assertEqual(get_data.get("value"), 200)
 
     def test_delete_instance_dummy_model(self):
@@ -204,7 +205,7 @@ class ORMBridgeE2ETest(APITestCase):
         self.assertEqual(create_response.status_code, 200)
 
         # Get the ID of the created model.
-        created_instance = create_response.data.get("data", {})
+        created_instance = denormalize(create_response.data.get("data", {}))
         instance_id = created_instance.get("id")
         self.assertIsNotNone(instance_id)
 
@@ -260,7 +261,7 @@ class ORMBridgeE2ETest(APITestCase):
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
         # Expect a dict with "data" and "metadata".
-        data = response.data.get("data", None)
+        data = denormalize(response.data.get("data", None))
         self.assertIsNotNone(data)
         self.assertTrue(any("id" in item for item in data))
 
@@ -335,7 +336,7 @@ class ORMBridgeE2ETest(APITestCase):
         url = reverse("statezero:model_view", args=["django_app.DeepModelLevel1"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
-        data = response.data.get("data", None)
+        data = denormalize(response.data.get("data", None))
         self.assertIsNotNone(data)
         if isinstance(data, list):
             deep_instance = data[0]
@@ -375,7 +376,7 @@ class ORMBridgeE2ETest(APITestCase):
         self.assertEqual(create_response.status_code, 200)
 
         # Get the ID of the created model
-        created_instance = create_response.data.get("data", {})
+        created_instance = denormalize(create_response.data.get("data", {}))
         instance_id = created_instance.get("id")
         self.assertIsNotNone(instance_id)
 
@@ -434,9 +435,9 @@ class ORMBridgeE2ETest(APITestCase):
         get_response = self.client.post(url, data=get_payload, format="json")
 
         # Print the GET response for debugging
-        print(f"GET response after update: {json.dumps(get_response.data)}")
+        print(f"GET response after update: {json.dumps(denormalize(get_response.data))}")
 
-        get_data = get_response.data.get("data", {})
+        get_data = denormalize(get_response.data.get("data", {}))
         related_id_in_response = get_data.get("related", {}).get("id")
         self.assertEqual(related_id_in_response, self.related_dummy_2.id)
 
@@ -460,7 +461,7 @@ class ORMBridgeE2ETest(APITestCase):
         self.assertEqual(create_response.status_code, 200)
 
         # Get the ID of the created model
-        created_instance = create_response.data.get("data", {})
+        created_instance = denormalize(create_response.data.get("data", {}))
         instance_id = created_instance.get("id")
         self.assertIsNotNone(instance_id)
 
@@ -501,7 +502,7 @@ class ORMBridgeE2ETest(APITestCase):
             }
         }
         get_response = self.client.post(url, data=get_payload, format="json")
-        get_data = get_response.data.get("data", {})
+        get_data = denormalize(get_response.data.get("data", {}))
         related_id_in_response = get_data.get("related", {}).get("id")
         self.assertEqual(related_id_in_response, self.related_dummy_2.id)
 
@@ -529,7 +530,7 @@ class ORMBridgeE2ETest(APITestCase):
         self.assertEqual(create_response.status_code, 200)
 
         # Get the ID of the created model
-        created_instance = create_response.data.get("data", {})
+        created_instance = denormalize(create_response.data.get("data", {}))
         instance_id = created_instance.get("id")
         self.assertIsNotNone(instance_id)
 
@@ -546,7 +547,7 @@ class ORMBridgeE2ETest(APITestCase):
             url, data=check_exists_payload, format="json"
         )
         self.assertEqual(exists_response.status_code, 200)
-        exists_data = exists_response.data.get("data", [])
+        exists_data = denormalize(exists_response.data.get("data", []))
         self.assertTrue(len(exists_data) > 0, "Instance should exist before deletion")
 
         # Now delete the instance using instance-level delete
@@ -570,7 +571,7 @@ class ORMBridgeE2ETest(APITestCase):
         check_after_delete_response = self.client.post(
             url, data=check_exists_payload, format="json"
         )
-        after_delete_data = check_after_delete_response.data.get("data", [])
+        after_delete_data = denormalize(check_after_delete_response.data.get("data", []))
         self.assertEqual(
             len(after_delete_data),
             0,
@@ -618,7 +619,7 @@ class ORMBridgeE2ETest(APITestCase):
         self.assertFalse(
             metadata.get("created", True), "Should not create a new instance"
         )
-        data = get_existing_response.data.get("data", {})
+        data = denormalize(get_existing_response.data.get("data", {}))
         self.assertEqual(
             data.get("id"), existing.id, "Should retrieve the existing instance"
         )
@@ -643,7 +644,7 @@ class ORMBridgeE2ETest(APITestCase):
         self.assertTrue(
             new_metadata.get("created", False), "Should create a new instance"
         )
-        new_data = get_new_response.data.get("data", {})
+        new_data = denormalize(get_new_response.data.get("data", {}))
         self.assertEqual(
             new_data.get("name"), new_name, "Should set the name correctly"
         )
@@ -666,7 +667,7 @@ class ORMBridgeE2ETest(APITestCase):
 
         special_response = self.client.post(url, data=special_payload, format="json")
         self.assertEqual(special_response.status_code, 200)
-        special_data = special_response.data.get("data", {})
+        special_data = denormalize(special_response.data.get("data", {}))
         self.assertEqual(
             special_data.get("name"), special_name, "Should handle special characters"
         )
@@ -704,7 +705,7 @@ class ORMBridgeE2ETest(APITestCase):
 
         minimal_response = self.client.post(url, data=minimal_payload, format="json")
         self.assertEqual(minimal_response.status_code, 200)
-        minimal_data = minimal_response.data.get("data", {})
+        minimal_data = denormalize(minimal_response.data.get("data", {}))
         self.assertEqual(minimal_data.get("name"), minimal_name)
 
         # 6. Test that defaults aren't used when retrieving existing
@@ -724,7 +725,7 @@ class ORMBridgeE2ETest(APITestCase):
             url, data=existing_with_defaults_payload, format="json"
         )
         self.assertEqual(existing_defaults_response.status_code, 200)
-        existing_defaults_data = existing_defaults_response.data.get("data", {})
+        existing_defaults_data = denormalize(existing_defaults_response.data.get("data", {}))
         # Verify original value is preserved, not the default
         self.assertEqual(existing_defaults_data.get("value"), 10)
 
@@ -794,7 +795,7 @@ class ORMBridgeE2ETest(APITestCase):
             updated_metadata.get("created", True),
             "Should update the existing instance, not create a new one",
         )
-        updated_data = update_existing_response.data.get("data", {})
+        updated_data = denormalize(update_existing_response.data.get("data", {}))
         self.assertEqual(
             updated_data.get("id"), existing.id, "Should update the existing instance"
         )
@@ -827,7 +828,7 @@ class ORMBridgeE2ETest(APITestCase):
             new_metadata.get("created", False),
             "Should create a new instance when none exists",
         )
-        new_data = update_new_response.data.get("data", {})
+        new_data = denormalize(update_new_response.data.get("data", {}))
         self.assertEqual(
             new_data.get("name"),
             new_name,
@@ -853,7 +854,7 @@ class ORMBridgeE2ETest(APITestCase):
         }
         special_response = self.client.post(url, data=special_payload, format="json")
         self.assertEqual(special_response.status_code, 200)
-        special_data = special_response.data.get("data", {})
+        special_data = denormalize(special_response.data.get("data", {}))
         self.assertEqual(
             special_data.get("name"),
             special_name,
@@ -913,7 +914,7 @@ class ORMBridgeE2ETest(APITestCase):
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
-        data = response.data.get("data", {})
+        data = denormalize(response.data.get("data", {}))
 
         # Verify only requested fields are present
         self.assertIn("id", data)
@@ -953,7 +954,7 @@ class ORMBridgeE2ETest(APITestCase):
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
-        data = response.data.get("data", {})
+        data = denormalize(response.data.get("data", {}))
 
         # Verify only requested fields are present
         self.assertIn("id", data)
@@ -991,7 +992,7 @@ class ORMBridgeE2ETest(APITestCase):
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
-        data = response.data.get("data", {})
+        data = denormalize(response.data.get("data", {}))
 
         # Verify only requested fields are present
         self.assertIn("id", data)
@@ -1030,7 +1031,7 @@ class ORMBridgeE2ETest(APITestCase):
         response = self.client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
-        data_list = response.data.get("data", [])
+        data_list = denormalize(response.data.get("data", []))
 
         # Ensure we got some results
         self.assertTrue(len(data_list) > 0)
@@ -1068,7 +1069,7 @@ class ORMBridgeE2ETest(APITestCase):
         # The behavior might vary - either return all fields or return an error
         # Let's assume it should return all fields for an empty list
         self.assertEqual(response.status_code, 200)
-        data = response.data.get("data", {})
+        data = denormalize(response.data.get("data", {}))
 
         # Verify that more than just id is returned (default behavior)
         self.assertIn("id", data)
@@ -1094,7 +1095,7 @@ class ORMBridgeE2ETest(APITestCase):
         url = reverse("statezero:model_view", args=["django_app.DeepModelLevel1"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
-        data = response.data.get("data", {})
+        data = denormalize(response.data.get("data", {}))
 
         # Verify root-level fields.
         self.assertEqual(data.get("id"), self.deep_level1.id)
@@ -1133,7 +1134,7 @@ class ORMBridgeE2ETest(APITestCase):
         url = reverse("statezero:model_view", args=["django_app.DeepModelLevel1"])
         response = self.client.post(url, data=payload, format="json")
         self.assertEqual(response.status_code, 200)
-        data = response.data.get("data", {})
+        data = denormalize(response.data.get("data", {}))
 
         # Verify root-level fields.
         self.assertEqual(data.get("id"), self.deep_level1.id)
