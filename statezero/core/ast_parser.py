@@ -455,28 +455,45 @@ class ASTParser:
     def _handle_update(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
-            model=self.model, data=data, partial=True, request=self.request, fields_map= self.update_fields_map
+            model=self.model, 
+            data=data, 
+            partial=True, 
+            request=self.request, 
+            fields_map=self.update_fields_map
         )
         ast["data"] = validated_data
-        # Retrieve permissions from the self.registry.
+        
+        # Retrieve permissions from the self.registry
         permissions = self.registry.get_config(self.model).permissions
-        rows_updated = self.engine.update(ast, self.request, permissions)
+        
+        # Update records and get the count and affected instance IDs
+        updated_count, updated_instances = self.engine.update(ast, self.request, permissions)
+        
+        data = self.serializer.serialize(
+            updated_instances, 
+            self.model, 
+            many=True, 
+            depth=0,  # Always use depth=0 for updates
+            fields_map=self.read_fields_map
+        )
+                    
         return {
-            "data": None,
-            "metadata": {
-                "updated": True,
-                "rows_updated": rows_updated,
-                "response_type": ResponseType.NUMBER.value,
-            },
-        }
+                "data": data,
+                "metadata": {
+                    "updated": True,
+                    "updated_count": updated_count,
+                    "response_type": ResponseType.QUERYSET.value,
+                }
+            }
 
     def _handle_delete(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         permissions = self.registry.get_config(self.model).permissions
-        rows_deleted = self.engine.delete(ast, self.request, permissions)
+        deleted_count, rows_deleted = self.engine.delete(ast, self.request, permissions)
         return {
             "data": None,
             "metadata": {
                 "deleted": True,
+                "deleted_count": deleted_count,
                 "rows_deleted": rows_deleted,
                 "response_type": ResponseType.NUMBER.value,
             },
@@ -631,7 +648,7 @@ class ASTParser:
         exists_flag = self.engine.exists()
         return {
             "data": exists_flag,
-            "metadata": {"exists": True, "response_type": ResponseType.NUMBER.value},
+            "metadata": {"exists": exists_flag, "response_type": ResponseType.NUMBER.value},
         }
 
     def _handle_aggregate(self, ast: Dict[str, Any]) -> Dict[str, Any]:

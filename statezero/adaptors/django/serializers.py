@@ -522,6 +522,11 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         """
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
+        if data is None:
+            return {
+                "data": None,
+                "included": {}
+            }
         
         with fields_map_context(fields_map):
             # Set up the normalized output context
@@ -545,7 +550,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                     serialized_data = serializer.data
                 
                 # If it's a single object, register it in the normalized map if not already there
-                if not many and serialized_data:
+                if not many and serialized_data and serialized_data:
                     model_name = config.orm_provider.get_model_name(model)
                     pk_field = model._meta.pk.name
                     

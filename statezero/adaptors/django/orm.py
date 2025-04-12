@@ -349,7 +349,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         node: Dict[str, Any],
         req: RequestType,
         permissions: List[Type[AbstractPermission]],
-    ) -> int:
+    ) -> Tuple[int, List[Dict[str, Union[int, str]]]]:
         assert self.model is not None, "Model must be set before updating."
         data: Dict[str, Any] = node.get("data", {})
         filter_ast: Optional[Dict[str, Any]] = node.get("filter")
@@ -372,14 +372,14 @@ class DjangoORMAdapter(AbstractORMProvider):
         # Triggers cache invalidation and broadcast to the frontend
         config.event_bus.emit_bulk_event(ActionType.BULK_UPDATE, instances)
 
-        return rows_updated
+        return rows_updated, instances
 
     def delete(
         self,
         node: Dict[str, Any],
         req: RequestType,
         permissions: List[Type[AbstractPermission]],
-    ) -> int:
+    ) -> Tuple[int, Tuple[int]]:
         assert self.model is not None, "Model must be set before deleting."
         filter_ast: Optional[Dict[str, Any]] = node.get("filter")
         # Start with self.queryset which already has permission filtering
@@ -401,7 +401,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         # Triggers cache invalidation and broadcast to the frontend
         config.event_bus.emit_bulk_event(ActionType.BULK_DELETE, instances)
             
-        return deleted
+        return deleted, (getattr(instance, pk_field_name) for instance in instances)
 
     def get(
         self,
@@ -868,7 +868,7 @@ class DjangoORMAdapter(AbstractORMProvider):
             )
 
     def get_model_name(
-        self, model: Union[ORMModel, Type[ORMModel]]
+        self, model: Union[models.Model, Type[models.Model]]
     ) -> str:  # type:ignore
         if not isinstance(model, type):
             model = model.__class__
