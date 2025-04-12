@@ -362,10 +362,11 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         check_bulk_permissions(req, qs, ActionType.UPDATE, permissions, self.model)
 
-        # TODO: this should be a values list, but we need to check the bulk event emitter code
         model = qs.model
-        pk_field_name = model._meta.pk.name
-        instances = list(qs.only(pk_field_name))
+        update_fields = list(data.keys())
+        update_fields.append(model._meta.pk.name)
+
+        instances = list(qs.only(*update_fields))
         
         rows_updated = qs.update(**data)
 

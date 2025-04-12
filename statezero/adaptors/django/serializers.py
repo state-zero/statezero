@@ -1,9 +1,6 @@
-import hashlib
-import json
-from typing import Any, Dict, List, Optional, Set, Type
-
-from django.conf import settings
+from typing import Any, Dict, List, Optional, Set, Type, Union
 from django.db import models
+from django.conf import settings
 from django.utils.module_loading import import_string
 from rest_framework import serializers
 import contextvars
@@ -12,51 +9,25 @@ import logging
 from zen_queries import queries_disabled
 
 from statezero.adaptors.django.config import config, registry
-from statezero.core.classes import ModelSummaryRepresentation
 from statezero.core.interfaces import AbstractDataSerializer, AbstractQueryOptimizer
 from statezero.core.types import RequestType
+from statezero.adaptors.django.helpers import collect_from_queryset
 
 logger = logging.getLogger(__name__)
 
-# Create a thread-local storage for the fields_map
+# Context variables remain the same
 fields_map_var = contextvars.ContextVar('fields_map', default=None)
-
-# Add a new context variable for normalized output
-normalized_output_var = contextvars.ContextVar('normalized_output', default={})
-model_registry_var = contextvars.ContextVar('model_registry', default={})
 
 @contextmanager
 def fields_map_context(fields_map):
     """
     Context manager that sets the fields_map for the current context.
     """
-    # Save the previous value to restore it later
     token = fields_map_var.set(fields_map)
     try:
         yield
     finally:
-        # Restore the previous value
         fields_map_var.reset(token)
-
-@contextmanager
-def normalized_output_context():
-    """
-    Context manager that provides a fresh normalized output dictionary.
-    """
-    # Initialize empty containers for the normalized output
-    normalized_map = {}
-    model_registry = {}
-    
-    # Set the context variables
-    output_token = normalized_output_var.set(normalized_map)
-    registry_token = model_registry_var.set(model_registry)
-    
-    try:
-        yield normalized_map
-    finally:
-        # Restore the previous values
-        normalized_output_var.reset(output_token)
-        model_registry_var.reset(registry_token)
 
 def get_current_fields_map():
     """
@@ -65,67 +36,17 @@ def get_current_fields_map():
     """
     return fields_map_var.get() or {}
 
-def get_current_normalized_output():
+def extract_fields(model_name:str=None) -> Set[str]:
     """
-    Get the normalized output dictionary from the current context.
-    """
-    return normalized_output_var.get()
-
-def get_current_model_registry():
-    """
-    Get the model registry from the current context.
-    """
-    return model_registry_var.get()
-
-def register_normalized_entity(model_type, model_id, data):
-    """
-    Register a normalized entity in the output map.
+    Extract the set of fields that should be included based on the fields_map and current path.
     
     Args:
-        model_type (str): The type/name of the model
-        model_id: The ID of the entity
-        data (dict): The serialized data
-    
-    Returns:
-        dict: A reference object with type and id
-    """
-    normalized_output = get_current_normalized_output()
-    model_registry = get_current_model_registry()
-    
-    # Create the entity key
-    entity_key = f"{model_type}"
-    if entity_key not in normalized_output:
-        normalized_output[entity_key] = {}
-    
-    # Store the entity data
-    normalized_output[entity_key][str(model_id)] = data
-    
-    # Create a reference object
-    ref_object = {
-        "type": model_type,
-        "id": model_id
-    }
-    
-    # Register in the model registry to avoid duplicate processing
-    registry_key = f"{model_type}:{model_id}"
-    model_registry[registry_key] = True
-    
-    return ref_object
-
-def is_entity_registered(model_type, model_id):
-    """
-    Check if an entity is already registered in the current context.
-    
-    Args:
-        model_type (str): The type/name of the model
-        model_id: The ID of the entity
+        model_name (str): Optional model name for model-based filtering
         
     Returns:
-        bool: True if the entity is already registered
+        set: Set of field names that should be included, or None if all fields should be included
     """
-    model_registry = get_current_model_registry()
-    registry_key = f"{model_type}:{model_id}"
-    return registry_key in model_registry
+    return get_current_fields_map().get(model_name)
 
 def get_custom_serializer(field_class: Type) -> Optional[Type[serializers.Field]]:
     """
@@ -141,34 +62,18 @@ def get_custom_serializer(field_class: Type) -> Optional[Type[serializers.Field]
     if serializer_path:
         return import_string(serializer_path)
     return None
-    
-def extract_fields(model_name:str=None) -> Set[str]:
-    """
-    Extract the set of fields that should be included based on the fields_map and current path.
-    
-    Args:
-        fields_map (dict): Dictionary mapping model names to sets of field names,
-        model_name (str): Optional model name for model-based filtering
-        
-    Returns:
-        set: Set of field names that should be included, or None if all fields should be included
-    """
-    return get_current_fields_map().get(model_name)
 
 class DynamicModelSerializer(serializers.ModelSerializer):
     """
-    A dynamic serializer that adds two extra read-only fields ('repr' and 'img'),
-    replaces relation fields with RelatedFieldWithRepr, and injects additional computed
-    fields from the registry.
+    A dynamic serializer that adds a read-only 'repr' field
+    and applies custom serializers for model fields.
     """
-
     repr = serializers.SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
-        self.depth = kwargs.pop("depth", 0)
+        self.depth = kwargs.pop("depth", 0)  # Always 0
         self.request = kwargs.pop("request", None)
-        self.normalize_output = kwargs.pop("normalize_output", True)
-
+        
         super().__init__(*args, **kwargs)
 
         # Get the model name
@@ -181,15 +86,16 @@ class DynamicModelSerializer(serializers.ModelSerializer):
         # Allowed fields must exist
         allowed_fields = allowed_fields or set()
 
-        # Always include the primary key and the 'repr' field.
+        # Always include the primary key and the 'repr' field
         allowed_fields.add(pk_field)
         allowed_fields.add("repr")
         
         # Filter the fields based on the result
-        self.fields = {
-            name: field for name, field in self.fields.items() 
-            if name in allowed_fields
-        }
+        if allowed_fields:
+            self.fields = {
+                name: field for name, field in self.fields.items() 
+                if name in allowed_fields
+            }
     
     def get_repr(self, obj):
         """
@@ -198,7 +104,6 @@ class DynamicModelSerializer(serializers.ModelSerializer):
         img_repr = obj.__img__() if hasattr(obj, "__img__") else None
         str_repr = str(obj)
 
-        # Return directly the repr dict that the test expects
         return {
             "str": str_repr,
             "img": img_repr
@@ -266,79 +171,15 @@ class DynamicModelSerializer(serializers.ModelSerializer):
         
         return instance
 
-    def to_representation(self, instance):
-        """
-        Overridden to_representation that integrates normalization.
-        """
-        model = self.Meta.model
-        model_name = config.orm_provider.get_model_name(model)
-        pk_field = model._meta.pk.name
-        model_id = getattr(instance, pk_field)
-        
-        # Check if normalization is enabled and this instance has already been registered
-        if self.normalize_output and is_entity_registered(model_name, model_id):
-            # Return just a reference to the already normalized entity
-            return {
-                "type": model_name,
-                "id": model_id
-            }
-        
-        # Get standard representation
-        result = super().to_representation(instance)
-        
-        # Register this entity if normalization is enabled
-        if self.normalize_output:
-            # If this is the root serializer, we'll handle the final output in the serialize method
-            if self.root == self:
-                # For nested serializers, we need to register the entity
-                register_normalized_entity(model_name, model_id, result)
-            else:
-                # Register the entity and return a reference to it
-                return register_normalized_entity(model_name, model_id, result)
-                
-        return result
-
     class Meta:
         model = None  # To be set dynamically.
         fields = "__all__"
-        
-    @classmethod
-    def _setup_relation_fields(cls, serializer_class, model, allowed_fields, depth):
-        """Configure relation fields to use nested DynamicModelSerializer instances."""
-        for field in model._meta.get_fields():
-            if allowed_fields is None:
-                break
-            
-            # Skip fields that won't be presented
-            if field.name not in allowed_fields:
-                continue
-            
-            if getattr(field, "auto_created", False) and not field.concrete:
-                continue
-                
-            if field.is_relation:
-                # Determine if this is a many-to-many or one-to-many field
-                is_many = field.many_to_many or field.one_to_many
-                
-                # Create a serializer class for the related model
-                nested_serializer_class = cls.for_model(
-                    model=field.related_model, 
-                    depth=max(depth - 1, -1)
-                )
-                
-                # Set the nested serializer field
-                serializer_class._declared_fields[field.name] = nested_serializer_class(
-                    many=is_many,
-                    read_only=False,
-                    required=not (field.null or field.blank),
-                    allow_null=field.null,
-                    depth=max(depth - 1, -1)
-                )
-        return serializer_class
                 
     @classmethod
     def _setup_custom_serializers(cls, serializer_class, model, allowed_fields):
         """Configure custom serializers for non-relation fields."""
+        allowed_fields = allowed_fields or set()
+        
         for field in model._meta.get_fields():
             # Skip fields that won't be presented
             if field.name not in allowed_fields:
@@ -386,9 +227,9 @@ class DynamicModelSerializer(serializers.ModelSerializer):
         return serializer_class
 
     @classmethod
-    def for_model(cls, model: Type[models.Model], depth: int = 0):
+    def for_model(cls, model: Type[models.Model]):
         """
-        Create a DynamicModelSerializer class for the given model with the specified depth.
+        Create a DynamicModelSerializer class for the given model.
         This configures all serialization behavior including:
         - Setting up the Meta class
         - Configuring list serialization
@@ -417,12 +258,7 @@ class DynamicModelSerializer(serializers.ModelSerializer):
         allowed_fields = extract_fields(model_name)
         
         # Only proceed with field setup if we have allowed fields
-        if allowed_fields and depth >= 0:
-            # Set up relation fields with RelatedFieldWithRepr
-            serializer_class = cls._setup_relation_fields(
-                serializer_class, model, allowed_fields, depth
-            )
-            
+        if allowed_fields:
             # Register custom serializers for model fields
             serializer_class = cls._setup_custom_serializers(
                 serializer_class, model, allowed_fields
@@ -435,20 +271,17 @@ class DynamicModelSerializer(serializers.ModelSerializer):
 
 class DRFDynamicSerializer(AbstractDataSerializer):
     """
-    The abstract base class for DRF serialization.
-
-    In this design, the private `_serialize` method instantiates a DynamicModelSerializer
-    with a fields_map set at the class level. This ensures all dependencies are properly
-    collected throughout the serialization chain.
+    Uses collect_from_queryset to gather model instances
+    and applies DynamicModelSerializer for each group of models.
     """
 
-    def _optimize_queryset(self, data, model, depth, fields_map):
+    def _optimize_queryset(self, data, model, fields_map):
         if config.query_optimizer is None:
             return data
         if isinstance(data, models.QuerySet) or isinstance(data, model):
             try:
                 query_optimizer: Type[AbstractQueryOptimizer] = config.query_optimizer(
-                    depth=depth,
+                    depth=0,  # Always use depth 0 since we're collecting models explicitly
                     fields_per_model=fields_map,
                     get_model_name_func=config.orm_provider.get_model_name,
                 )
@@ -468,106 +301,110 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             except Exception as e:
                 logger.error(f"Error optimizing query for {model.__name__}: {e}")
         
-        return data  # Make sure to return data regardless of optimization
-
-    def _serialize(
-        self,
-        data: Any,
-        model: Type[models.Model],
-        depth: int,
-        fields_map: Dict[str, Set[str]],
-        many: bool,
-        normalize_output: bool = True,
-        request: Optional[RequestType] = None
-    ) -> DynamicModelSerializer:
-        # Serious security issue if fields_map is None
-        assert fields_map is not None, "fields_map is required and cannot be None"
-        
-        data = self._optimize_queryset(
-            data=data,
-            model=model,
-            depth=depth,
-            fields_map=fields_map
-        )
-        
-        # Create the serializer class with fields_map as a class attribute
-        serializer_class = DynamicModelSerializer.for_model(
-            model=model, 
-            depth=depth
-        )
-        
-        # Pass explicit parameters without fields_map
-        serializer = serializer_class(
-            data,
-            many=many,
-            depth=depth,
-            normalize_output=normalize_output,
-            request=request
-        )
-
-        return serializer
+        return data
 
     def serialize(
         self,
         data: Any,
         model: Type[models.Model],
-        depth: int,
+        depth: int,  # Parameter kept for API compatibility, but no longer used
         fields_map: Optional[Dict[str, Set[str]]],
         many: bool = False,
         request: Optional[RequestType] = None
     ) -> Any:
         """
-        Public serialization method.
-        For reads, returns a flattened normalized structure.
+        Serializes data using collect_from_queryset and applies DynamicModelSerializer
+        for each group of models.
+        
+        Returns a format of:
+        {
+            "data": [pks], # list of primary keys for top-level models
+            "included": {
+                "modelName": [objects], # full serialized objects per model type
+            }
+        }
         """
-        # Serious security issue if fields_map is None
+        # Validate fields_map
         assert fields_map is not None, "fields_map is required and cannot be None"
+        
+        # Handle None data
         if data is None:
             return {
-                "data": None,
+                "data": [],
                 "included": {}
             }
         
+        # Apply query optimization
+        data = self._optimize_queryset(data, model, fields_map)
+        
+        # Use the fields_map context for all operations
         with fields_map_context(fields_map):
-            # Set up the normalized output context
-            with normalized_output_context() as normalized_map:
-                serializer = self._serialize(
-                    data=data, 
-                    model=model,
-                    depth=depth,
-                    fields_map=fields_map, 
-                    many=many,
-                    request=request
-                )
-
-                # Apply zen-queries protection only to the data access part
-                if getattr(settings, 'ZEN_STRICT_SERIALIZATION', False):
-                    with queries_disabled():
-                        # This will raise an exception if any query is executed
-                        serialized_data = serializer.data
-                else:
-                    # Original code path without zen-queries
-                    serialized_data = serializer.data
+            # Collect all model instances based on the fields_map
+            collected_models = collect_from_queryset(
+                data=data,
+                fields_map=fields_map,
+                get_model_name=config.orm_provider.get_model_name,
+                get_model=config.orm_provider.get_model_by_name
+            )
+            
+            # Initialize the response structure
+            result = {
+                "data": [],
+                "included": {}
+            }
+            
+            # Extract primary keys for the top-level model
+            model_name = config.orm_provider.get_model_name(model)
+            pk_field = model._meta.pk.name
+            top_level_instances = []
+            
+            # For QuerySets, gather all instances
+            if isinstance(data, models.QuerySet):
+                top_level_instances = list(data)
+            # For single instance
+            elif isinstance(data, model):
+                top_level_instances = [data]
+            # For many=True with a list of instances
+            elif many and isinstance(data, list):
+                top_level_instances = [item for item in data if isinstance(item, model)]
+            
+            # Extract primary keys for top-level instances
+            result["data"] = [getattr(instance, pk_field) for instance in top_level_instances]
+            
+            # Apply zen-queries protection if configured
+            query_protection = getattr(settings, 'ZEN_STRICT_SERIALIZATION', False)
+            
+            # Serialize each group of models
+            for model_type, instances in collected_models.items():
+                # Skip empty collections
+                if not instances:
+                    continue
                 
-                # If it's a single object, register it in the normalized map if not already there
-                if not many and serialized_data and serialized_data:
-                    model_name = config.orm_provider.get_model_name(model)
-                    pk_field = model._meta.pk.name
+                try:
+                    # Get the model class for this type
+                    model_class = config.orm_provider.get_model_by_name(model_type)
                     
-                    # Check if the object is already in the normalized map
-                    if not is_entity_registered(model_name, serialized_data.get(pk_field)):
-                        instance = data
-                        register_normalized_entity(
-                            model_name,
-                            getattr(instance, pk_field),
-                            serialized_data
-                        )
-                
-                # Return the normalized output with a reference to the root data
-                return {
-                    "data": serialized_data,
-                    "included": normalized_map
-                }
+                    # Create a serializer for this model type
+                    serializer_class = DynamicModelSerializer.for_model(model_class)
+                    
+                    # Apply zen-queries protection if configured
+                    if query_protection:
+                        with queries_disabled():
+                            # This will raise an exception if any query is executed
+                            serialized_data = serializer_class(instances, many=True).data
+                    else:
+                        # Original code path without zen-queries
+                        serialized_data = serializer_class(instances, many=True).data
+                    
+                    # Add the serialized data to the result
+                    result["included"][model_type] = serialized_data
+                    
+                except Exception as e:
+                    logger.error(f"Error serializing {model_type}: {e}")
+                    # Include an empty list for this model type to maintain the expected structure
+                    result["included"][model_type] = []
+            
+            return result
 
     def deserialize(
         self,
@@ -583,30 +420,30 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         # Use the context manager for the duration of deserialization
         with fields_map_context(fields_map):
             # Create serializer class
-            serializer_class = DynamicModelSerializer.for_model(
-                model=model, 
-                depth=0
-            )
+            serializer_class = DynamicModelSerializer.for_model(model)
 
-            model_config = registry.get_config(model)
+            try:
+                model_config = registry.get_config(model)
+                if model_config.pre_hooks:
+                    for hook in model_config.pre_hooks:
+                        data = hook(data, request=request)
+            except ValueError:
+                # No model config available
+                model_config = None
 
-            if model_config.pre_hooks:
-                for hook in model_config.pre_hooks:
-                    data = hook(data, request=request)
-
-            # Create serializer (with normalization disabled for write operations)
+            # Create serializer
             serializer = serializer_class(
                 data=data, 
                 partial=partial,
-                normalize_output=False,
                 request=request
             )
             serializer.is_valid(raise_exception=True)
             validated_data = serializer.validated_data
 
-            if model_config.post_hooks:
+            if model_config and model_config.post_hooks:
                 for hook in model_config.post_hooks:
                     validated_data = hook(validated_data, request=request)
+                    
             return validated_data
     
     def save(
@@ -620,7 +457,6 @@ class DRFDynamicSerializer(AbstractDataSerializer):
     ) -> Any:
         """
         Save data to create a new instance or update an existing one.
-        This is unchanged from the original implementation.
         """
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
@@ -635,16 +471,12 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         # Use the context manager with the unrestricted fields map
         with fields_map_context(unrestricted_fields_map):
             # Create serializer class
-            serializer_class = DynamicModelSerializer.for_model(
-                model=model, 
-                depth=0  # No need for depth during save
-            )
+            serializer_class = DynamicModelSerializer.for_model(model)
             
-            # Create serializer (with normalization disabled for write operations)
+            # Create serializer
             serializer = serializer_class(
                 instance=instance,  # Will be None for creation
                 data=data,
-                normalize_output=False,
                 partial=partial if instance else False,  # partial only makes sense for updates
                 request=request
             )
