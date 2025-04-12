@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import logging
 from zen_queries import queries_disabled
 
+from statezero.core.caching import CachingMixin
 from statezero.adaptors.django.config import config, registry
 from statezero.core.interfaces import AbstractDataSerializer, AbstractQueryOptimizer
 from statezero.core.types import RequestType
@@ -63,7 +64,7 @@ def get_custom_serializer(field_class: Type) -> Optional[Type[serializers.Field]
         return import_string(serializer_path)
     return None
 
-class DynamicModelSerializer(serializers.ModelSerializer):
+class DynamicModelSerializer(serializers.ModelSerializer, CachingMixin):
     """
     A dynamic serializer that adds a read-only 'repr' field
     and applies custom serializers for model fields.
@@ -108,6 +109,40 @@ class DynamicModelSerializer(serializers.ModelSerializer):
             "str": str_repr,
             "img": img_repr
         }
+
+    def to_representation(self, instance):
+        """
+        Override to_representation to add caching support.
+        For single instances, checks the cache first before serializing.
+        """
+        # Only use caching for single model instances, not for querysets/lists
+        if self.cache_backend and hasattr(instance, '_meta'):
+            model = instance.__class__
+            fields_map = get_current_fields_map()
+            
+            # Generate a cache key for this specific model instance and fields
+            cache_key = self.generate_cache_key(
+                model=model,
+                instance=instance,
+                depth=self.depth,
+                fields_map=fields_map,
+                get_model_name=config.orm_provider.get_model_name
+            )
+            
+            # Check if we have a cached result
+            cached_result = self.get_cached_result(cache_key)
+            if cached_result is not None:
+                return cached_result
+            
+            # Not in cache, serialize normally
+            result = super().to_representation(instance)
+            
+            # Cache the result
+            self.cache_result(cache_key, result)
+            return result
+        
+        # No caching, just serialize normally
+        return super().to_representation(instance)
 
     def to_internal_value(self, data):
         # If this is being used as a related field (not the root serializer)

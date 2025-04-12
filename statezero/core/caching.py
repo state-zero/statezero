@@ -58,54 +58,45 @@ class RedisCacheBackend(AbstractCacheBackend):
                 self.redis_client.delete(key)
             except Exception as e:
                 logger.error(f"Error invalidating key {key} from cache: {str(e)}")
-
-
-class RedisDependencyStore(AbstractDependencyStore):
-    """Redis-based dependency store that accepts any Redis client implementation"""
-
-    def __init__(self, redis_client):
-        self.redis_client = redis_client
-        self.lock = Lock()
-
-    def _get_dependency_key(self, model_name: str, instance_pk: Any) -> str:
-        """Generate Redis key for dependencies."""
-        return f"deps:{model_name}:{instance_pk}"
-
-    def add_cache_key(self, model_name: str, instance_pk: Any, cache_key: str) -> None:
-        """Add a cache key to the dependency store."""
+                
+    def invalidate_pattern(self, pattern: str) -> None:
+        """Remove all keys matching the given pattern from cache."""
         with self.lock:
             try:
-                key = self._get_dependency_key(model_name, instance_pk)
-                self.redis_client.sadd(key, cache_key)
+                # Use Redis SCAN command to find keys matching the pattern
+                cursor = '0'
+                while cursor != 0:
+                    cursor, keys = self.redis_client.scan(cursor=cursor, match=pattern, count=100)
+                    if keys:
+                        self.redis_client.delete(*keys)
+                    # Convert string cursor to int for comparison
+                    cursor = int(cursor)
             except Exception as e:
-                logger.error(
-                    f"Error adding cache key for {model_name}.{instance_pk}: {str(e)}"
-                )
-
-    def get_cache_keys(self, model_name: str, instance_pk: Any) -> Set[str]:
-        """Get all cache keys for a model instance."""
+                logger.error(f"Error invalidating keys with pattern {pattern}: {str(e)}")
+    
+    def invalidate_multi_pattern(self, patterns: List[str]) -> None:
+        """Remove all keys matching any of the given patterns from cache."""
         with self.lock:
             try:
-                key = self._get_dependency_key(model_name, instance_pk)
-                members = self.redis_client.smembers(key)
-                return {m.decode("utf-8") for m in members}
+                all_keys = set()
+                for pattern in patterns:
+                    cursor = '0'
+                    while cursor != 0:
+                        cursor, keys = self.redis_client.scan(cursor=cursor, match=pattern, count=100)
+                        all_keys.update(keys)
+                        # Convert string cursor to int for comparison
+                        cursor = int(cursor)
+                
+                # Delete all keys in batches to avoid too long command
+                if all_keys:
+                    # Split into batches of 1000 keys each
+                    batch_size = 1000
+                    for i in range(0, len(all_keys), batch_size):
+                        batch = list(all_keys)[i:i+batch_size]
+                        if batch:
+                            self.redis_client.delete(*batch)
             except Exception as e:
-                logger.error(
-                    f"Error getting cache keys for {model_name}.{instance_pk}: {str(e)}"
-                )
-                return set()
-
-    def clear_cache_keys(self, model_name: str, instance_pk: Any) -> None:
-        """Clear all cache keys for a model instance."""
-        with self.lock:
-            try:
-                key = self._get_dependency_key(model_name, instance_pk)
-                self.redis_client.delete(key)
-            except Exception as e:
-                logger.error(
-                    f"Error clearing cache keys for {model_name}.{instance_pk}: {str(e)}"
-                )
-
+                logger.error(f"Error invalidating multiple patterns: {str(e)}")
 
 def generate_cache_key(
     model: Type[ORMModel],  # type: ignore
@@ -114,36 +105,34 @@ def generate_cache_key(
     fields_map: Dict[str, Set[str]],
     get_model_name: Callable[[Type[ORMModel]], str],  # type: ignore
 ) -> str:
+    """
+    Generate a cache key with the model name and primary key as a prefix
+    to enable pattern-based invalidation.
+    """
+    model_name = get_model_name(model)
+    
     key_data = {
-        "model": get_model_name(model),
-        "primary_key": instance.pk,
         "depth": depth,
         "fields_map": {k: sorted(list(v)) for k, v in fields_map.items()},
     }
     key_str = json.dumps(key_data, sort_keys=True)
-    return hashlib.md5(key_str.encode("utf-8")).hexdigest()
+    hash_suffix = hashlib.md5(key_str.encode("utf-8")).hexdigest()
+    
+    # Format: model_name:pk:hash
+    return f"{model_name}:{instance.pk}:{hash_suffix}"
 
 class CachingMixin:
     """
-    A mixin to add caching and dependency logging logic to a serializer.
-
+    A simplified mixin to add caching logic to a serializer without dependency tracking.
+    
     - `generate_cache_key` uses static properties of the serialization process.
-    - `log_dependency` records dependency information (model name and primary key)
-      in the serializer's context.
-    - `cache_result` stores a computed result in a pluggable cache backend and
-      registers its dependencies with a pluggable dependency store.
-
-    Both the cache backend and dependency store are expected to be provided
-    by the framework. The cache backend should implement at least `get` and `set`
-    methods, while the dependency store should implement an `add_cache_key(model_name, instance_pk, cache_key)`
-    method for tracking dependencies.
+    - `cache_result` stores a computed result in a pluggable cache backend.
+    
+    The cache backend is expected to be provided by the framework.
     """
 
     # Pluggable cache backend. For example, an instance wrapping Redis or similar.
     cache_backend: Optional[AbstractCacheBackend] = None
-
-    # Pluggable dependency store. It must implement an `add_cache_key` method.
-    dependency_store: Optional[AbstractDependencyStore] = None
 
     @classmethod
     def generate_cache_key(
@@ -156,58 +145,18 @@ class CachingMixin:
     ) -> str:
         return generate_cache_key(model, instance, depth, fields_map, get_model_name)
 
-    def log_dependency(
-        self, instance: ORMModel, get_model_name: Callable[[Type[ORMModel]], str]  # type: ignore
-    ) -> None:  # type: ignore
-        """
-        Log a dependency for a nested object into the serializer's context.
-        Dependencies are stored in a registry under the 'dependency_registry' key,
-        mapping model names to sets of instance primary keys.
-        """
-        # Ensure the registry exists in the context.
-        registry: Dict[str, Set[Any]] = self.context.setdefault(
-            "dependency_registry", {}
-        )
-        model_name = get_model_name(instance)
-        registry.setdefault(model_name, set()).add(instance.pk)
-
     def cache_result(
         self, cache_key: str, result: Any, ttl: Optional[int] = None
     ) -> Any:
         """
-        Cache the provided result using the generated cache key and record its dependencies.
-
-        Steps:
-          1. Store the result in the pluggable cache backend.
-          2. Register the cache key with all dependencies logged in the serializer context.
+        Cache the provided result using the generated cache key.
         """
         if self.cache_backend is None:
             raise ValueError("Cache backend is not configured.")
 
         # Cache the result.
         self.cache_backend.set(cache_key, result, ttl=ttl)
-
-        # Register this cache key for later invalidation based on dependencies.
-        self._register_cache_dependencies(cache_key)
         return result
-
-    def _register_cache_dependencies(self, cache_key: str) -> None:
-        """
-        Associate the given cache key with its dependencies as recorded in the context.
-        This method assumes that `log_dependency` has populated the `dependency_registry`
-        in `self.context`.
-        """
-        if self.dependency_store is None:
-            # No dependency store is configured; skip dependency registration.
-            return
-
-        # dependency_registry maps model names to sets of instance primary keys.
-        dependency_registry: Dict[str, Set[Any]] = self.context.get(
-            "dependency_registry", {}
-        )
-        for model_name, instance_pks in dependency_registry.items():
-            for instance_pk in instance_pks:
-                self.dependency_store.add_cache_key(model_name, instance_pk, cache_key)
 
     def get_cached_result(self, cache_key: str) -> Optional[Any]:
         """
@@ -217,55 +166,68 @@ class CachingMixin:
             raise ValueError("Cache backend is not configured.")
         return self.cache_backend.get(cache_key)
 
-    def invalidate_cache_for_instance(
-        self,
-        dependency_store: AbstractDependencyStore,
-        cache_backend: AbstractCacheBackend,
-        model_name: str,
-        instance_pk: Any,
-    ) -> None:
-        """
-        Given a model name and primary key, look up all associated cache keys and
-        invalidate them in the cache backend.
-        """
-        cache_keys = self.dependency_store.get_cache_keys(model_name, instance_pk)
-        for key in cache_keys:
-            self.cache_backend.invalidate(key)
-        self.dependency_store.clear_cache_keys(model_name, instance_pk)
-
-
 class CacheInvalidationEmitter(AbstractEventEmitter):
     def __init__(
         self,
         cache_backend: AbstractCacheBackend,
-        dependency_store: AbstractDependencyStore,
         get_model_name: Callable[[Type[ORMModel]], str],  # type:ignore
     ) -> None:
         """
+        Simplified cache invalidation emitter without dependency tracking.
+        
         :param cache_backend: The cache backend used to invalidate cache keys.
-        :param dependency_store: The dependency store tracking cache keys.
         :param get_model_name: A function that takes an ORMModel instance and returns its model name.
         """
         self.cache_backend = cache_backend
-        self.dependency_store = dependency_store
         self.get_model_name = get_model_name
 
     def emit(
         self, event_type: ActionType, instance: Type[ORMModel]
     ) -> None:  # type:ignore
-        # Use the injected callable to get the model name from the instance.
+        # Use the injected callable to get the model name from the instance
         model_name = self.get_model_name(instance)
-        cache_keys = self.dependency_store.get_cache_keys(model_name, instance.pk)
-        for key in cache_keys:
-            self.cache_backend.invalidate(key)
-        self.dependency_store.clear_cache_keys(model_name, instance.pk)
+        
+        # Create a model-specific cache key pattern
+        cache_key_pattern = f"{model_name}:{instance.pk}:*"
+        
+        # Invalidate all cache entries that match the pattern
+        self._invalidate_cache_keys_by_pattern(cache_key_pattern)
 
     def emit_bulk(
         self, event_type: ActionType, instances: List[Type[ORMModel]]
     ) -> None:
-        # Just loop through all instances and call emit for each one
+        """
+        Handle bulk invalidation more efficiently by:
+        1. Grouping instances by model type
+        2. For each model type, invalidate all instances in a single operation if possible
+        """
+        if not instances:
+            return
+            
+        # Group instances by model name
+        model_groups = {}
         for instance in instances:
-            self.emit(event_type, instance)
+            model_name = self.get_model_name(instance)
+            if model_name not in model_groups:
+                model_groups[model_name] = []
+            model_groups[model_name].append(instance.pk)
+            
+        # Invalidate each model group
+        for model_name, pks in model_groups.items():
+            if len(pks) == 1:
+                # Single instance - use standard pattern
+                cache_key_pattern = f"{model_name}:{pks[0]}:*"
+                self._invalidate_cache_keys_by_pattern(cache_key_pattern)
+            else:
+                # Multiple instances - use more efficient method if available
+                if hasattr(self.cache_backend, 'invalidate_multi_pattern'):
+                    patterns = [f"{model_name}:{pk}:*" for pk in pks]
+                    self.cache_backend.invalidate_multi_pattern(patterns)
+                else:
+                    # Fall back to invalidating one by one
+                    for pk in pks:
+                        cache_key_pattern = f"{model_name}:{pk}:*"
+                        self._invalidate_cache_keys_by_pattern(cache_key_pattern)
 
     def has_permission(self, request: RequestType, namespace: str) -> bool:
         # Cache invalidation is internal and doesn't require permission checks.
@@ -274,3 +236,18 @@ class CacheInvalidationEmitter(AbstractEventEmitter):
     def authenticate(self, request: RequestType) -> None:
         # No authentication required for cache invalidation.
         pass
+        
+    def _invalidate_cache_keys_by_pattern(self, pattern: str) -> None:
+        """
+        Invalidate all cache keys matching the given pattern.
+        """
+        try:
+            # If your cache backend has a method to delete by pattern, use it
+            if hasattr(self.cache_backend, 'invalidate_pattern'):
+                self.cache_backend.invalidate_pattern(pattern)
+            else:
+                # Legacy implementation goes here
+                # This would be specific to your cache backend
+                logger.warning(f"Cache backend does not support pattern invalidation: {pattern}")
+        except Exception as e:
+            logger.exception(f"Error invalidating cache keys with pattern {pattern}: {str(e)}")

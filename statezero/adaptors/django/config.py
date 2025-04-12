@@ -25,10 +25,9 @@ class DjangoLocalConfig(AppConfig):
         from statezero.adaptors.django.schemas import DjangoSchemaGenerator
         from statezero.adaptors.django.serializers import DRFDynamicSerializer
         from statezero.adaptors.django.search_providers.basic_search import BasicSearchProvider
-        from statezero.adaptors.django.caching import DjangoCacheBackend, DjangoDependencyStore
+        from statezero.adaptors.django.caching import DjangoCacheBackend
         from statezero.core.caching import (CacheInvalidationEmitter,
-                                            RedisCacheBackend,
-                                            RedisDependencyStore)
+                                            RedisCacheBackend)
         from statezero.core.event_bus import EventBus
 
         # Initialize serializer, schema generator, and ORM adapter.
@@ -47,16 +46,14 @@ class DjangoLocalConfig(AppConfig):
         if settings.CACHES.get(cache_name):
             logger.info(f"Using Django cache backend '{cache_name}' for StateZero")
             self.cache_backend = DjangoCacheBackend(cache_name=cache_name, default_ttl=default_ttl)
-            self.dependency_store = DjangoDependencyStore(cache_name=cache_name)
         else:
             # Fall back to fakeredis if the specified cache is not configured
             logger.warning(f"Django cache '{cache_name}' not configured, falling back to fakeredis")
             import fakeredis
-            from statezero.core.caching import RedisCacheBackend, RedisDependencyStore
+            from statezero.core.caching import RedisCacheBackend
             
             redis_client = fakeredis.FakeStrictRedis()
             self.cache_backend = RedisCacheBackend(redis_client, default_ttl=default_ttl)
-            self.dependency_store = RedisDependencyStore(redis_client)
 
         # Instantiate emitters by injecting only the necessary functions.
         if hasattr(settings, 'STATEZERO_PUSHER'):
@@ -68,7 +65,6 @@ class DjangoLocalConfig(AppConfig):
         
         cache_invalidation_emitter = CacheInvalidationEmitter(
             cache_backend=self.cache_backend,
-            dependency_store=self.dependency_store,
             get_model_name=self.orm_provider.get_model_name,
         )
 
