@@ -103,8 +103,8 @@ class DRFDynamicSerializerTests(TestCase):
         self.assertIn(self.dummy_model_name, result["included"])
         self.assertIn(self.related_model_name, result["included"])
         
-        # Verify dummy model data is correct
-        dummy_data = result["included"][self.dummy_model_name][0]
+        # Verify dummy model data is correct - using ID-keyed object structure
+        dummy_data = result["included"][self.dummy_model_name][self.dummy.pk]
         self.assertEqual(dummy_data["id"], self.dummy.pk)
         self.assertEqual(dummy_data["name"], "Test")
         self.assertEqual(dummy_data["value"], 42)
@@ -113,8 +113,8 @@ class DRFDynamicSerializerTests(TestCase):
         self.assertIn("related", dummy_data)
         self.assertEqual(dummy_data["related"], self.related.pk)
         
-        # Verify related model data is correct
-        related_data = result["included"][self.related_model_name][0]
+        # Verify related model data is correct - using ID-keyed object structure
+        related_data = result["included"][self.related_model_name][self.related.pk]
         self.assertEqual(related_data["id"], self.related.pk)
         self.assertEqual(related_data["name"], "Related")
 
@@ -148,26 +148,26 @@ class DRFDynamicSerializerTests(TestCase):
         self.assertIn(self.dummy_model_name, result["included"])
         self.assertIn(self.related_model_name, result["included"])
         
-        # Verify dummy models data is correct
+        # Verify dummy models data is correct - using ID-keyed object structure
         dummy_data = result["included"][self.dummy_model_name]
         self.assertEqual(len(dummy_data), 2)
         
         # Get data for each dummy model
-        dummy1_data = next(d for d in dummy_data if d["id"] == self.dummy.pk)
-        dummy2_data = next(d for d in dummy_data if d["id"] == dummy2.pk)
+        dummy1_data = dummy_data[self.dummy.pk]
+        dummy2_data = dummy_data[dummy2.pk]
         
         self.assertEqual(dummy1_data["name"], "Test")
         self.assertEqual(dummy1_data["value"], 42)
         self.assertEqual(dummy2_data["name"], "Test2")
         self.assertEqual(dummy2_data["value"], 100)
         
-        # Verify related models data is correct
+        # Verify related models data is correct - using ID-keyed object structure
         related_data = result["included"][self.related_model_name]
         self.assertEqual(len(related_data), 2)
         
         # Get data for each related model
-        related1_data = next(r for r in related_data if r["id"] == self.related.pk)
-        related2_data = next(r for r in related_data if r["id"] == related2.pk)
+        related1_data = related_data[self.related.pk]
+        related2_data = related_data[related2.pk]
         
         self.assertEqual(related1_data["name"], "Related")
         self.assertEqual(related2_data["name"], "Related2")
@@ -229,20 +229,20 @@ class RelatedModelFetchingTests(TestCase):
         self.assertIn(self.level2_model_name, result["included"])
         self.assertIn(self.level3_model_name, result["included"])
         
-        # Verify level1 data is correct
-        level1_data = result["included"][self.level1_model_name][0]
+        # Verify level1 data is correct - using ID-keyed object structure
+        level1_data = result["included"][self.level1_model_name][self.level1.pk]
         self.assertEqual(level1_data["id"], self.level1.pk)
         self.assertEqual(level1_data["name"], "Level1")
         self.assertIn("level2", level1_data)
         
-        # Verify level2 data is correct
-        level2_data = result["included"][self.level2_model_name][0]
+        # Verify level2 data is correct - using ID-keyed object structure
+        level2_data = result["included"][self.level2_model_name][self.level2.pk]
         self.assertEqual(level2_data["id"], self.level2.pk)
         self.assertEqual(level2_data["name"], "Level2")
         self.assertIn("level3", level2_data)
         
-        # Verify level3 data is correct
-        level3_data = result["included"][self.level3_model_name][0]
+        # Verify level3 data is correct - using ID-keyed object structure
+        level3_data = result["included"][self.level3_model_name][self.level3.pk]
         self.assertEqual(level3_data["id"], self.level3.pk)
         self.assertEqual(level3_data["name"], "Level3")
 
@@ -262,14 +262,14 @@ class RelatedModelFetchingTests(TestCase):
         
         # Verify level1 is included and has the requested fields
         self.assertIn(self.level1_model_name, result["included"])
-        level1_data = result["included"][self.level1_model_name][0]
+        level1_data = result["included"][self.level1_model_name][self.level1.pk]
         self.assertEqual(level1_data["id"], self.level1.pk)
         self.assertEqual(level1_data["name"], "Level1")
         self.assertIn("level2", level1_data)
         
         # If level2 is included, it should only have minimal representation
         if self.level2_model_name in result["included"]:
-            level2_data = result["included"][self.level2_model_name][0]
+            level2_data = result["included"][self.level2_model_name][self.level2.pk]
             self.assertEqual(level2_data["id"], self.level2.pk)
             self.assertNotIn("name", level2_data)
             self.assertNotIn("level3", level2_data)
@@ -323,8 +323,8 @@ class ComplexModelSerializationTests(TestCase):
         self.assertIn(self.comp_model_name, result["included"])
         self.assertIn(self.level1_model_name, result["included"])
         
-        # Verify comprehensive model data
-        comp_data = result["included"][self.comp_model_name][0]
+        # Verify comprehensive model data - using ID-keyed object structure
+        comp_data = result["included"][self.comp_model_name][self.comp_model.pk]
         self.assertEqual(comp_data["id"], self.comp_model.pk)
         self.assertEqual(comp_data["char_field"], "CompTest")
         self.assertEqual(comp_data["text_field"], "This is a test")
@@ -337,8 +337,8 @@ class ComplexModelSerializationTests(TestCase):
         self.assertIn("related", comp_data)
         self.assertEqual(comp_data["related"], self.level1.pk)
         
-        # Verify level1 data
-        level1_data = result["included"][self.level1_model_name][0]
+        # Verify level1 data - using ID-keyed object structure
+        level1_data = result["included"][self.level1_model_name][self.level1.pk]
         self.assertEqual(level1_data["id"], self.level1.pk)
         self.assertEqual(level1_data["name"], "Level1")
 
@@ -365,6 +365,7 @@ class ComplexModelSerializationTests(TestCase):
         self.assertIn("data", result_empty)
         self.assertIn("included", result_empty)
         self.assertEqual(result_empty["data"], [])
+
 
 class EdgeCaseTests(TestCase):
     def setUp(self):
@@ -482,8 +483,8 @@ class EdgeCaseTests(TestCase):
         self.assertIn(self.level1_model_name, result["included"])
         self.assertIn(self.comp_model_name, result["included"])
         
-        # Verify level1 data
-        level1_data = result["included"][self.level1_model_name][0]
+        # Verify level1 data - using ID-keyed object structure
+        level1_data = result["included"][self.level1_model_name][self.level1.pk]
         self.assertEqual(level1_data["id"], self.level1.pk)
         self.assertEqual(level1_data["name"], "Level1")
         self.assertIn("comprehensive_models", level1_data)
@@ -493,8 +494,8 @@ class EdgeCaseTests(TestCase):
         self.assertEqual(len(level1_data["comprehensive_models"]), 1)
         self.assertEqual(level1_data["comprehensive_models"][0], self.comp_model.pk)
         
-        # Verify comprehensive model data
-        comp_data = result["included"][self.comp_model_name][0]
+        # Verify comprehensive model data - using ID-keyed object structure
+        comp_data = result["included"][self.comp_model_name][self.comp_model.pk]
         self.assertEqual(comp_data["id"], self.comp_model.pk)
         self.assertEqual(comp_data["char_field"], "CompTest")
 
@@ -638,6 +639,7 @@ class EdgeCaseTests(TestCase):
         
         # Verify the relation was updated
         self.assertEqual(updated_instance.related, None)
+
 
 if __name__ == "__main__":
     import unittest

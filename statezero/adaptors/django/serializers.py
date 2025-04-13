@@ -6,6 +6,7 @@ from rest_framework import serializers
 import contextvars
 from contextlib import contextmanager
 import logging
+from cytoolz import pluck
 from zen_queries import queries_disabled
 
 from statezero.adaptors.django.config import config, registry
@@ -348,16 +349,17 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 get_model=config.orm_provider.get_model_by_name
             )
             
-            # Initialize the response structure
-            result = {
-                "data": [],
-                "included": {}
-            }
-            
             # Extract primary keys for the top-level model
             model_name = config.orm_provider.get_model_name(model)
             pk_field = model._meta.pk.name
             top_level_instances = []
+
+            # Initialize the response structure
+            result = {
+                "data": [],
+                "included": {},
+                "model": model_name
+            }
             
             # For QuerySets, gather all instances
             if isinstance(data, models.QuerySet):
@@ -396,14 +398,19 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                     else:
                         # Original code path without zen-queries
                         serialized_data = serializer_class(instances, many=True).data
+
+                    pk_field_name = model_class._meta.pk.name
+                    # [{pk: 1, ...}, {pk: 2, ...}] -> {1: {...}, 2: {...}}
+                    # Create a dictionary indexed by primary key for easy lookup in the frontend
+                    pk_indexed_data = dict(zip(pluck(pk_field_name, serialized_data), serialized_data))
                     
                     # Add the serialized data to the result
-                    result["included"][model_type] = serialized_data
+                    result["included"][model_type] = pk_indexed_data
                     
                 except Exception as e:
                     logger.error(f"Error serializing {model_type}: {e}")
                     # Include an empty list for this model type to maintain the expected structure
-                    result["included"][model_type] = []
+                    result["included"][model_type] = {}
             
             return result
 
