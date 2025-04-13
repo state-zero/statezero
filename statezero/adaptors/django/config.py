@@ -25,7 +25,6 @@ class DjangoLocalConfig(AppConfig):
         from statezero.adaptors.django.schemas import DjangoSchemaGenerator
         from statezero.adaptors.django.serializers import DRFDynamicSerializer
         from statezero.adaptors.django.search_providers.basic_search import BasicSearchProvider
-        from statezero.adaptors.django.caching import DjangoCacheBackend
         from statezero.core.caching import (CacheInvalidationEmitter,
                                             RedisCacheBackend)
         from statezero.core.event_bus import EventBus
@@ -39,21 +38,35 @@ class DjangoLocalConfig(AppConfig):
 
         # Set up cache backends based on settings
         cache_config = getattr(settings, 'STATEZERO_CACHE', {})
-        cache_name = cache_config.get('NAME', 'default')
         default_ttl = cache_config.get('DEFAULT_TTL', None)
-        
-        # Use Django's caching framework
+
+        # Try to get Redis client from Django's cache configuration
+        redis_client = None
+        cache_name = cache_config.get('NAME', 'default')
+
         if settings.CACHES.get(cache_name):
-            logger.info(f"Using Django cache backend '{cache_name}' for StateZero")
-            self.cache_backend = DjangoCacheBackend(cache_name=cache_name, default_ttl=default_ttl)
-        else:
-            # Fall back to fakeredis if the specified cache is not configured
-            logger.warning(f"Django cache '{cache_name}' not configured, falling back to fakeredis")
-            import fakeredis
-            from statezero.core.caching import RedisCacheBackend
+            django_cache = settings.CACHES.get(cache_name)
+            backend = django_cache.get('BACKEND', '')
             
+            # Check if it's a Redis-based cache
+            if 'redis' in backend.lower():
+                logger.info(f"Using Redis from Django cache '{cache_name}' for StateZero")
+                try:
+                    from django_redis import get_redis_connection
+                    redis_client = get_redis_connection(cache_name)
+                except (ImportError, Exception) as e:
+                    logger.warning(f"Could not get Redis connection from Django cache: {e}")
+            else:
+                logger.warning(f"Django cache '{cache_name}' is not Redis-based, using fakeredis instead")
+
+        # If no Redis client was obtained, use fakeredis
+        if redis_client is None:
+            logger.warning("Using fakeredis for StateZero caching - data will not persist between restarts")
+            import fakeredis
             redis_client = fakeredis.FakeStrictRedis()
-            self.cache_backend = RedisCacheBackend(redis_client, default_ttl=default_ttl)
+
+        # Create the Redis cache backend
+        self.cache_backend = RedisCacheBackend(redis_client, default_ttl=default_ttl)        
 
         # Instantiate emitters by injecting only the necessary functions.
         if hasattr(settings, 'STATEZERO_PUSHER'):

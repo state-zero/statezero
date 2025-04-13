@@ -19,7 +19,7 @@ class AbstractCacheBackend(ABC):
         pass
 
     @abstractmethod
-    def invalidate(self, key: str) -> None:
+    def invalidate_pattern(self, pattern: str) -> None:
         pass
 
 

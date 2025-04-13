@@ -1,253 +1,205 @@
+# statezero/core/caching.py
+
 import hashlib
 import json
 import logging
-import time
-from threading import Lock
-from typing import Any, Callable, Dict, Optional, Set, Type, List
+from typing import Any, Callable, Dict, List, Optional, Set, Type
 
 import orjson
 
-from statezero.core.interfaces import (AbstractCacheBackend,
-                                       AbstractDependencyStore,
-                                       AbstractEventEmitter)
-from statezero.core.types import (ActionType, ORMModel,  # type: ignore
-                                  RequestType)
+from statezero.core.interfaces import AbstractCacheBackend, AbstractEventEmitter
+from statezero.core.types import ActionType
 
 logger = logging.getLogger(__name__)
 
 
 class RedisCacheBackend(AbstractCacheBackend):
-    """Redis-based cache backend that accepts any Redis client implementation"""
+    """Redis-based cache backend with pattern matching support"""
 
     def __init__(self, redis_client, default_ttl: Optional[int] = None):
         self.redis_client = redis_client
         self.default_ttl = default_ttl
-        self.lock = Lock()
 
     def get(self, key: str) -> Optional[Any]:
-        """Retrieve and deserialize a value from cache using orjson."""
-        with self.lock:
-            try:
-                data = self.redis_client.get(key)
-                if data is None:
-                    return None
-                # orjson.loads returns a native Python object
-                return orjson.loads(data)
-            except Exception as e:
-                logger.error(f"Error retrieving key {key} from cache: {str(e)}")
+        """Retrieve and deserialize a value from cache using orjson"""
+        try:
+            data = self.redis_client.get(key)
+            if data is None:
                 return None
+            return orjson.loads(data)
+        except Exception as e:
+            logger.error(f"Error retrieving key {key} from cache: {str(e)}")
+            return None
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        """Serialize and set a value in cache with an optional TTL using orjson."""
-        with self.lock:
-            try:
-                # orjson.dumps returns bytes directly.
-                serialized_value = orjson.dumps(value)
-                expiration = ttl or self.default_ttl
-                if expiration is not None:
-                    self.redis_client.set(key, serialized_value, ex=expiration)
-                else:
-                    self.redis_client.set(key, serialized_value)
-            except Exception as e:
-                logger.error(f"Error setting key {key} in cache: {str(e)}")
-
-    def invalidate(self, key: str) -> None:
-        """Remove a key from cache."""
-        with self.lock:
-            try:
-                self.redis_client.delete(key)
-            except Exception as e:
-                logger.error(f"Error invalidating key {key} from cache: {str(e)}")
-                
+        """Serialize and set a value in cache with an optional TTL using orjson"""
+        try:
+            serialized_value = orjson.dumps(value)
+            expiration = ttl or self.default_ttl
+            if expiration is not None:
+                self.redis_client.set(key, serialized_value, ex=expiration)
+            else:
+                self.redis_client.set(key, serialized_value)
+        except Exception as e:
+            logger.error(f"Error setting key {key} in cache: {str(e)}")
+    
     def invalidate_pattern(self, pattern: str) -> None:
-        """Remove all keys matching the given pattern from cache."""
-        with self.lock:
-            try:
-                # Use Redis SCAN command to find keys matching the pattern
-                cursor = '0'
-                while cursor != 0:
-                    cursor, keys = self.redis_client.scan(cursor=cursor, match=pattern, count=100)
+        """
+        Invalidate all keys matching the given pattern.
+        
+        This is the primary method used for model-based invalidation.
+        
+        Args:
+            pattern: Redis pattern to match (e.g., "ModelName:*")
+        """
+        try:
+            # Use Redis' SCAN command to find matching keys
+            cursor = '0'
+            deleted_count = 0
+            
+            while cursor != 0:
+                cursor, keys = self.redis_client.scan(cursor=cursor, match=pattern, count=100)
+                if keys:
                     if keys:
                         self.redis_client.delete(*keys)
-                    # Convert string cursor to int for comparison
-                    cursor = int(cursor)
-            except Exception as e:
-                logger.error(f"Error invalidating keys with pattern {pattern}: {str(e)}")
-    
-    def invalidate_multi_pattern(self, patterns: List[str]) -> None:
-        """Remove all keys matching any of the given patterns from cache."""
-        with self.lock:
-            try:
-                all_keys = set()
-                for pattern in patterns:
-                    cursor = '0'
-                    while cursor != 0:
-                        cursor, keys = self.redis_client.scan(cursor=cursor, match=pattern, count=100)
-                        all_keys.update(keys)
-                        # Convert string cursor to int for comparison
-                        cursor = int(cursor)
+                        deleted_count += len(keys)
                 
-                # Delete all keys in batches to avoid too long command
-                if all_keys:
-                    # Split into batches of 1000 keys each
-                    batch_size = 1000
-                    for i in range(0, len(all_keys), batch_size):
-                        batch = list(all_keys)[i:i+batch_size]
-                        if batch:
-                            self.redis_client.delete(*batch)
-            except Exception as e:
-                logger.error(f"Error invalidating multiple patterns: {str(e)}")
+                # Convert cursor from bytes to string if needed
+                if isinstance(cursor, bytes):
+                    cursor = cursor.decode('utf-8')
+                
+                # Convert to int for comparison
+                cursor = int(cursor)
+            
+            if deleted_count > 0:
+                logger.debug(f"Invalidated {deleted_count} keys matching pattern '{pattern}'")
+                
+        except Exception as e:
+            logger.error(f"Error using Redis pattern invalidation for '{pattern}': {str(e)}")
+
 
 def generate_cache_key(
-    model: Type[ORMModel],  # type: ignore
-    instance: ORMModel,  # type: ignore
-    depth: int,
+    model_name: str,
+    instance_id: Any,
     fields_map: Dict[str, Set[str]],
-    get_model_name: Callable[[Type[ORMModel]], str],  # type: ignore
 ) -> str:
     """
-    Generate a cache key with the model name and primary key as a prefix
-    to enable pattern-based invalidation.
+    Generate a cache key for model data with a specific fields map.
+    
+    Format: "ModelName:id|collection:fields_hash"
+    
+    Args:
+        model_name: The name of the model
+        instance_id: The ID of the instance or None/special identifier for collections
+        fields_map: The fields map defining what to include
+        
+    Returns:
+        A cache key string
     """
-    model_name = get_model_name(model)
+    # Convert the fields map to a deterministic string for hashing
+    fields_dict = {k: sorted(list(v)) for k, v in fields_map.items() if v}
+    fields_json = json.dumps(fields_dict, sort_keys=True)
+    fields_hash = hashlib.md5(fields_json.encode("utf-8")).hexdigest()
     
-    key_data = {
-        "depth": depth,
-        "fields_map": {k: sorted(list(v)) for k, v in fields_map.items()},
-    }
-    key_str = json.dumps(key_data, sort_keys=True)
-    hash_suffix = hashlib.md5(key_str.encode("utf-8")).hexdigest()
-    
-    # Format: model_name:pk:hash
-    return f"{model_name}:{instance.pk}:{hash_suffix}"
+    # Decide if this is for a specific instance or a collection
+    if instance_id is None:
+        return f"{model_name}:collection:{fields_hash}"
+    else:
+        # For a specific instance
+        return f"{model_name}:{instance_id}:{fields_hash}"
 
-class CachingMixin:
-    """
-    A simplified mixin to add caching logic to a serializer without dependency tracking.
-    
-    - `generate_cache_key` uses static properties of the serialization process.
-    - `cache_result` stores a computed result in a pluggable cache backend.
-    
-    The cache backend is expected to be provided by the framework.
-    """
-
-    # Pluggable cache backend. For example, an instance wrapping Redis or similar.
-    cache_backend: Optional[AbstractCacheBackend] = None
-
-    @classmethod
-    def generate_cache_key(
-        cls,
-        model: Type[ORMModel],  # type: ignore
-        instance: ORMModel,  # type: ignore
-        depth: int,
-        fields_map: Dict[str, Set[str]],
-        get_model_name: Callable[[Type[ORMModel]], str],  # type: ignore
-    ) -> str:
-        return generate_cache_key(model, instance, depth, fields_map, get_model_name)
-
-    def cache_result(
-        self, cache_key: str, result: Any, ttl: Optional[int] = None
-    ) -> Any:
-        """
-        Cache the provided result using the generated cache key.
-        """
-        if self.cache_backend is None:
-            raise ValueError("Cache backend is not configured.")
-
-        # Cache the result.
-        self.cache_backend.set(cache_key, result, ttl=ttl)
-        return result
-
-    def get_cached_result(self, cache_key: str) -> Optional[Any]:
-        """
-        Retrieve a cached result using the provided cache key, if available.
-        """
-        if self.cache_backend is None:
-            raise ValueError("Cache backend is not configured.")
-        return self.cache_backend.get(cache_key)
 
 class CacheInvalidationEmitter(AbstractEventEmitter):
+    """
+    Event emitter that invalidates cache entries when models are modified.
+    
+    This emitter uses pattern-based invalidation to invalidate ALL cached
+    data related to a model when any instance of that model changes.
+    """
+    
     def __init__(
         self,
         cache_backend: AbstractCacheBackend,
-        get_model_name: Callable[[Type[ORMModel]], str],  # type:ignore
+        get_model_name: Callable[[Type], str],
     ) -> None:
         """
-        Simplified cache invalidation emitter without dependency tracking.
+        Initialize the cache invalidation emitter.
         
-        :param cache_backend: The cache backend used to invalidate cache keys.
-        :param get_model_name: A function that takes an ORMModel instance and returns its model name.
+        Args:
+            cache_backend: The cache backend to use for invalidation
+            get_model_name: Function to get a model's name from its class
         """
         self.cache_backend = cache_backend
         self.get_model_name = get_model_name
 
-    def emit(
-        self, event_type: ActionType, instance: Type[ORMModel]
-    ) -> None:  # type:ignore
-        # Use the injected callable to get the model name from the instance
-        model_name = self.get_model_name(instance)
-        
-        # Create a model-specific cache key pattern
-        cache_key_pattern = f"{model_name}:{instance.pk}:*"
-        
-        # Invalidate all cache entries that match the pattern
-        self._invalidate_cache_keys_by_pattern(cache_key_pattern)
-
-    def emit_bulk(
-        self, event_type: ActionType, instances: List[Type[ORMModel]]
-    ) -> None:
+    def emit(self, event_type: ActionType, instance: Any) -> None:
         """
-        Handle bulk invalidation more efficiently by:
-        1. Grouping instances by model type
-        2. For each model type, invalidate all instances in a single operation if possible
+        Handle model instance events by invalidating ALL related cache entries.
+        
+        This method invalidates ALL cached data for a model whenever any
+        instance of that model changes, regardless of the specific instance
+        or fields map used.
+        
+        Args:
+            event_type: The type of event (CREATE, UPDATE, DELETE, etc.)
+            instance: The model instance that triggered the event
+        """
+        try:
+            # Skip pre-operation events
+            if event_type in (ActionType.PRE_DELETE, ActionType.PRE_UPDATE):
+                return
+                
+            # Get the model name
+            model_class = instance.__class__
+            model_name = self.get_model_name(model_class)
+            
+            # Invalidate ALL cache entries for this model
+            # This will match both collections and specific instances
+            model_pattern = f"{model_name}:*"
+            self.cache_backend.invalidate_pattern(model_pattern)
+            
+            logger.debug(f"All cache entries invalidated for model {model_name} after {event_type}")
+            
+        except Exception as e:
+            logger.exception(f"Error invalidating cache for {event_type}: {e}")
+
+    def emit_bulk(self, event_type: ActionType, instances: List[Any]) -> None:
+        """
+        Handle bulk model events by invalidating ALL related cache entries.
+        
+        For bulk operations, we invalidate all cache entries for the model.
+        
+        Args:
+            event_type: The type of bulk event
+            instances: List of model instances that triggered the event
         """
         if not instances:
             return
             
-        # Group instances by model name
-        model_groups = {}
-        for instance in instances:
-            model_name = self.get_model_name(instance)
-            if model_name not in model_groups:
-                model_groups[model_name] = []
-            model_groups[model_name].append(instance.pk)
+        try:
+            # Skip pre-operation events
+            if event_type in (ActionType.PRE_DELETE, ActionType.PRE_UPDATE):
+                return
+                
+            # Get model information from the first instance
+            first_instance = instances[0]
+            model_class = first_instance.__class__
+            model_name = self.get_model_name(model_class)
             
-        # Invalidate each model group
-        for model_name, pks in model_groups.items():
-            if len(pks) == 1:
-                # Single instance - use standard pattern
-                cache_key_pattern = f"{model_name}:{pks[0]}:*"
-                self._invalidate_cache_keys_by_pattern(cache_key_pattern)
-            else:
-                # Multiple instances - use more efficient method if available
-                if hasattr(self.cache_backend, 'invalidate_multi_pattern'):
-                    patterns = [f"{model_name}:{pk}:*" for pk in pks]
-                    self.cache_backend.invalidate_multi_pattern(patterns)
-                else:
-                    # Fall back to invalidating one by one
-                    for pk in pks:
-                        cache_key_pattern = f"{model_name}:{pk}:*"
-                        self._invalidate_cache_keys_by_pattern(cache_key_pattern)
+            # Invalidate ALL cache entries for this model
+            model_pattern = f"{model_name}:*"
+            self.cache_backend.invalidate_pattern(model_pattern)
+            
+            logger.debug(f"Bulk cache invalidation for model {model_name} after {event_type}")
+            
+        except Exception as e:
+            logger.exception(f"Error in bulk cache invalidation for {event_type}: {e}")
 
-    def has_permission(self, request: RequestType, namespace: str) -> bool:
-        # Cache invalidation is internal and doesn't require permission checks.
+    # Required interface methods
+    def has_permission(self, request, namespace: str) -> bool:
+        """Cache invalidation is always permitted"""
         return True
 
-    def authenticate(self, request: RequestType) -> None:
-        # No authentication required for cache invalidation.
+    def authenticate(self, request) -> None:
+        """No authentication required for cache invalidation"""
         pass
-        
-    def _invalidate_cache_keys_by_pattern(self, pattern: str) -> None:
-        """
-        Invalidate all cache keys matching the given pattern.
-        """
-        try:
-            # If your cache backend has a method to delete by pattern, use it
-            if hasattr(self.cache_backend, 'invalidate_pattern'):
-                self.cache_backend.invalidate_pattern(pattern)
-            else:
-                # Legacy implementation goes here
-                # This would be specific to your cache backend
-                logger.warning(f"Cache backend does not support pattern invalidation: {pattern}")
-        except Exception as e:
-            logger.exception(f"Error invalidating cache keys with pattern {pattern}: {str(e)}")

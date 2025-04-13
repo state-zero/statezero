@@ -2,6 +2,7 @@ from typing import Dict, Set, List, Optional, Callable, Type, Union, Any
 from django.db import models
 from django.db.models.query import QuerySet
 from django.apps import apps
+from django.core.exceptions import FieldDoesNotExist
 
 def collect_models_by_type(
     obj, 
@@ -112,12 +113,11 @@ def collect_models_by_type(
                     # This will use select_related data if available
                     collect_models_by_type(related_obj, fields_map, collected, get_model_name, visited)
                     
-        except models.FieldDoesNotExist:
+        except FieldDoesNotExist:
             # Skip computed properties and non-existent fields
             continue
     
     return collected
-
 
 def collect_from_queryset(
     data: Any, 

@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Optional, Set, Type
 
 import fakeredis
 
-from statezero.core.caching import (CacheInvalidationEmitter, CachingMixin,
+from statezero.core.caching import (CacheInvalidationEmitter,
                                     RedisCacheBackend, generate_cache_key)
 from statezero.core.types import ActionType
 # Import your actual dummy model from tests.django_app.models.
@@ -13,229 +13,218 @@ from tests.django_app.models import \
     DummyModel  # adjust the import path as needed
 
 
-def dummy_get_model_name(model: Any) -> str:
-    """
-    A helper that returns the model name in the format "app_label.model_name"
-    using the model's _meta attribute.
-    """
-    if not isinstance(model, type):
-        model = model.__class__
-    return f"{model._meta.app_label}.{model._meta.model_name}"
-
-
-# Create a dummy caching helper that uses the CachingMixin.
-class DummyCaching(CachingMixin):
-    def __init__(self, cache_backend):
-        self.cache_backend = cache_backend
-
-
-class TestCacheInvalidation(unittest.TestCase):
+class TestRedisCacheBackend(unittest.TestCase):
+    """Test the Redis cache backend functionality"""
+    
     def setUp(self):
-        # Set up a fake Redis client and caching components.
+        """Set up a fresh Redis instance for each test"""
         self.redis_client = fakeredis.FakeStrictRedis()
         self.cache_backend = RedisCacheBackend(self.redis_client)
         
-        # Create our dummy caching helper.
-        self.caching = DummyCaching(self.cache_backend)
+        # Add some test data to Redis
+        self.redis_client.set("test:key1", b'"value1"')
+        self.redis_client.set("test:key2", b'"value2"')
+        self.redis_client.set("other:key1", b'"other_value"')
         
-        # Create an emitter that will simulate signal triggering.
-        self.emitter = CacheInvalidationEmitter(
-            cache_backend=self.cache_backend,
-            get_model_name=dummy_get_model_name,
-        )
+    def test_get(self):
+        """Test retrieving values from cache"""
+        # Test existing key
+        self.assertEqual(self.cache_backend.get("test:key1"), "value1")
         
-        # Create a dummy model instance using the actual dummy model.
-        self.instance = DummyModel.objects.create(name="TestModel")
-        self.fields_map = {"name": {"name"}}
-        self.depth = 0
+        # Test non-existent key
+        self.assertIsNone(self.cache_backend.get("nonexistent:key"))
+        
+        # Test with invalid JSON
+        self.redis_client.set("invalid:json", b'not json')
+        self.assertIsNone(self.cache_backend.get("invalid:json"))
+        
+    def test_set(self):
+        """Test setting values in cache"""
+        # Test simple value
+        self.cache_backend.set("new:key", "new_value")
+        self.assertEqual(self.redis_client.get("new:key"), b'"new_value"')
+        
+        # Test complex value
+        complex_data = {"key": "value", "nested": {"a": 1, "b": 2}}
+        self.cache_backend.set("complex:key", complex_data)
+        self.assertEqual(json.loads(self.redis_client.get("complex:key")), complex_data)
+        
+        # Test with TTL
+        self.cache_backend.set("ttl:key", "ttl_value", ttl=60)
+        self.assertEqual(self.redis_client.get("ttl:key"), b'"ttl_value"')
+        self.assertGreaterEqual(self.redis_client.ttl("ttl:key"), 0)
+        
+    def test_invalidate_pattern(self):
+        """Test pattern-based invalidation"""
+        # Test invalidating by prefix
+        self.cache_backend.invalidate_pattern("test:*")
+        self.assertIsNone(self.redis_client.get("test:key1"))
+        self.assertIsNone(self.redis_client.get("test:key2"))
+        self.assertEqual(self.redis_client.get("other:key1"), b'"other_value"')
+        
+        # Test invalidating specific key pattern
+        self.redis_client.set("model:1:abc", b'"data1"')
+        self.redis_client.set("model:1:def", b'"data2"')
+        self.redis_client.set("model:2:abc", b'"data3"')
+        
+        self.cache_backend.invalidate_pattern("model:1:*")
+        self.assertIsNone(self.redis_client.get("model:1:abc"))
+        self.assertIsNone(self.redis_client.get("model:1:def"))
+        self.assertEqual(self.redis_client.get("model:2:abc"), b'"data3"')
+        
+        # Test invalidating non-matching pattern (should do nothing)
+        self.cache_backend.invalidate_pattern("nonexistent:*")
+        self.assertEqual(self.redis_client.get("model:2:abc"), b'"data3"')
 
-        # Generate a cache key using the new format
-        self.model_name = dummy_get_model_name(DummyModel)
-        key_data = {
-            "depth": self.depth,
-            "fields_map": {k: sorted(list(v)) for k, v in self.fields_map.items()},
+
+class TestCacheKeyGeneration(unittest.TestCase):
+    """Test the cache key generation functionality"""
+    
+    def test_generate_cache_key_for_instance(self):
+        """Test generating a cache key for a specific instance"""
+        model_name = "TestModel"
+        instance_id = 123
+        fields_map = {
+            "TestModel": {"id", "name", "description"},
+            "RelatedModel": {"id", "title"}
         }
-        key_str = json.dumps(key_data, sort_keys=True)
-        hash_suffix = hashlib.md5(key_str.encode("utf-8")).hexdigest()
-        self.cache_key = f"{self.model_name}:{self.instance.pk}:{hash_suffix}"
-
-    def tearDown(self):
-        # Clean up the dummy instance.
-        DummyModel.objects.all().delete()
-
-    def test_cache_set_and_get(self):
-        """Ensure that a value can be set and retrieved from the cache."""
-        value = {"result": "data"}
-        # Cache the result.
-        self.caching.cache_result(self.cache_key, value, ttl=60)
-
-        # Retrieve value from cache.
-        cached_value = self.cache_backend.get(self.cache_key)
-        self.assertEqual(cached_value, value)
-
-    def test_signal_based_invalidation(self):
-        """
-        Simulate a Django signal (such as post_save) by calling the emitter's emit method,
-        and verify that the cache key is invalidated.
-        """
-        value = {"result": "data"}
-        self.caching.cache_result(self.cache_key, value, ttl=60)
-
-        # Verify that the key is in the cache.
-        self.assertEqual(self.cache_backend.get(self.cache_key), value)
-
-        # Now simulate triggering the invalidation signal.
-        self.emitter.emit(ActionType.UPDATE, self.instance)
-
-        # The cache key should be invalidated.
-        self.assertIsNone(self.cache_backend.get(self.cache_key))
-
-    def test_pattern_based_invalidation(self):
-        """Test that pattern-based invalidation works correctly."""
-        # Create several cache keys with the same model and instance but different hashes
-        value1 = {"result": "data1"}
-        value2 = {"result": "data2"}
-        value3 = {"result": "data3"}
         
-        # Manually create keys with different hash suffixes
-        key1 = f"{self.model_name}:{self.instance.pk}:hash1"
-        key2 = f"{self.model_name}:{self.instance.pk}:hash2"
-        key3 = f"{self.model_name}:{self.instance.pk}:hash3"
+        key = generate_cache_key(model_name, instance_id, fields_map)
         
-        # A key for a different instance
-        other_instance = DummyModel.objects.create(name="OtherModel")
-        other_key = f"{self.model_name}:{other_instance.pk}:hash1"
+        # Ensure key has the right format
+        self.assertTrue(key.startswith(f"{model_name}:{instance_id}:"))
         
-        # Set all the values
-        self.cache_backend.set(key1, value1)
-        self.cache_backend.set(key2, value2)
-        self.cache_backend.set(key3, value3)
-        self.cache_backend.set(other_key, value1)
+        # Ensure consistent hashing
+        fields_dict = {k: sorted(list(v)) for k, v in fields_map.items()}
+        fields_json = json.dumps(fields_dict, sort_keys=True)
+        expected_hash = hashlib.md5(fields_json.encode("utf-8")).hexdigest()
         
-        # Verify all values are in the cache
-        self.assertEqual(self.cache_backend.get(key1), value1)
-        self.assertEqual(self.cache_backend.get(key2), value2)
-        self.assertEqual(self.cache_backend.get(key3), value3)
-        self.assertEqual(self.cache_backend.get(other_key), value1)
+        self.assertTrue(key.endswith(expected_hash))
         
-        # Simulate an update to the first instance
-        pattern = f"{self.model_name}:{self.instance.pk}:*"
-        self.cache_backend.invalidate_pattern(pattern)
+    def test_generate_cache_key_for_collection(self):
+        """Test generating a cache key for a collection"""
+        model_name = "TestModel"
+        fields_map = {"TestModel": {"id", "name"}}
         
-        # Check that all keys for the first instance are invalidated
-        self.assertIsNone(self.cache_backend.get(key1))
-        self.assertIsNone(self.cache_backend.get(key2))
-        self.assertIsNone(self.cache_backend.get(key3))
+        key = generate_cache_key(model_name, None, fields_map)
         
-        # But the key for the other instance should still be there
-        self.assertEqual(self.cache_backend.get(other_key), value1)
+        # Ensure key has the right format
+        self.assertTrue(key.startswith(f"{model_name}:collection:"))
+        
+        # Test with empty fields map
+        key = generate_cache_key(model_name, None, {})
+        self.assertTrue(key.startswith(f"{model_name}:collection:"))
+        
+    def test_generate_cache_key_consistency(self):
+        """Test that the same inputs always generate the same key"""
+        model_name = "TestModel"
+        instance_id = 456
+        fields_map = {"TestModel": {"id", "name"}}
+        
+        key1 = generate_cache_key(model_name, instance_id, fields_map)
+        key2 = generate_cache_key(model_name, instance_id, fields_map)
+        
+        self.assertEqual(key1, key2)
+        
+        # Test that different field ordering produces the same key
+        fields_map1 = {"TestModel": {"id", "name"}}
+        fields_map2 = {"TestModel": {"name", "id"}}
+        
+        key1 = generate_cache_key(model_name, instance_id, fields_map1)
+        key2 = generate_cache_key(model_name, instance_id, fields_map2)
+        
+        self.assertEqual(key1, key2)
 
 
-class TestBulkCacheInvalidation(unittest.TestCase):
+class TestCacheInvalidationEmitter(unittest.TestCase):
+    """Test the cache invalidation emitter functionality"""
+    
     def setUp(self):
-        # Set up a fake Redis client and caching components.
+        """Set up the emitter with a mock cache backend"""
         self.redis_client = fakeredis.FakeStrictRedis()
         self.cache_backend = RedisCacheBackend(self.redis_client)
         
-        # Create our dummy caching helper.
-        self.caching = DummyCaching(self.cache_backend)
-        
-        # Create an emitter that will simulate signal triggering.
+        # A simple function to get a model's name
+        def get_model_name(model_class):
+            return model_class.__name__
+            
+        self.get_model_name = get_model_name
         self.emitter = CacheInvalidationEmitter(
             cache_backend=self.cache_backend,
-            get_model_name=dummy_get_model_name,
+            get_model_name=self.get_model_name
         )
         
-        # Create multiple dummy model instances
-        self.instances = [
-            DummyModel.objects.create(name=f"TestModel{i}") 
-            for i in range(3)
-        ]
+        # Add some test data to Redis
+        self.redis_client.set("DummyModel:1:abc", b'"instance_data"')
+        self.redis_client.set("DummyModel:2:abc", b'"instance_data2"')
+        self.redis_client.set("DummyModel:collection:abc", b'"collection_data"')
+        self.redis_client.set("OtherModel:1:abc", b'"other_data"')
         
-        self.model_name = dummy_get_model_name(DummyModel)
-        self.fields_map = {"name": {"name"}}
-        self.depth = 0
+    def test_emit_for_instance(self):
+        """Test emitting an event for a model instance"""
+        # Create a dummy instance
+        dummy = DummyModel(pk=1)
         
-        # Generate cache keys for each instance
-        self.cache_keys = []
-        for instance in self.instances:
-            key_data = {
-                "depth": self.depth,
-                "fields_map": {k: sorted(list(v)) for k, v in self.fields_map.items()},
-            }
-            key_str = json.dumps(key_data, sort_keys=True)
-            hash_suffix = hashlib.md5(key_str.encode("utf-8")).hexdigest()
-            self.cache_keys.append(f"{self.model_name}:{instance.pk}:{hash_suffix}")
-
-    def tearDown(self):
-        # Clean up the dummy instances.
-        DummyModel.objects.all().delete()
-
-    def test_bulk_invalidation(self):
-        """Test that bulk invalidation correctly invalidates multiple cache keys."""
-        # Set values for all cache keys
-        for i, key in enumerate(self.cache_keys):
-            value = {"result": f"data{i}"}
-            self.caching.cache_result(key, value, ttl=60)
-            
-        # Verify all values are in the cache
-        for i, key in enumerate(self.cache_keys):
-            self.assertEqual(self.cache_backend.get(key), {"result": f"data{i}"})
-            
-        # Simulate bulk invalidation
-        self.emitter.emit_bulk(ActionType.BULK_UPDATE, self.instances)
+        # Emit a CREATE event
+        self.emitter.emit(ActionType.CREATE, dummy)
         
-        # Check that all keys are invalidated
-        for key in self.cache_keys:
-            self.assertIsNone(self.cache_backend.get(key))
-            
-    def test_multi_pattern_invalidation(self):
-        """Test that multi_pattern invalidation works correctly."""
-        # Set values for all cache keys
-        for i, key in enumerate(self.cache_keys):
-            value = {"result": f"data{i}"}
-            self.caching.cache_result(key, value, ttl=60)
-            
-        # Create patterns for each instance
-        patterns = [f"{self.model_name}:{instance.pk}:*" for instance in self.instances]
+        # All DummyModel cache entries should be invalidated
+        self.assertIsNone(self.redis_client.get("DummyModel:1:abc"))
+        self.assertIsNone(self.redis_client.get("DummyModel:2:abc"))
+        self.assertIsNone(self.redis_client.get("DummyModel:collection:abc"))
         
-        # Invalidate using multiple patterns
-        self.cache_backend.invalidate_multi_pattern(patterns)
+        # OtherModel entries should remain
+        self.assertEqual(self.redis_client.get("OtherModel:1:abc"), b'"other_data"')
         
-        # Check that all keys are invalidated
-        for key in self.cache_keys:
-            self.assertIsNone(self.cache_backend.get(key))
-
-
-class TestGenerateCacheKey(unittest.TestCase):
-    def setUp(self):
-        # Create a dummy model instance using the actual dummy model.
-        self.instance = DummyModel.objects.create(name="TestModel")
-        self.fields_map = {"name": {"name"}}
-        self.depth = 0
-
-    def tearDown(self):
-        # Clean up the dummy instance.
-        DummyModel.objects.all().delete()
-
-    def test_generate_cache_key(self):
-        """Test that the generate_cache_key function produces correctly formatted keys."""
-        # Generate a cache key using the function
-        key = generate_cache_key(
-            model=DummyModel,
-            instance=self.instance,
-            depth=self.depth,
-            fields_map=self.fields_map,
-            get_model_name=dummy_get_model_name
-        )
+    def test_emit_for_pre_event(self):
+        """Test that pre-events don't trigger invalidation"""
+        dummy = DummyModel(pk=1)
         
-        # Verify the key format starts with model_name:pk:
-        model_name = dummy_get_model_name(DummyModel)
-        self.assertTrue(key.startswith(f"{model_name}:{self.instance.pk}:"))
+        # Emit a PRE_UPDATE event
+        self.emitter.emit(ActionType.PRE_UPDATE, dummy)
         
-        # Key should have three parts separated by colons
-        parts = key.split(":")
-        self.assertEqual(len(parts), 3)
+        # No cache entries should be invalidated
+        self.assertEqual(self.redis_client.get("DummyModel:1:abc"), b'"instance_data"')
+        self.assertEqual(self.redis_client.get("DummyModel:2:abc"), b'"instance_data2"')
+        self.assertEqual(self.redis_client.get("DummyModel:collection:abc"), b'"collection_data"')
+        
+    def test_emit_bulk(self):
+        """Test emitting a bulk event"""
+        # Create multiple dummy instances
+        dummies = [DummyModel(pk=1), DummyModel(pk=2)]
+        
+        # Emit a BULK_UPDATE event
+        self.emitter.emit_bulk(ActionType.BULK_UPDATE, dummies)
+        
+        # All DummyModel cache entries should be invalidated
+        self.assertIsNone(self.redis_client.get("DummyModel:1:abc"))
+        self.assertIsNone(self.redis_client.get("DummyModel:2:abc"))
+        self.assertIsNone(self.redis_client.get("DummyModel:collection:abc"))
+        
+        # OtherModel entries should remain
+        self.assertEqual(self.redis_client.get("OtherModel:1:abc"), b'"other_data"')
+        
+    def test_emit_bulk_for_pre_event(self):
+        """Test that pre-events don't trigger bulk invalidation"""
+        dummies = [DummyModel(pk=1), DummyModel(pk=2)]
+        
+        # Emit a PRE_UPDATE event
+        self.emitter.emit_bulk(ActionType.PRE_DELETE, dummies)
+        
+        # No cache entries should be invalidated
+        self.assertEqual(self.redis_client.get("DummyModel:1:abc"), b'"instance_data"')
+        self.assertEqual(self.redis_client.get("DummyModel:2:abc"), b'"instance_data2"')
+        self.assertEqual(self.redis_client.get("DummyModel:collection:abc"), b'"collection_data"')
+        
+    def test_emit_bulk_empty_list(self):
+        """Test emitting a bulk event with an empty list"""
+        # This should do nothing and not raise any errors
+        self.emitter.emit_bulk(ActionType.BULK_UPDATE, [])
+        
+        # All cache entries should remain
+        self.assertEqual(self.redis_client.get("DummyModel:1:abc"), b'"instance_data"')
+        self.assertEqual(self.redis_client.get("DummyModel:2:abc"), b'"instance_data2"')
+        self.assertEqual(self.redis_client.get("DummyModel:collection:abc"), b'"collection_data"')
 
 
 if __name__ == "__main__":
