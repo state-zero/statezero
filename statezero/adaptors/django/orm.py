@@ -12,6 +12,7 @@ from django.urls import path
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework import serializers
 
 
 from statezero.adaptors.django.config import config, registry
@@ -401,8 +402,23 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         # Triggers cache invalidation and broadcast to the frontend
         config.event_bus.emit_bulk_event(ActionType.BULK_DELETE, instances)
-            
-        return deleted, (getattr(instance, pk_field_name) for instance in instances)
+
+        # Dynamically create a Meta inner class
+        Meta = type("Meta", (), {
+            "model": model,
+            "fields": [pk_field_name],  # Only include the PK field
+        })
+        
+        # Create the serializer class
+        serializer_class = type(
+            f"Dynamic{model.__name__}PkSerializer", 
+            (serializers.ModelSerializer,), 
+            {"Meta": Meta}
+        )
+
+        serializer = serializer_class(instances, many=True)
+                
+        return deleted, serializer.data
 
     def get(
         self,
@@ -876,5 +892,5 @@ class DjangoORMAdapter(AbstractORMProvider):
         if hasattr(model, "_meta"):
             return f"{model._meta.app_label}.{model._meta.model_name}"
         raise ValueError(
-            "Cannot determine model name: _meta attribute is missing from the model."
+            f"Cannot determine model name from {model} of type {type(model)}: _meta attribute is missing from the model."
         )

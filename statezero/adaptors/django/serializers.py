@@ -64,6 +64,25 @@ def get_custom_serializer(field_class: Type) -> Optional[Type[serializers.Field]
         return import_string(serializer_path)
     return None
 
+class FlexiblePrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
+    """
+    A custom PrimaryKeyRelatedField that can handle both primary keys and model instances.
+    """
+    def to_internal_value(self, data):
+        # If data is already a model instance, extract its primary key
+        if hasattr(data, '_meta'):
+            pk_field = data._meta.pk.name
+            pk_value = getattr(data, pk_field)
+            return super().to_internal_value(pk_value)
+        
+        # If data is a dictionary with a key matching the PK field name, extract the value
+        if isinstance(data, dict) and self.queryset.model._meta.pk.name in data:
+            pk_value = data[self.queryset.model._meta.pk.name]
+            return super().to_internal_value(pk_value)
+        
+        # Otherwise, use the standard to_internal_value
+        return super().to_internal_value(data)
+
 class DynamicModelSerializer(serializers.ModelSerializer):
     """
     A dynamic serializer that adds a read-only 'repr' field
@@ -110,29 +129,6 @@ class DynamicModelSerializer(serializers.ModelSerializer):
             "str": str_repr,
             "img": img_repr
         }
-
-    def to_internal_value(self, data):
-        # If this is being used as a related field (not the root serializer)
-        if self.root != self:
-            # If data is already a Django model instance, return it directly
-            if hasattr(data, '_meta'):
-                return data
-                
-            # Get the primary key field
-            pk_field = self.Meta.model._meta.pk.name
-            
-            # Handle dictionary or primitive value
-            pk = data.get(pk_field) if isinstance(data, dict) else data
-            try:
-                instance = self.Meta.model.objects.get(**{pk_field: pk})
-                return instance
-            except self.Meta.model.DoesNotExist:
-                raise serializers.ValidationError({
-                    pk_field: f"Related object with {pk_field} {pk} does not exist."
-                })
-        
-        # Otherwise, use the standard deserialization
-        return super().to_internal_value(data)
     
     def create(self, validated_data):
         """
@@ -176,6 +172,31 @@ class DynamicModelSerializer(serializers.ModelSerializer):
     class Meta:
         model = None  # To be set dynamically.
         fields = "__all__"
+
+    
+    @classmethod
+    def _setup_relation_fields(cls, serializer_class, model, allowed_fields):
+        """Configure relation fields to use PrimaryKeyRelatedField."""
+        allowed_fields = allowed_fields or set()
+        
+        for field in model._meta.get_fields():
+            # Skip fields that won't be presented
+            if field.name not in allowed_fields:
+                continue
+                
+            if getattr(field, "auto_created", False) and not field.concrete:
+                continue
+                
+            if field.is_relation:
+                queryset = field.related_model.objects.all()
+                serializer_class._declared_fields[field.name] = FlexiblePrimaryKeyRelatedField(
+                    queryset=queryset,
+                    required=not (field.null or field.blank),
+                    allow_null=field.null,
+                    many= field.many_to_many or field.one_to_many
+                )
+                    
+        return serializer_class
                 
     @classmethod
     def _setup_custom_serializers(cls, serializer_class, model, allowed_fields):
@@ -196,7 +217,7 @@ class DynamicModelSerializer(serializers.ModelSerializer):
         return serializer_class
         
     @classmethod
-    def _setup_computed_fields(cls, serializer_class, model):
+    def _setup_computed_fields(cls, serializer_class, model, allowed_fields):
         """Set up additional computed fields from the model registry."""
         try:
             model_config = registry.get_config(model)
@@ -206,6 +227,8 @@ class DynamicModelSerializer(serializers.ModelSerializer):
         mapping = serializers.ModelSerializer.serializer_field_mapping
         
         for additional_field in model_config.additional_fields:
+            if additional_field.name not in allowed_fields:
+                continue
             drf_field_class = mapping.get(type(additional_field.field))
             if not drf_field_class:
                 continue
@@ -267,7 +290,9 @@ class DynamicModelSerializer(serializers.ModelSerializer):
             )
         
             # Add computed fields from the registry
-            serializer_class = cls._setup_computed_fields(serializer_class, model)
+            serializer_class = cls._setup_computed_fields(serializer_class, model, allowed_fields)
+            # Add relationship fields
+            serializer_class = cls._setup_relation_fields(serializer_class, model, allowed_fields)
         
         return serializer_class
 

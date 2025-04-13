@@ -39,7 +39,7 @@ def collect_models_by_type(
         visited = set()
     
     # Handle querysets
-    if isinstance(obj, QuerySet):
+    if isinstance(obj, (QuerySet, list, tuple)):
         for item in obj:
             collect_models_by_type(item, fields_map, collected, get_model_name, visited)
         return collected
