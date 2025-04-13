@@ -333,7 +333,8 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         if data is None:
             return {
                 "data": [],
-                "included": {}
+                "included": {},
+                "model_name": None
             }
         
         # Apply query optimization
@@ -358,7 +359,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             result = {
                 "data": [],
                 "included": {},
-                "model": model_name
+                "model_name": model_name
             }
             
             # For QuerySets, gather all instances
