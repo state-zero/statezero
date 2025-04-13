@@ -71,7 +71,6 @@ class DynamicModelSerializer(serializers.ModelSerializer):
     repr = serializers.SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
-        self.cache_backend = kwargs.pop("cache_backend", config.cache_backend)
         self.get_model_name = kwargs.pop("get_model_name", config.orm_provider.get_model_name)
         self.depth = kwargs.pop("depth", 0)  # Always 0
         self.request = kwargs.pop("request", None)

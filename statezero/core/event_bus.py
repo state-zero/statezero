@@ -1,7 +1,6 @@
 import logging
 from typing import Any, Type, Union, List
 
-from statezero.core.caching import CacheInvalidationEmitter
 from statezero.core.interfaces import AbstractEventEmitter, AbstractORMProvider
 from statezero.core.types import ActionType, ORMModel, ORMQuerySet
 
@@ -11,27 +10,20 @@ logger = logging.getLogger(__name__)
 class EventBus:
     def __init__(
         self,
-        cache_invalidation_emitter: AbstractEventEmitter,
         broadcast_emitter: AbstractEventEmitter,
         orm_provider: AbstractORMProvider = None,
     ) -> None:
         """
         Initialize the EventBus with two explicit event emitters:
-          - cache_invalidation_emitter: Handles critical tasks (e.g., cache invalidation).
           - broadcast_emitter: Handles broadcasting events to clients.
 
         Parameters:
         -----------
-        cache_invalidation_emitter: AbstractEventEmitter
-            Emitter responsible for cache invalidation tasks
         broadcast_emitter: AbstractEventEmitter
             Emitter responsible for broadcasting events to clients
         orm_provider : AbstractORMProvider
             The orm provider to be used to get the default namespace for events
         """
-        self.cache_invalidation_emitter: AbstractEventEmitter = (
-            cache_invalidation_emitter
-        )
         self.broadcast_emitter: AbstractEventEmitter = broadcast_emitter
         self.orm_provider = orm_provider
 
@@ -45,9 +37,8 @@ class EventBus:
         Emit an event for a model instance to appropriate namespaces.
 
         This method:
-        1. Always dispatches to the cache invalidation emitter
-        2. Determines applicable namespaces (default + additional)
-        3. Emits the event to each namespace via the broadcast emitter
+        1. Determines applicable namespaces (default + additional)
+        2. Emits the event to each namespace via the broadcast emitter
 
         Parameters:
         -----------
@@ -56,18 +47,7 @@ class EventBus:
         instance: Any
             The model instance that triggered the event
         """
-        # First dispatch to cache invalidation emitter
-        try:
-            self.cache_invalidation_emitter.emit(action_type, instance)
-        except Exception as e:
-            logger.exception(
-                "Error in cache invalidation emitter dispatching event %s for instance %s: %s",
-                action_type,
-                instance,
-                e,
-            )
-
-        # Check if its an event that's just for the cache
+        # Unused actions, no need to broadcast
         if action_type in (ActionType.PRE_DELETE, ActionType.PRE_UPDATE):
             pass 
 
@@ -145,9 +125,8 @@ class EventBus:
         Emit a bulk event for multiple instances.
         
         This method:
-        1. Sends a bulk event to the cache invalidation emitter
-        2. Groups instances by namespace
-        3. Emits bulk events to each namespace with the appropriate instances
+        1. Groups instances by namespace
+        2. Emits bulk events to each namespace with the appropriate instances
         
         Parameters:
         -----------
@@ -166,18 +145,8 @@ class EventBus:
         # Get the model class from the first instance
         first_instance = instances[0]
         model_class = first_instance.__class__
-        
-        # First dispatch to cache invalidation emitter
-        try:
-            self.cache_invalidation_emitter.emit_bulk(action_type, instances)
-        except Exception as e:
-            logger.exception(
-                "Error in cache invalidation emitter dispatching bulk event %s: %s",
-                action_type,
-                e,
-            )
 
-        # Then handle broadcast with namespace resolution
+        # Handle broadcast with namespace resolution
         if not self.broadcast_emitter or not self.orm_provider:
             return
 
