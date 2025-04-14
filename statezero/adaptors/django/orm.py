@@ -86,30 +86,16 @@ class QueryASTVisitor:
 
     def _process_field_lookup(self, field: str, value: Any) -> Tuple[str, Any]:
         """
-        Process a field lookup string to determine the correct Django ORM lookup.
-        Handles deeply nested lookups like 'level2__level3__name'.
-
+        This used to contain logic, right now it just passes through the field and value.
+        
         Args:
-            field: The field lookup string (e.g., 'name__icontains' or 'level2__level3__name')
+            field: The field lookup string (e.g., 'datetime_field__hour__gt')
             value: The value to filter by
-
+            
         Returns:
-            A tuple of (processed_lookup, value)
-        """
-        parts = field.split("__")
-
-        # Check if the last part is a supported operator
-        if parts[-1] in self.SUPPORTED_OPERATORS:
-            operator = parts.pop(-1)
-            # Rejoin the field parts
-            base_field = "__".join(parts)
-            # Add back the operator
-            lookup = f"{base_field}__{operator}"
-        else:
-            # No special operator, use the field as is (exact/equal lookup)
-            lookup = field
-
-        return lookup, value
+            A tuple of (lookup, value)
+        """            
+        return field, value
 
     def visit_filter(self, node: Dict[str, Any]) -> Q:
         """Process a filter node, handling both conditions and Q objects."""
@@ -136,7 +122,6 @@ class QueryASTVisitor:
                     q_combined |= q_part
             if q_combined:
                 q &= q_combined
-
         return q
 
     def visit_exclude(self, node: Dict[str, Any]) -> Q:

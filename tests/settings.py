@@ -21,6 +21,9 @@ TEMPLATES = [
     },
 ]
 
+USE_TZ = True
+TIME_ZONE = 'UTC'
+
 STATIC_URL = "/static/"
 
 SECRET_KEY = "fake-key"
