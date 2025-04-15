@@ -9,6 +9,7 @@ __pycache__/
 *.pyc
 __pycache__/
 db.sqlite3
+test_db.sqlite3-journal
 
 # Hypothesis
 .hypothesis/
