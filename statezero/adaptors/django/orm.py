@@ -19,7 +19,7 @@ from statezero.adaptors.django.config import config, registry
 from statezero.core.ast_parser import ASTParser
 from statezero.core.classes import FieldNode, ModelNode
 from statezero.core.event_bus import EventBus
-from statezero.core.exceptions import (ORMBridgeError, MultipleObjectsReturned,
+from statezero.core.exceptions import (StateZeroError, MultipleObjectsReturned,
                                        NotFound, PermissionDenied,
                                        ValidationError)
 from statezero.core.interfaces import (AbstractCustomQueryset,

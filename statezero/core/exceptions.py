@@ -14,7 +14,7 @@ class ErrorDetail:
         return f"ErrorDetail(message={self.message!r}, code={self.code!r})"
 
 
-class ORMBridgeError(Exception):
+class StateZeroError(Exception):
     """Base exception for all StateZero errors."""
 
     status_code: int = 500
@@ -46,7 +46,7 @@ class ORMBridgeError(Exception):
         return detail
 
 
-class ValidationError(ORMBridgeError):
+class ValidationError(StateZeroError):
     """Error raised for invalid input. Corresponds to HTTP 400."""
 
     status_code = 400
@@ -57,7 +57,7 @@ class ValidationError(ORMBridgeError):
         super().__init__(detail, self.default_code)
 
 
-class NotFound(ORMBridgeError):
+class NotFound(StateZeroError):
     """Error raised when an object is not found. Corresponds to HTTP 404."""
 
     status_code = 404
@@ -68,7 +68,7 @@ class NotFound(ORMBridgeError):
         super().__init__(detail, self.default_code)
 
 
-class PermissionDenied(ORMBridgeError):
+class PermissionDenied(StateZeroError):
     """Error raised for permission issues. Corresponds to HTTP 403."""
 
     status_code = 403
@@ -79,7 +79,7 @@ class PermissionDenied(ORMBridgeError):
         super().__init__(detail, self.default_code)
 
 
-class MultipleObjectsReturned(ORMBridgeError):
+class MultipleObjectsReturned(StateZeroError):
     """Error raised when multiple objects are returned but only one was expected."""
 
     status_code = 400
@@ -90,7 +90,7 @@ class MultipleObjectsReturned(ORMBridgeError):
         super().__init__(detail, self.default_code)
 
 
-class ASTValidationError(ORMBridgeError):
+class ASTValidationError(StateZeroError):
     """Error raised for invalid query syntax (AST issues)."""
 
     status_code = 400

@@ -18,7 +18,7 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
 # Import your custom StateZero exception types.
-from statezero.core.exceptions import (ErrorDetail, ORMBridgeError,
+from statezero.core.exceptions import (ErrorDetail, StateZeroError,
                                        MultipleObjectsReturned, NotFound,
                                        PermissionDenied, ValidationError)
 
@@ -33,7 +33,7 @@ def map_exception(exc):
     """
     logger.debug("Mapping exception type: %s", type(exc))
 
-    if isinstance(exc, ORMBridgeError):
+    if isinstance(exc, StateZeroError):
         return exc
 
     if isinstance(exc, type) and issubclass(exc, Model.DoesNotExist):
