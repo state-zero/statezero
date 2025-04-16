@@ -103,5 +103,4 @@ class ASTValidationError(StateZeroError):
 
 class ConfigError(Exception):
     """Error raised for configuration issues."""
-
     pass
