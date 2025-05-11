@@ -463,11 +463,19 @@ class ASTParser:
         )
         ast["data"] = validated_data
         
-        # Retrieve permissions from the self.registry
+        # Retrieve permissions from the registry
         permissions = self.registry.get_config(self.model).permissions
         
+        # Get the readable fields for this model using our existing method
+        readable_fields = self._get_operation_fields(self.model, 'read')
+        
         # Update records and get the count and affected instance IDs
-        updated_count, updated_instances = self.engine.update(ast, self.request, permissions)
+        updated_count, updated_instances = self.engine.update(
+            ast, 
+            self.request, 
+            permissions,
+            readable_fields=readable_fields  # Pass readable fields to the update method
+        )
         
         data = self.serializer.serialize(
             updated_instances, 

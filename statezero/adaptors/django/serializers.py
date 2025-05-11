@@ -82,8 +82,40 @@ class FlexiblePrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
         
         # Otherwise, use the standard to_internal_value
         return super().to_internal_value(data)
+    
+class FExpressionMixin:
+    """
+    A mixin that can handle F expression objects in serializer write operations.
+    """
+    def to_internal_value(self, data):
+        """
+        Override to_internal_value to handle F expressions before standard validation.
+        """
+        # Check if data is a dictionary, if not let the parent handle it
+        if not isinstance(data, dict):
+            return super().to_internal_value(data)
+            
+        # First extract F expressions
+        f_expressions = {}
+        data_copy = {**data}  # Create a copy to modify
+        
+        for field_name, value in data.items():
+            if isinstance(value, dict) and value.get('__f_expr'):
+                # Store F expressions for later
+                f_expressions[field_name] = value
+                # Remove them from the data to avoid validation errors
+                data_copy.pop(field_name)
+        
+        # Standard validation for remaining fields
+        validated_data = super().to_internal_value(data_copy)
+        
+        # Add F expressions back to the validated data
+        for field_name, value in f_expressions.items():
+            validated_data[field_name] = value
+            
+        return validated_data
 
-class DynamicModelSerializer(serializers.ModelSerializer):
+class DynamicModelSerializer(FExpressionMixin, serializers.ModelSerializer):
     """
     A dynamic serializer that adds a read-only 'repr' field
     and applies custom serializers for model fields.

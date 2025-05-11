@@ -335,10 +335,16 @@ class DjangoORMAdapter(AbstractORMProvider):
         node: Dict[str, Any],
         req: RequestType,
         permissions: List[Type[AbstractPermission]],
+        readable_fields: Set[str] = None
     ) -> Tuple[int, List[Dict[str, Union[int, str]]]]:
+        """
+        Update operations with support for F expressions.
+        Includes permission checks for fields referenced in F expressions.
+        """
         assert self.model is not None, "Model must be set before updating."
         data: Dict[str, Any] = node.get("data", {})
         filter_ast: Optional[Dict[str, Any]] = node.get("filter")
+        
         # Start with self.queryset which already has permission filtering
         qs: QuerySet = self.queryset
         if filter_ast:
@@ -346,20 +352,52 @@ class DjangoORMAdapter(AbstractORMProvider):
             q_obj = visitor.visit(filter_ast)
             qs = qs.filter(q_obj)
 
+        # Check bulk update permissions
         check_bulk_permissions(req, qs, ActionType.UPDATE, permissions, self.model)
 
         model = qs.model
+        
+        # Get the fields to update (keys from data plus primary key)
         update_fields = list(data.keys())
         update_fields.append(model._meta.pk.name)
 
-        instances = list(qs.only(*update_fields))
+        # Process any F expressions in the update data
+        processed_data = {}
+        from statezero.adaptors.django.f_handler import FExpressionHandler
         
-        rows_updated = qs.update(**data)
+        for key, value in data.items():
+            if isinstance(value, dict) and value.get('__f_expr'):
+                # It's an F expression - check permissions and process it
+                try:
+                    # Extract field names referenced in the F expression
+                    referenced_fields = FExpressionHandler.extract_referenced_fields(value)
+                    
+                    # Check that user has READ permissions for all referenced fields
+                    for field in referenced_fields:
+                        if field not in readable_fields:
+                            raise PermissionDenied(
+                                f"No permission to read field '{field}' referenced in F expression"
+                            )
+                    
+                    # Process the F expression now that permissions are verified
+                    processed_data[key] = FExpressionHandler.process_expression(value)
+                except ValueError as e:
+                    logger.error(f"Error processing F expression for field {key}: {e}")
+                    raise ValidationError(f"Invalid F expression for field {key}: {str(e)}")
+            else:
+                # Regular value, use as-is
+                processed_data[key] = value
+        
+        # Execute the update with processed expressions
+        rows_updated = qs.update(**processed_data)
 
+        # After update, fetch the updated instances
+        updated_instances = list(qs.only(*update_fields))
+        
         # Triggers cache invalidation and broadcast to the frontend
-        config.event_bus.emit_bulk_event(ActionType.BULK_UPDATE, instances)
+        config.event_bus.emit_bulk_event(ActionType.BULK_UPDATE, updated_instances)
 
-        return rows_updated, instances
+        return rows_updated, updated_instances
 
     def delete(
         self,
