@@ -1,12 +1,21 @@
 import json
 import logging
-from typing import Callable, Type, Dict, List
+from typing import Callable, Type, Dict, List, Any, Optional
+from pydantic import BaseModel
 
 from statezero.core.context_storage import current_operation_id
 from statezero.core.interfaces import AbstractEventEmitter
 from statezero.core.types import ActionType, ORMModel, RequestType
 
 logger = logging.getLogger(__name__)
+
+
+class EventPayload(BaseModel):
+    event: str
+    model: str
+    operation_id: Optional[str]
+    instances: List[Any]
+    pk_field_name: str
 
 
 class ConsoleEventEmitter(AbstractEventEmitter):
@@ -31,13 +40,17 @@ class ConsoleEventEmitter(AbstractEventEmitter):
         # Get the actual primary key field name
         pk_field_name = instance._meta.pk.name
         pk_value = instance.pk
-        data = {
-            "event": event_type.value,
-            "model": model_name,
-            "operation_id": current_operation_id.get(),
-        }
-        data[pk_field_name] = pk_value
-        logger.info(f"Event emitted: {json.dumps(data)}")
+        
+        # Use the standardized payload structure
+        payload = EventPayload(
+            event=event_type.value,
+            model=model_name,
+            operation_id=current_operation_id.get(),
+            instances=[pk_value],
+            pk_field_name=pk_field_name
+        )
+        
+        logger.info(f"Event emitted: {json.dumps(payload.model_dump())}")
 
     def emit_bulk(
         self,
@@ -50,18 +63,23 @@ class ConsoleEventEmitter(AbstractEventEmitter):
         Emit a bulk event to the given namespace.
         Aggregates events for each instance into a single log message.
         """
-        events = []
-        for instance in instances:
-            model_name = self.get_model_name(instance)
-            pk_field_name = instance._meta.pk.name
-            data = {
-                "event": event_type.value,
-                "model": model_name,
-                "operation_id": current_operation_id.get(),
-            }
-            data[pk_field_name] = instance.pk
-            events.append(data)
-        logger.info(f"Bulk event emitted to namespace '{namespace}': {json.dumps(events)}")
+        if not instances:
+            return
+            
+        model_name = self.get_model_name(instances[0])
+        pk_field_name = instances[0]._meta.pk.name
+        pks = [instance.pk for instance in instances]
+        
+        # Use the standardized payload structure
+        payload = EventPayload(
+            event=event_type.value,
+            model=model_name,
+            operation_id=current_operation_id.get(),
+            instances=pks,
+            pk_field_name=pk_field_name
+        )
+        
+        logger.info(f"Bulk event emitted to namespace '{namespace}': {payload.model_dump()}")
 
     def authenticate(self, request: RequestType) -> None:
         channel = request.data.get("channel_name")
@@ -99,17 +117,16 @@ class PusherEventEmitter(AbstractEventEmitter):
         pk_field_name = instance._meta.pk.name
         pk_value = instance.pk
 
-        data = {
-            "event": event_type.value,
-            "model": model_name,
-            "operation_id": current_operation_id.get(),
-        }
-
-        # Add the primary key using its actual field name
-        data[pk_field_name] = pk_value
+        payload = EventPayload(
+            event=event_type.value,
+            model=model_name,
+            operation_id=current_operation_id.get(),
+            instances=[pk_value],
+            pk_field_name=pk_field_name
+        )
 
         try:
-            self.pusher_client.trigger(channel, event_type.value, data)
+            self.pusher_client.trigger(channel, event_type.value, payload.model_dump())
         except Exception as e:
             logger.error(
                 f"Error emitting event '{event_type.value}' on channel '{channel}': {e}"
@@ -123,23 +140,24 @@ class PusherEventEmitter(AbstractEventEmitter):
         instances: List[ORMModel],
     ) -> None:
         channel = f"private-{namespace}"
-        # Collect only the primary key values
-        pks = [instance.pk for instance in instances]
         
-        if len(pks) < 1:
+        if len(instances) < 1:
             return
         
+        # Collect only the primary key values
+        pks = [instance.pk for instance in instances]
         pk_field_name = instances[0]._meta.pk.name
 
-        payload = {
-            "event": event_type.value,
-            "model": self.get_model_name(instances[0]) if instances else "",
-            "operation_id": current_operation_id.get(),
-            "instances": pks,
-            "pk_field_name": pk_field_name
-        }
+        payload = EventPayload(
+            event=event_type.value,
+            model=self.get_model_name(instances[0]),
+            operation_id=current_operation_id.get(),
+            instances=pks,
+            pk_field_name=pk_field_name
+        )
+        
         try:
-            self.pusher_client.trigger(channel, event_type.value, payload)
+            self.pusher_client.trigger(channel, event_type.value, payload.model_dump())
         except Exception as e:
             logger.error(f"Error emitting bulk event on channel '{channel}': {e}")
 
