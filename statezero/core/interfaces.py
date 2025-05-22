@@ -363,6 +363,15 @@ class AbstractEventEmitter(ABC):
         pass
 
     @abstractmethod
+    def emit_hot_path_event(
+        self, trusted_group: str, event_data
+    ) -> None:
+        """
+        Emit a hot path event, event data should follow the HotPathEvent defined in core/event_emitters.py
+        """
+        pass
+
+    @abstractmethod
     def has_permission(self, request: RequestType, namespace: str) -> bool:
         """
         Check if the given request has permission to access the channel identified by the namespace.

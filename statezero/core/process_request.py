@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional, Set, Type
 
 from fastapi.encoders import jsonable_encoder
 
+from statezero.core.context_storage import current_operation_id
 from statezero.core import AppConfig, ModelConfig, Registry
 from statezero.core.ast_parser import ASTParser
 from statezero.core.ast_validator import ASTValidator
@@ -12,6 +13,7 @@ from statezero.core.interfaces import (AbstractDataSerializer,
                                        AbstractORMProvider,
                                        AbstractSchemaGenerator)
 from statezero.core.types import ActionType
+from statezero.core.event_emitters import HotPathEvent
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -66,6 +68,55 @@ class RequestProcessor:
         self.schema_overrides = schema_overrides or config.schema_overrides
         self.registry = registry
         self.config = config
+
+    def _get_trusted_groups(self, user) -> Set[str]:
+        """Get trusted groups for a user using the global resolver"""
+        
+        if not self.config.trusted_group_resolver:
+            return set()
+        
+        try:
+            groups = self.config.trusted_group_resolver(user)
+            if isinstance(groups, (list, set, tuple)):
+                return {str(g) for g in groups}
+            else:
+                return {str(groups)}
+        except Exception as e:
+            logger.warning(f"Error resolving trusted groups for user: {e}")
+            return set()
+        
+    def _emit_hot_path_event(
+        self, 
+        user,
+        model_name: str,
+        ast: dict,
+        operation_id: str,
+        event: str
+    ) -> None:
+        """Emit hot path event to user's trusted groups"""
+        
+        if not self.config.hot_path_enabled:
+            return
+            
+        if not self.config.event_bus or not self.config.event_bus.broadcast_emitter:
+            return
+        
+        trusted_groups = self._get_trusted_groups(user)
+        if not trusted_groups:
+            return
+            
+        # Create hot path event with full AST
+        hot_path_event = HotPathEvent(
+            operation_id=operation_id,
+            ast=ast,
+            model=model_name
+        )
+        
+        # Emit to each trusted group
+        emitter = self.config.event_bus.broadcast_emitter
+        for group in trusted_groups:
+            emitter.emit_hot_path_event(group, event, hot_path_event)
+            
 
     def process_schema(self, req: Any) -> Dict[str, Any]:
         try:
@@ -170,16 +221,50 @@ class RequestProcessor:
                     final_query_ast["defaults"], req, model, model_config, self.orm_provider, create=True
                 )
 
-        # Create and use the AST parser directly, instead of delegating to ORM provider
-        self.orm_provider.set_queryset(base_queryset)
-        parser = ASTParser(
-            engine=self.orm_provider,
-            serializer=self.data_serializer,
-            model=model,
-            config=self.config,
-            registry=self.registry,
-            serializer_options=serializer_options or {},
-            request=req,
-        )
-        result: Dict[str, Any] = parser.parse(final_query_ast)
+        # ---- HOT PATH: Emit before DB operation for write operations ----
+        write_ops = {"create", "update", "delete", "update_or_create", "get_or_create"}
+        if op in write_ops:
+            operation_id = current_operation_id.get()
+            self._emit_hot_path_event(
+                user=req.user,
+                model_name=model_name,
+                ast=final_query_ast,
+                operation_id=operation_id,
+                event="created"
+            )
+
+        try:
+            # Create and use the AST parser directly, instead of delegating to ORM provider
+            self.orm_provider.set_queryset(base_queryset)
+            parser = ASTParser(
+                engine=self.orm_provider,
+                serializer=self.data_serializer,
+                model=model,
+                config=self.config,
+                registry=self.registry,
+                serializer_options=serializer_options or {},
+                request=req,
+            )
+            result: Dict[str, Any] = parser.parse(final_query_ast)
+            
+            if op in write_ops:
+                self._emit_hot_path_event(
+                    user=req.user,
+                    model_name=model_name,
+                    ast=final_query_ast,
+                    operation_id=operation_id,
+                    event="completed"
+                )
+
+        except Exception:
+            if op in write_ops:
+                self._emit_hot_path_event(
+                    user=req.user,
+                    model_name=model_name,
+                    ast=final_query_ast,
+                    operation_id=operation_id,
+                    event="rejected"
+                )
+            raise
+
         return result

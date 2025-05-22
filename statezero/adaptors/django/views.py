@@ -20,6 +20,49 @@ logger.setLevel(logging.DEBUG)
 default_permission = "rest_framework.permissions.AllowAny"
 permission_class = import_string(getattr(settings, "STATEZERO_VIEW_ACCESS_CLASS", default_permission))
 
+class HotPathView(APIView):
+    """
+    Returns the hot path channels the authenticated user should subscribe to.
+    """
+    permission_classes = [permission_class]
+    
+    def get(self, request, *args, **kwargs):
+        if not config.hot_path_enabled:
+            return Response(
+                {"hot_path_enabled": False, "channels": []}, 
+                status=status.HTTP_200_OK
+            )
+        
+        if not config.trusted_group_resolver:
+            return Response(
+                {"hot_path_enabled": True, "channels": []}, 
+                status=status.HTTP_200_OK
+            )
+        
+        try:
+            # Get user's trusted groups
+            groups = config.trusted_group_resolver(request.user)
+            if isinstance(groups, (list, set, tuple)):
+                groups = {str(g) for g in groups}
+            else:
+                groups = {str(groups)}
+            
+            # Convert to channel names
+            channels = [f"private-hotpath-{group}" for group in groups]
+            
+            return Response({
+                "hot_path_enabled": True,
+                "channels": channels,
+                "groups": list(groups)  # Also return the raw groups for debugging
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.exception(f"Error getting hot path channels for user: {e}")
+            return Response(
+                {"error": "Failed to determine hot path channels"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 class EventsAuthView(APIView):
     """
     A generic authentication view for event emitters.
@@ -27,6 +70,23 @@ class EventsAuthView(APIView):
     calls its authenticate method with the request.
     """
     permission_classes = [permission_class]
+
+    def _user_belongs_to_trusted_group(self, request, group: str) -> bool:
+        """Check if user belongs to the specified trusted group"""
+        if not config.hot_path_enabled or not config.trusted_group_resolver:
+            return False
+            
+        try:
+            user_groups = config.trusted_group_resolver(request)
+            if isinstance(user_groups, (list, set, tuple)):
+                user_groups = {str(g) for g in user_groups}
+            else:
+                user_groups = {str(user_groups)}
+            
+            return group in user_groups
+        except Exception as e:
+            logger.warning(f"Error checking trusted group membership: {e}")
+            return False
     
     def post(self, request, *args, **kwargs):
         channel_name = request.data.get("channel_name")
@@ -39,9 +99,22 @@ class EventsAuthView(APIView):
             )
 
         # Extract the namespace from the channel name.
-        # Assumes channel_name is prefixed with "private-"
-        if channel_name.startswith("private-"):
-            namespace = channel_name[len("private-") :]
+        # Handle both regular channels and hot path channels
+        if channel_name.startswith("private-hotpath-"):
+            # Hot path channel: private-hotpath-{group}
+            group = channel_name[len("private-hotpath-"):]
+            
+            # Check if user belongs to this trusted group
+            if not self._user_belongs_to_trusted_group(request, group):
+                return Response(
+                    {"error": "Permission denied for accessing hot path channel."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            namespace = f"hotpath-{group}"
+            
+        elif channel_name.startswith("private-"):
+            # Regular channel: private-{namespace}
+            namespace = channel_name[len("private-"):]
         else:
             namespace = channel_name
 
@@ -54,17 +127,35 @@ class EventsAuthView(APIView):
 
         event_emitter: AbstractEventEmitter = config.event_bus.broadcast_emitter
 
-        # Use the event emitter's permission check.
-        if not event_emitter.has_permission(request, namespace):
-            return Response(
-                {"error": "Permission denied for accessing channel."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        # Use the event emitter's permission check (skip for hot path since we already checked)
+        if not channel_name.startswith("private-hotpath-"):
+            if not event_emitter.has_permission(request, namespace):
+                return Response(
+                    {"error": "Permission denied for accessing channel."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
         # Delegate authentication to the event emitter.
         response = event_emitter.authenticate(request)
         logger.debug(f"Authentication successful for channel: {channel_name}")
         return Response(response, status=status.HTTP_200_OK)
+    
+    def _user_belongs_to_trusted_group(self, user, group: str) -> bool:
+        """Check if user belongs to the specified trusted group"""
+        if not config.hot_path_enabled or not config.trusted_group_resolver:
+            return False
+            
+        try:
+            user_groups = config.trusted_group_resolver(user)
+            if isinstance(user_groups, (list, set, tuple)):
+                user_groups = {str(g) for g in user_groups}
+            else:
+                user_groups = {str(user_groups)}
+            
+            return group in user_groups
+        except Exception as e:
+            logger.warning(f"Error checking trusted group membership: {e}")
+            return False
 
 
 class ModelListView(APIView):

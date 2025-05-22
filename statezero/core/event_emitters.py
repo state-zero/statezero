@@ -17,6 +17,10 @@ class EventPayload(BaseModel):
     instances: List[Any]
     pk_field_name: str
 
+class HotPathEvent(BaseModel):
+    operation_id: str
+    ast: dict
+    model: str
 
 class ConsoleEventEmitter(AbstractEventEmitter):
     def __init__(
@@ -80,6 +84,9 @@ class ConsoleEventEmitter(AbstractEventEmitter):
         )
         
         logger.info(f"Bulk event emitted to namespace '{namespace}': {payload.model_dump()}")
+
+    def emit_hot_path_event(self, trusted_group: str, event_data: HotPathEvent) -> None:
+        logger.info(f"Emitted to trusted group '{trusted_group}': {event_data.model_dump()}")
 
     def authenticate(self, request: RequestType) -> None:
         channel = request.data.get("channel_name")
@@ -160,6 +167,14 @@ class PusherEventEmitter(AbstractEventEmitter):
             self.pusher_client.trigger(channel, event_type.value, payload.model_dump())
         except Exception as e:
             logger.error(f"Error emitting bulk event on channel '{channel}': {e}")
+
+    def emit_hot_path_event(self, trusted_group: str, event: str, event_data: HotPathEvent) -> None:
+        """ Emit an event to the hot path """
+
+        try:
+            self.pusher_client.trigger(f'private-hotpath-{trusted_group}', event, event_data.model_dump())
+        except Exception as e:
+            logger.error(f"Error emitting hot path event on channel '{trusted_group}': {e}")
 
     def authenticate(self, request: RequestType) -> dict:
         channel = request.data.get("channel_name")

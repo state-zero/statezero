@@ -32,7 +32,11 @@ class DjangoLocalConfig(AppConfig):
         self.schema_generator = DjangoSchemaGenerator()
         self.orm_provider = DjangoORMAdapter()
         self.context_manager = query_timeout
-        self.query_optimizer = DjangoQueryOptimizer 
+        self.query_optimizer = DjangoQueryOptimizer
+
+        # Hot path
+        self.hot_path_enabled = True
+        self.trusted_group_resolver = lambda req: str(req.user.pk)
 
         # Instantiate emitters by injecting only the necessary functions.
         if hasattr(settings, 'STATEZERO_PUSHER'):

@@ -14,6 +14,7 @@ from statezero.core.interfaces import (AbstractCustomQueryset,
 from statezero.core.types import ORMField
 
 NamespaceResolver = Callable[[Any, str], Union[str, List[str], None]]
+TrustedGroupResolver = Callable[[Any], Union[str, Set[str]]]
 
 
 class AppConfig(ABC):
@@ -43,6 +44,14 @@ class AppConfig(ABC):
 
     # Query optimizers
     query_optimizer: Optional[AbstractQueryOptimizer] = None
+
+    # Hot path
+    hot_path_enabled: bool = True
+
+    def trusted_group_resolver_fn(req):
+        return str(req.user.pk)
+    
+    trusted_group_resolver = trusted_group_resolver_fn
 
     def __init__(self) -> None:
         self._orm_provider: Optional[AbstractORMProvider] = None
