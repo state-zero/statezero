@@ -87,7 +87,7 @@ class RequestProcessor:
         
     def _emit_hot_path_event(
         self, 
-        user,
+        request,
         model_name: str,
         ast: dict,
         operation_id: str,
@@ -101,7 +101,7 @@ class RequestProcessor:
         if not self.config.event_bus or not self.config.event_bus.broadcast_emitter:
             return
         
-        trusted_groups = self._get_trusted_groups(user)
+        trusted_groups = self._get_trusted_groups(request)
         if not trusted_groups:
             return
             
@@ -226,9 +226,9 @@ class RequestProcessor:
         if op in write_ops:
             operation_id = current_operation_id.get()
             self._emit_hot_path_event(
-                user=req.user,
+                request=req,
                 model_name=model_name,
-                ast=final_query_ast,
+                ast=ast_body,
                 operation_id=operation_id,
                 event="created"
             )
@@ -249,9 +249,9 @@ class RequestProcessor:
             
             if op in write_ops:
                 self._emit_hot_path_event(
-                    user=req.user,
+                    request=req,
                     model_name=model_name,
-                    ast=final_query_ast,
+                    ast=ast_body,
                     operation_id=operation_id,
                     event="completed"
                 )
@@ -259,9 +259,9 @@ class RequestProcessor:
         except Exception:
             if op in write_ops:
                 self._emit_hot_path_event(
-                    user=req.user,
+                    request=req,
                     model_name=model_name,
-                    ast=final_query_ast,
+                    ast=ast_body,
                     operation_id=operation_id,
                     event="rejected"
                 )
