@@ -18,9 +18,9 @@ class EventPayload(BaseModel):
     pk_field_name: str
 
 class HotPathEvent(BaseModel):
-    operation_id: str
+    operation_id: Optional[str]
     ast: dict
-    model: str
+    model: Optional[str]
 
 class ConsoleEventEmitter(AbstractEventEmitter):
     def __init__(
