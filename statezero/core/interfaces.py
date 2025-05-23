@@ -9,6 +9,24 @@ from statezero.core.types import (ActionType, ORMField, ORMModel, ORMQuerySet,
                                   RequestType)
 
 
+class AbstractHotPath(ABC):
+    """ Defines a hotpath """
+
+    @classmethod
+    @abstractmethod
+    def get_path(cls, request) -> str:
+        pass
+
+    @classmethod
+    @abstractmethod
+    def has_permission(cls, request) -> bool:
+        pass
+
+    @classmethod
+    @abstractmethod
+    def get_name(cls) -> str:
+        pass
+
 class AbstractCacheBackend(ABC):
     @abstractmethod
     def get(self, key: str) -> Optional[Any]:

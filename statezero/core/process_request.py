@@ -69,21 +69,22 @@ class RequestProcessor:
         self.registry = registry
         self.config = config
 
-    def _get_trusted_groups(self, user) -> Set[str]:
-        """Get trusted groups for a user using the global resolver"""
+    def _get_hotpaths(self, request) -> Set[str]:
+        """Get all hotpaths the user has access to"""
         
-        if not self.config.trusted_group_resolver:
+        if not hasattr(self.config, 'hotpaths') or not self.config.hotpaths:
             return set()
         
+        user_paths = set()
         try:
-            groups = self.config.trusted_group_resolver(user)
-            if isinstance(groups, (list, set, tuple)):
-                return {str(g) for g in groups}
-            else:
-                return {str(groups)}
+            for hotpath_class in self.config.hotpaths.values():
+                path = hotpath_class.get_path(request)
+                if path and hotpath_class.has_permission(request, path):
+                    user_paths.add(str(path))
         except Exception as e:
-            logger.warning(f"Error resolving trusted groups for user: {e}")
-            return set()
+            logger.warning(f"Error getting user hotpaths: {e}")
+        
+        return user_paths
         
     def _emit_hot_path_event(
         self, 
@@ -93,18 +94,22 @@ class RequestProcessor:
         operation_id: str,
         event: str
     ) -> None:
-        """Emit hot path event to user's trusted groups"""
+        """Emit hot path event to the specified hotpaths"""
         
-        if not self.config.hot_path_enabled:
+        if not hasattr(self.config, 'hotpaths') or not self.config.hotpaths:
             return
             
         if not self.config.event_bus or not self.config.event_bus.broadcast_emitter:
             return
         
-        trusted_groups = self._get_trusted_groups(request)
-        if not trusted_groups:
-            return
-            
+        # Get the hotpaths from serializer options, default to ["default"]
+        serializer_options = ast.get("serializerOptions", {})
+        hotpath_names = serializer_options.get("hotpaths", ["default"])
+        
+        # Ensure it's a list
+        if isinstance(hotpath_names, str):
+            hotpath_names = [hotpath_names]
+        
         # Create hot path event with full AST
         hot_path_event = HotPathEvent(
             operation_id=operation_id,
@@ -112,11 +117,22 @@ class RequestProcessor:
             model=model_name
         )
         
-        # Emit to each trusted group
         emitter = self.config.event_bus.broadcast_emitter
-        for group in trusted_groups:
-            emitter.emit_hot_path_event(group, event, hot_path_event)
+        
+        # Emit to each specified hotpath
+        for hotpath_name in hotpath_names:
+            hotpath_class = self.config.hotpaths.get(hotpath_name)
+            if not hotpath_class:
+                logger.warning(f"Unknown hotpath: {hotpath_name}")
+                continue
             
+            # Get the user's path for this hotpath type and check permission
+            hotpath = hotpath_class.get_path(request)
+            if not hotpath or not hotpath_class.has_permission(request, hotpath):
+                logger.warning(f"User has no permission for hotpath: {hotpath_name}")
+                continue
+                
+            emitter.emit_hot_path_event(hotpath, event, hot_path_event)
 
     def process_schema(self, req: Any) -> Dict[str, Any]:
         try:

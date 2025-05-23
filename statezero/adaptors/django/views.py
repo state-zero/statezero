@@ -27,33 +27,31 @@ class HotPathView(APIView):
     permission_classes = [permission_class]
     
     def get(self, request, *args, **kwargs):
-        if not config.hot_path_enabled:
+        if not hasattr(config, 'hotpaths') or not config.hotpaths:
             return Response(
                 {"hot_path_enabled": False, "channels": []}, 
                 status=status.HTTP_200_OK
             )
         
-        if not config.trusted_group_resolver:
-            return Response(
-                {"hot_path_enabled": True, "channels": []}, 
-                status=status.HTTP_200_OK
-            )
-        
         try:
-            # Get user's trusted groups
-            groups = config.trusted_group_resolver(request.user)
-            if isinstance(groups, (list, set, tuple)):
-                groups = {str(g) for g in groups}
-            else:
-                groups = {str(groups)}
+            channels = []
+            hotpath_info = {}
             
-            # Convert to channel names
-            channels = [f"private-hotpath-{group}" for group in groups]
+            # Get channels from all available hotpath strategies
+            for name, hotpath_class in config.hotpaths.items():
+                path = hotpath_class.get_path(request)
+                if path:  # Only include if user has permission (path is not None)
+                    channel_name = f"private-hotpath-{path}"
+                    channels.append(channel_name)
+                    hotpath_info[name] = {
+                        "path": path,
+                        "channel": channel_name
+                    }
             
             return Response({
                 "hot_path_enabled": True,
                 "channels": channels,
-                "groups": list(groups)  # Also return the raw groups for debugging
+                "hotpaths": hotpath_info  # More structured info for debugging
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
@@ -71,21 +69,19 @@ class EventsAuthView(APIView):
     """
     permission_classes = [permission_class]
 
-    def _user_belongs_to_trusted_group(self, request, group: str) -> bool:
-        """Check if user belongs to the specified trusted group"""
-        if not config.hot_path_enabled or not config.trusted_group_resolver:
+    def _has_hotpath_permission(self, request, hotpath: str) -> bool:
+        """Check if user has permission to access the specified hotpath"""
+        if not hasattr(config, 'hotpaths') or not config.hotpaths:
             return False
             
         try:
-            user_groups = config.trusted_group_resolver(request)
-            if isinstance(user_groups, (list, set, tuple)):
-                user_groups = {str(g) for g in user_groups}
-            else:
-                user_groups = {str(user_groups)}
-            
-            return group in user_groups
+            # Check all hotpath strategies to see if any grant access to this path
+            for hotpath_class in config.hotpaths.values():
+                if hotpath_class.has_permission(request, hotpath):
+                    return True
+            return False
         except Exception as e:
-            logger.warning(f"Error checking trusted group membership: {e}")
+            logger.warning(f"Error checking hotpath permission: {e}")
             return False
     
     def post(self, request, *args, **kwargs):
@@ -102,15 +98,15 @@ class EventsAuthView(APIView):
         # Handle both regular channels and hot path channels
         if channel_name.startswith("private-hotpath-"):
             # Hot path channel: private-hotpath-{group}
-            group = channel_name[len("private-hotpath-"):]
+            path = channel_name[len("private-hotpath-"):]
             
             # Check if user belongs to this trusted group
-            if not self._user_belongs_to_trusted_group(request, group):
+            if not self._has_hotpath_permission(request, path):
                 return Response(
                     {"error": "Permission denied for accessing hot path channel."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-            namespace = f"hotpath-{group}"
+            namespace = path
             
         elif channel_name.startswith("private-"):
             # Regular channel: private-{namespace}
@@ -139,24 +135,6 @@ class EventsAuthView(APIView):
         response = event_emitter.authenticate(request)
         logger.debug(f"Authentication successful for channel: {channel_name}")
         return Response(response, status=status.HTTP_200_OK)
-    
-    def _user_belongs_to_trusted_group(self, user, group: str) -> bool:
-        """Check if user belongs to the specified trusted group"""
-        if not config.hot_path_enabled or not config.trusted_group_resolver:
-            return False
-            
-        try:
-            user_groups = config.trusted_group_resolver(user)
-            if isinstance(user_groups, (list, set, tuple)):
-                user_groups = {str(g) for g in user_groups}
-            else:
-                user_groups = {str(user_groups)}
-            
-            return group in user_groups
-        except Exception as e:
-            logger.warning(f"Error checking trusted group membership: {e}")
-            return False
-
 
 class ModelListView(APIView):
     """

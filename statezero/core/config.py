@@ -7,15 +7,11 @@ import networkx as nx
 
 from statezero.core.classes import AdditionalField
 from statezero.core.event_bus import EventBus
-from statezero.core.interfaces import (AbstractCustomQueryset,
+from statezero.core.interfaces import (AbstractCustomQueryset, AbstractHotPath,
                                        AbstractDataSerializer,
                                        AbstractORMProvider, AbstractPermission,
                                        AbstractSchemaGenerator, AbstractSearchProvider, AbstractQueryOptimizer)
 from statezero.core.types import ORMField
-
-NamespaceResolver = Callable[[Any, str], Union[str, List[str], None]]
-TrustedGroupResolver = Callable[[Any], Union[str, Set[str]]]
-
 
 class AppConfig(ABC):
     """
@@ -46,12 +42,7 @@ class AppConfig(ABC):
     query_optimizer: Optional[AbstractQueryOptimizer] = None
 
     # Hot path
-    hot_path_enabled: bool = True
-
-    def trusted_group_resolver_fn(req):
-        return str(req.user.pk)
-    
-    trusted_group_resolver = trusted_group_resolver_fn
+    hotpaths: Optional[Dict[str, Type[AbstractHotPath]]] = None
 
     def __init__(self) -> None:
         self._orm_provider: Optional[AbstractORMProvider] = None
@@ -176,11 +167,6 @@ class ModelConfig:
         Fields that can be used in search queries
     ordering_fields: Set[str], optional
         Fields that can be used for ordering
-    additional_namespace_resolvers: List[NamespaceResolver], optional
-        Functions that generate additional event namespaces beyond the default model namespace.
-        Each resolver receives (instance, action) parameters and should return a string,
-        list of strings, or None. The 'instance' is the model instance being affected,
-        and 'action' is one of 'create', 'update', or 'delete'.
     DEBUG: bool, default=False
         Enable debug mode for this model
     """
@@ -200,7 +186,6 @@ class ModelConfig:
         searchable_fields: Optional[Set[str]] = None,
         ordering_fields: Optional[Set[str]] = None,
         fields: Optional[Set[str]] = None,
-        additional_namespace_resolvers: NamespaceResolver = None,
         DEBUG: bool = False,
     ):
         self.model = model
@@ -216,7 +201,6 @@ class ModelConfig:
         self.searchable_fields = searchable_fields or set()
         self.ordering_fields = ordering_fields or set()
         self.fields = fields or "__all__"
-        self.additional_namespace_resolvers = additional_namespace_resolvers or []
         self.DEBUG = DEBUG or False
 
     @property

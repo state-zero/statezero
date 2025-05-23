@@ -9,8 +9,27 @@ import warnings
 from statezero.adaptors.django.query_optimizer import DjangoQueryOptimizer
 from statezero.adaptors.django.context_manager import query_timeout
 from statezero.core.config import AppConfig, Registry
+from statezero.core.interfaces import AbstractHotPath
 
 logger = logging.getLogger(__name__)
+
+class DjangoUserHotpath(AbstractHotPath):
+    """
+    Returns a hotpath for the individual user.
+    """
+    name = "default"
+
+    @classmethod
+    def get_path(cls, request) -> str:
+        return str(request.user.pk)
+
+    @classmethod
+    def has_permission(cls, request, path=None) -> bool:
+        return request.user.is_authenticated and path == str(request.user.pk)
+    
+    @classmethod
+    def get_name(cls) -> str:
+        return cls.name
 
 class DjangoLocalConfig(AppConfig):
     def __init__(self):
@@ -35,8 +54,9 @@ class DjangoLocalConfig(AppConfig):
         self.query_optimizer = DjangoQueryOptimizer
 
         # Hot path
-        self.hot_path_enabled = True
-        self.trusted_group_resolver = lambda req: str(req.user.pk)
+        self.hotpaths = {
+            "default": DjangoUserHotpath
+        }
 
         # Instantiate emitters by injecting only the necessary functions.
         if hasattr(settings, 'STATEZERO_PUSHER'):

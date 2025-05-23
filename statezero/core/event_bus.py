@@ -67,40 +67,9 @@ class EventBus:
                 except ValueError:
                     pass
 
-            # Step 1: Determine the default namespace (always included)
             default_namespace = self.orm_provider.get_model_name(model_class)
             namespaces = [default_namespace]
 
-            # Step 2: Add additional namespaces from any custom resolvers
-            if model_config and hasattr(model_config, "additional_namespace_resolvers"):
-                for resolver in model_config.additional_namespace_resolvers:
-                    try:
-                        result = resolver(instance=instance, action=action_type.value)
-                        if result:
-                            if isinstance(result, str):
-                                # Validate that the custom namespace doesn't contain the delimiter
-                                if "::" in result:
-                                    raise ValueError(
-                                        f"Custom namespace '{result}' cannot contain the '::' delimiter"
-                                    )
-                                namespaces.append(f"{default_namespace}::{result}")
-                            elif isinstance(result, (list, tuple)):
-                                for ns in result:
-                                    # Validate each namespace in the collection
-                                    if "::" in ns:
-                                        raise ValueError(
-                                            f"Custom namespace '{ns}' cannot contain the '::' delimiter"
-                                        )
-                                    namespaces.append(f"{default_namespace}::{ns}")
-                    except Exception as e:
-                        # Log error but continue with other resolvers
-                        logger.exception(
-                            "Error in namespace resolver for %s: %s",
-                            model_class.__name__,
-                            e,
-                        )
-
-            # Step 3: Emit the event to all determined namespaces
             for namespace in namespaces:
                 try:
                     # Emit to this specific namespace
@@ -165,53 +134,9 @@ class EventBus:
                 "global": instances
             }
 
-            # Step 1: Determine the default namespace
             default_namespace = self.orm_provider.get_model_name(model_class)
             namespaced_instances[default_namespace] = instances
-            
-            # Step 2: Add additional namespaces based on resolvers
-            if model_config and hasattr(model_config, "additional_namespace_resolvers"):
-                # For each instance, determine its additional namespaces
-                for instance in instances:
-                    for resolver in model_config.additional_namespace_resolvers:
-                        try:
-                            # Get all namespaces for this instance from the resolver
-                            results = resolver(instance=instance, action=action_type.value)
-                            
-                            # Handle the case where resolver returns None
-                            if not results:
-                                continue
-                                
-                            # Convert string result to list for uniform handling
-                            if isinstance(results, str):
-                                results = [results]
-                                
-                            # Process each namespace
-                            for ns in results:
-                                # Validate namespace format
-                                if "::" in ns:
-                                    raise ValueError(
-                                        f"Custom namespace '{ns}' cannot contain the '::' delimiter"
-                                    )
-                                
-                                # Create the fully qualified namespace
-                                namespace = f"{default_namespace}::{ns}"
-                                
-                                # Add this instance to the namespace
-                                if namespace not in namespaced_instances:
-                                    namespaced_instances[namespace] = []
-                                namespaced_instances[namespace].append(instance)
-                                
-                        except Exception as e:
-                            # Log error but continue with other resolvers
-                            logger.exception(
-                                "Error in namespace resolver for instance %s of model %s: %s",
-                                instance.pk,
-                                model_class.__name__,
-                                e,
-                            )
 
-            # Step 3: Emit the bulk event to each namespace with its instances
             for namespace, ns_instances in namespaced_instances.items():
                 try:
                     self.broadcast_emitter.emit_bulk(
