@@ -12,7 +12,8 @@ class AbstractHotPath(ABC):
 
     @classmethod
     @abstractmethod
-    def get_path(cls, user) -> str:
+    def get_path(cls, user) -> Optional[str]:
+        """ Return the path the user has permission to, None if no permission"""
         pass
 
     @classmethod
