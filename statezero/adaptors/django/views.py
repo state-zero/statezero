@@ -29,29 +29,28 @@ class HotPathView(APIView):
     def get(self, request, *args, **kwargs):
         if not hasattr(config, 'hotpaths') or not config.hotpaths:
             return Response(
-                {"hot_path_enabled": False, "channels": []}, 
+                {"hot_path_enabled": False, "hotpaths": []}, 
                 status=status.HTTP_200_OK
             )
         
         try:
-            channels = []
-            hotpath_info = {}
+            hotpaths = []
             
             # Get channels from all available hotpath strategies
             for name, hotpath_class in config.hotpaths.items():
-                path = hotpath_class.get_path(request)
-                if path:  # Only include if user has permission (path is not None)
+                user = config.orm_provider.get_user(request)
+                path = hotpath_class.get_path(user)
+                if path:
                     channel_name = f"private-hotpath-{path}"
-                    channels.append(channel_name)
-                    hotpath_info[name] = {
-                        "path": path,
-                        "channel": channel_name
-                    }
+                    hotpaths.append({
+                        "hotpath": name,  # The hotpath name (e.g., "default")
+                        "channel": channel_name,  # The actual channel to subscribe to
+                        "path": path  # The user-specific path (for debugging)
+                    })
             
             return Response({
                 "hot_path_enabled": True,
-                "channels": channels,
-                "hotpaths": hotpath_info  # More structured info for debugging
+                "hotpaths": hotpaths
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
@@ -73,11 +72,11 @@ class EventsAuthView(APIView):
         """Check if user has permission to access the specified hotpath"""
         if not hasattr(config, 'hotpaths') or not config.hotpaths:
             return False
-            
         try:
             # Check all hotpath strategies to see if any grant access to this path
             for hotpath_class in config.hotpaths.values():
-                if hotpath_class.has_permission(request, hotpath):
+                user = config.orm_provider.get_user(request)
+                if hotpath_class.get_path(user):
                     return True
             return False
         except Exception as e:

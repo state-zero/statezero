@@ -917,3 +917,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         raise ValueError(
             f"Cannot determine model name from {model} of type {type(model)}: _meta attribute is missing from the model."
         )
+    
+    def get_user(self, request):
+        """ Return the user """
+        return request.user

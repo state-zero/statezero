@@ -4,9 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, Literal
 
 from statezero.core.classes import ModelSchemaMetadata, SchemaFieldMetadata
-from statezero.core.exceptions import PermissionDenied
-from statezero.core.types import (ActionType, ORMField, ORMModel, ORMQuerySet,
-                                  RequestType)
+from statezero.core.types import (ActionType, ORMField, ORMModel, ORMQuerySet, RequestType)
 
 
 class AbstractHotPath(ABC):
@@ -14,12 +12,7 @@ class AbstractHotPath(ABC):
 
     @classmethod
     @abstractmethod
-    def get_path(cls, request) -> str:
-        pass
-
-    @classmethod
-    @abstractmethod
-    def has_permission(cls, request) -> bool:
+    def get_path(cls, user) -> str:
         pass
 
     @classmethod
@@ -250,6 +243,13 @@ class AbstractORMProvider(ABC):
     ) -> str:  # type:ignore
         """
         Retrieve the model name (e.g. "app_label.ModelName") for the given model class OR instance.
+        """
+        pass
+
+    @abstractmethod
+    def get_user(self, request: RequestType): # returns User
+        """
+        Get the request user.
         """
         pass
 

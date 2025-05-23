@@ -78,8 +78,9 @@ class RequestProcessor:
         user_paths = set()
         try:
             for hotpath_class in self.config.hotpaths.values():
-                path = hotpath_class.get_path(request)
-                if path and hotpath_class.has_permission(request, path):
+                user = self.config.orm_provider.get_user(request)
+                path = hotpath_class.get_path(user)
+                if path:
                     user_paths.add(str(path))
         except Exception as e:
             logger.warning(f"Error getting user hotpaths: {e}")
@@ -121,14 +122,15 @@ class RequestProcessor:
         
         # Emit to each specified hotpath
         for hotpath_name in hotpath_names:
+            user = self.config.orm_provider.get_user(request)
             hotpath_class = self.config.hotpaths.get(hotpath_name)
             if not hotpath_class:
                 logger.warning(f"Unknown hotpath: {hotpath_name}")
                 continue
             
             # Get the user's path for this hotpath type and check permission
-            hotpath = hotpath_class.get_path(request)
-            if not hotpath or not hotpath_class.has_permission(request, hotpath):
+            hotpath = hotpath_class.get_path(user)
+            if not hotpath:
                 logger.warning(f"User has no permission for hotpath: {hotpath_name}")
                 continue
                 
