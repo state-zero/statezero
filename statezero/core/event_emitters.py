@@ -170,7 +170,6 @@ class PusherEventEmitter(AbstractEventEmitter):
 
     def emit_hot_path_event(self, trusted_group: str, event: str, event_data: HotPathEvent) -> None:
         """ Emit an event to the hot path """
-
         try:
             self.pusher_client.trigger(f'private-hotpath-{trusted_group}', event, event_data.model_dump())
         except Exception as e:

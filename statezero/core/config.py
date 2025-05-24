@@ -167,6 +167,12 @@ class ModelConfig:
         Fields that can be used in search queries
     ordering_fields: Set[str], optional
         Fields that can be used for ordering
+    fields: Optional[Set[str]]
+        Expose just a subset of the model fields
+    partition_fields: Optional[Set[str]], default=None
+        List of field names to use for partitioning events. When set, events will be
+        broadcast to partition-specific channels in addition to the main model channel.
+        Example: partition_fields=['user_id'] creates channels like 'model-user::123'
     DEBUG: bool, default=False
         Enable debug mode for this model
     """
@@ -186,6 +192,7 @@ class ModelConfig:
         searchable_fields: Optional[Set[str]] = None,
         ordering_fields: Optional[Set[str]] = None,
         fields: Optional[Set[str]] = None,
+        partition_fields: Optional[Set[str]] = None,
         DEBUG: bool = False,
     ):
         self.model = model
@@ -201,6 +208,7 @@ class ModelConfig:
         self.searchable_fields = searchable_fields or set()
         self.ordering_fields = ordering_fields or set()
         self.fields = fields or "__all__"
+        self.partition_fields = partition_fields or set()
         self.DEBUG = DEBUG or False
 
     @property

@@ -53,7 +53,6 @@ class AllowAllPermission(AbstractPermission):
             return self._get_user_fields()
         return "__all__"
 
-
 class IsAuthenticatedPermission(AbstractPermission):
     """
     Permission class that allows access only to authenticated users.

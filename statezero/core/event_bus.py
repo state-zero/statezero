@@ -70,6 +70,20 @@ class EventBus:
             default_namespace = self.orm_provider.get_model_name(model_class)
             namespaces = [default_namespace]
 
+            # Add partition-specific namespaces if configured
+            if model_config and model_config.partition_fields:
+                for field_name in model_config.partition_fields:
+                    try:
+                        partition_value = getattr(instance, field_name, None)
+                        if partition_value is not None:
+                            partition_namespace = f"{default_namespace}-{field_name}-{partition_value}"
+                            namespaces.append(partition_namespace)
+                    except Exception as e:
+                        logger.warning(
+                            "Could not resolve partition field '%s' for model %s: %s",
+                            field_name, model_class.__name__, e
+                        )
+
             for namespace in namespaces:
                 try:
                     # Emit to this specific namespace
@@ -136,6 +150,28 @@ class EventBus:
 
             default_namespace = self.orm_provider.get_model_name(model_class)
             namespaced_instances[default_namespace] = instances
+
+            # Add partition-specific groupings if configured
+            if model_config and model_config.partition_fields:
+                for field_name in model_config.partition_fields:
+                    # Group instances by partition value for this field
+                    partition_groups = {}
+                    for instance in instances:
+                        try:
+                            partition_value = getattr(instance, field_name, None)
+                            if partition_value is not None:
+                                partition_namespace = f"{default_namespace}-{field_name}-{partition_value}"
+                                if partition_namespace not in partition_groups:
+                                    partition_groups[partition_namespace] = []
+                                partition_groups[partition_namespace].append(instance)
+                        except Exception as e:
+                            logger.warning(
+                                "Could not resolve partition field '%s' for instance: %s",
+                                field_name, e
+                            )
+                    
+                    # Add partition groups to namespaced_instances
+                    namespaced_instances.update(partition_groups)
 
             for namespace, ns_instances in namespaced_instances.items():
                 try:
