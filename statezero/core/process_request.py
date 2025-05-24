@@ -93,7 +93,8 @@ class RequestProcessor:
         model_name: str,
         ast: dict,
         operation_id: str,
-        event: str
+        event: str,
+        response: dict
     ) -> None:
         """Emit hot path event to the specified hotpaths"""
         
@@ -115,7 +116,8 @@ class RequestProcessor:
         hot_path_event = HotPathEvent(
             operation_id=operation_id,
             ast=ast,
-            model=model_name
+            model=model_name,
+            response=response
         )
         
         emitter = self.config.event_bus.broadcast_emitter
@@ -240,7 +242,7 @@ class RequestProcessor:
                 )
 
         # ---- HOT PATH: Emit before DB operation for write operations ----
-        write_ops = {"create", "update", "delete", "update_or_create", "get_or_create"}
+        write_ops = {"create", "update", "update_instance", "delete_instance", "delete", "update_or_create", "get_or_create"}
         if op in write_ops:
             operation_id = current_operation_id.get()
             self._emit_hot_path_event(
@@ -271,7 +273,8 @@ class RequestProcessor:
                     model_name=model_name,
                     ast=ast_body,
                     operation_id=operation_id,
-                    event="completed"
+                    event="completed",
+                    response=result
                 )
 
         except Exception:

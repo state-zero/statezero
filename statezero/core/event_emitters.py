@@ -21,6 +21,7 @@ class HotPathEvent(BaseModel):
     operation_id: Optional[str]
     ast: dict
     model: Optional[str]
+    response: Optional[Dict] = None
 
 class ConsoleEventEmitter(AbstractEventEmitter):
     def __init__(
