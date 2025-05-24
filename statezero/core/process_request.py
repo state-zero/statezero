@@ -94,7 +94,7 @@ class RequestProcessor:
         ast: dict,
         operation_id: str,
         event: str,
-        response: dict
+        response: Optional[dict] = None
     ) -> None:
         """Emit hot path event to the specified hotpaths"""
         
