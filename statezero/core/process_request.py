@@ -3,7 +3,6 @@ from typing import Any, Dict, Optional, Set, Type
 
 from fastapi.encoders import jsonable_encoder
 
-from statezero.core.context_storage import current_operation_id
 from statezero.core import AppConfig, ModelConfig, Registry
 from statezero.core.ast_parser import ASTParser
 from statezero.core.ast_validator import ASTValidator
@@ -12,7 +11,7 @@ from statezero.core.exceptions import PermissionDenied, ValidationError
 from statezero.core.interfaces import (AbstractDataSerializer,
                                        AbstractORMProvider,
                                        AbstractSchemaGenerator)
-from statezero.core.types import ActionType, HotPathActionType
+from statezero.core.types import ActionType
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -67,75 +66,6 @@ class RequestProcessor:
         self.schema_overrides = schema_overrides or config.schema_overrides
         self.registry = registry
         self.config = config
-
-    def _get_hotpaths(self, request) -> Set[str]:
-        """Get all hotpaths the user has access to"""
-        
-        if not hasattr(self.config, 'hotpaths') or not self.config.hotpaths:
-            return set()
-        
-        user_paths = set()
-        try:
-            for hotpath_class in self.config.hotpaths.values():
-                user = self.config.orm_provider.get_user(request)
-                path = hotpath_class.get_path(user)
-                if path:
-                    user_paths.add(str(path))
-        except Exception as e:
-            logger.warning(f"Error getting user hotpaths: {e}")
-        
-        return user_paths
-        
-    def _emit_hot_path_event(
-        self, 
-        request,
-        model_name: str,
-        ast: dict,
-        operation_id: str,
-        event: str,
-        response: Optional[dict] = None
-    ) -> None:
-        """Emit hot path event to the specified hotpaths"""
-        
-        if not hasattr(self.config, 'hotpaths') or not self.config.hotpaths:
-            return
-            
-        if not self.config.event_bus or not self.config.event_bus.broadcast_emitter:
-            return
-        
-        # Get the hotpaths from serializer options, default to ["default"]
-        serializer_options = ast.get("serializerOptions", {})
-        hotpath_names = serializer_options.get("hotpaths", ["default"])
-        
-        # Ensure it's a list
-        if isinstance(hotpath_names, str):
-            hotpath_names = [hotpath_names]
-        
-        # Create hot path event with full AST
-        hot_path_event = {
-            "operation_id": operation_id,
-            "ast": ast,
-            "model": model_name,
-            "response": response
-        }
-        
-        emitter = self.config.event_bus.broadcast_emitter
-        
-        # Emit to each specified hotpath
-        for hotpath_name in hotpath_names:
-            user = self.config.orm_provider.get_user(request)
-            hotpath_class = self.config.hotpaths.get(hotpath_name)
-            if not hotpath_class:
-                logger.warning(f"Unknown hotpath: {hotpath_name}")
-                continue
-            
-            # Get the user's path for this hotpath type and check permission
-            hotpath = hotpath_class.get_path(user)
-            if not hotpath:
-                logger.warning(f"User has no permission for hotpath: {hotpath_name}")
-                continue
-                
-            emitter.emit(f"hotpath-{hotpath}", event, hot_path_event)
 
     def process_schema(self, req: Any) -> Dict[str, Any]:
         try:
@@ -240,51 +170,17 @@ class RequestProcessor:
                     final_query_ast["defaults"], req, model, model_config, self.orm_provider, create=True
                 )
 
-        # ---- HOT PATH: Emit before DB operation for write operations ----
-        write_ops = {"create", "update", "update_instance", "delete_instance", "delete", "update_or_create", "get_or_create"}
-        if op in write_ops:
-            operation_id = current_operation_id.get()
-            self._emit_hot_path_event(
-                request=req,
-                model_name=model_name,
-                ast=ast_body,
-                operation_id=operation_id,
-                event=HotPathActionType.CREATED
-            )
-
-        try:
-            # Create and use the AST parser directly, instead of delegating to ORM provider
-            self.orm_provider.set_queryset(base_queryset)
-            parser = ASTParser(
-                engine=self.orm_provider,
-                serializer=self.data_serializer,
-                model=model,
-                config=self.config,
-                registry=self.registry,
-                serializer_options=serializer_options or {},
-                request=req,
-            )
-            result: Dict[str, Any] = parser.parse(final_query_ast)
-            
-            if op in write_ops:
-                self._emit_hot_path_event(
-                    request=req,
-                    model_name=model_name,
-                    ast=ast_body,
-                    operation_id=operation_id,
-                    event=HotPathActionType.COMPLETED,
-                    response=result
-                )
-
-        except Exception:
-            if op in write_ops:
-                self._emit_hot_path_event(
-                    request=req,
-                    model_name=model_name,
-                    ast=ast_body,
-                    operation_id=operation_id,
-                    event=HotPathActionType.REJECTED
-                )
-            raise
+        # Create and use the AST parser directly, instead of delegating to ORM provider
+        self.orm_provider.set_queryset(base_queryset)
+        parser = ASTParser(
+            engine=self.orm_provider,
+            serializer=self.data_serializer,
+            model=model,
+            config=self.config,
+            registry=self.registry,
+            serializer_options=serializer_options or {},
+            request=req,
+        )
+        result: Dict[str, Any] = parser.parse(final_query_ast)
 
         return result

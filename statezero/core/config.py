@@ -7,7 +7,7 @@ import networkx as nx
 
 from statezero.core.classes import AdditionalField
 from statezero.core.event_bus import EventBus
-from statezero.core.interfaces import (AbstractCustomQueryset, AbstractHotPath,
+from statezero.core.interfaces import (AbstractCustomQueryset,
                                        AbstractDataSerializer,
                                        AbstractORMProvider, AbstractPermission,
                                        AbstractSchemaGenerator, AbstractSearchProvider, AbstractQueryOptimizer)
@@ -40,9 +40,6 @@ class AppConfig(ABC):
 
     # Query optimizers
     query_optimizer: Optional[AbstractQueryOptimizer] = None
-
-    # Hot path
-    hotpaths: Optional[Dict[str, Type[AbstractHotPath]]] = None
 
     def __init__(self) -> None:
         self._orm_provider: Optional[AbstractORMProvider] = None

@@ -6,35 +6,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union,
 from statezero.core.classes import ModelSchemaMetadata, SchemaFieldMetadata
 from statezero.core.types import (ActionType, ORMField, ORMModel, ORMQuerySet, RequestType)
 
-
-class AbstractHotPath(ABC):
-    """ Defines a hotpath """
-
-    @classmethod
-    @abstractmethod
-    def get_path(cls, user) -> Optional[str]:
-        """ Return the path the user has permission to, None if no permission"""
-        pass
-
-    @classmethod
-    @abstractmethod
-    def get_name(cls) -> str:
-        pass
-
-class AbstractCacheBackend(ABC):
-    @abstractmethod
-    def get(self, key: str) -> Optional[Any]:
-        pass
-
-    @abstractmethod
-    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        pass
-
-    @abstractmethod
-    def invalidate_pattern(self, pattern: str) -> None:
-        pass
-
-
 class AbstractDependencyStore(ABC):
     @abstractmethod
     def add_cache_key(self, model_name: str, instance_pk: Any, cache_key: str) -> None:

@@ -4,32 +4,12 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 import warnings
-from typing import Optional
 
 from statezero.adaptors.django.query_optimizer import DjangoQueryOptimizer
 from statezero.adaptors.django.context_manager import query_timeout
 from statezero.core.config import AppConfig, Registry
-from statezero.core.interfaces import AbstractHotPath
 
 logger = logging.getLogger(__name__)
-
-class DjangoUserHotpath(AbstractHotPath):
-    """
-    A hotpath is used to share operations between different sessions, either separate
-    browser tabs or between a common group of users. This allows for shared optimistic
-    updates.
-    """
-    name = "default"
-
-    @classmethod
-    def get_path(cls, user) -> Optional[str]:
-        if not user or not user.is_authenticated:
-            return None
-        return str(user.pk)
-
-    @classmethod
-    def get_name(cls) -> str:
-        return cls.name
 
 class DjangoLocalConfig(AppConfig):
     def __init__(self):
@@ -52,11 +32,6 @@ class DjangoLocalConfig(AppConfig):
         self.orm_provider = DjangoORMAdapter()
         self.context_manager = query_timeout
         self.query_optimizer = DjangoQueryOptimizer
-
-        # Hot path
-        self.hotpaths = {
-            "default": DjangoUserHotpath
-        }
 
         # Instantiate emitters by injecting only the necessary functions.
         if hasattr(settings, 'STATEZERO_PUSHER'):

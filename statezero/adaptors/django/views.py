@@ -20,46 +20,6 @@ logger.setLevel(logging.DEBUG)
 default_permission = "rest_framework.permissions.AllowAny"
 permission_class = import_string(getattr(settings, "STATEZERO_VIEW_ACCESS_CLASS", default_permission))
 
-class HotPathView(APIView):
-    """
-    Returns the hot path channels the authenticated user should subscribe to.
-    """
-    permission_classes = [permission_class]
-    
-    def get(self, request, *args, **kwargs):
-        if not hasattr(config, 'hotpaths') or not config.hotpaths:
-            return Response(
-                {"hot_path_enabled": False, "hotpaths": []}, 
-                status=status.HTTP_200_OK
-            )
-        
-        try:
-            hotpaths = []
-            
-            # Get channels from all available hotpath strategies
-            for name, hotpath_class in config.hotpaths.items():
-                user = config.orm_provider.get_user(request)
-                path = hotpath_class.get_path(user)
-                if path:
-                    channel_name = f"private-hotpath-{path}"
-                    hotpaths.append({
-                        "hotpath": name,  # The hotpath name (e.g., "default")
-                        "channel": channel_name,  # The actual channel to subscribe to
-                        "path": path  # The user-specific path (for debugging)
-                    })
-            
-            return Response({
-                "hot_path_enabled": True,
-                "hotpaths": hotpaths
-            }, status=status.HTTP_200_OK)
-            
-        except Exception as e:
-            logger.exception(f"Error getting hot path channels for user: {e}")
-            return Response(
-                {"error": "Failed to determine hot path channels"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
 class EventsAuthView(APIView):
     """
     A generic authentication view for event emitters.
@@ -67,21 +27,6 @@ class EventsAuthView(APIView):
     calls its authenticate method with the request.
     """
     permission_classes = [permission_class]
-
-    def _has_hotpath_permission(self, request, hotpath: str) -> bool:
-        """Check if user has permission to access the specified hotpath"""
-        if not hasattr(config, 'hotpaths') or not config.hotpaths:
-            return False
-        try:
-            # Check all hotpath strategies to see if any grant access to this path
-            for hotpath_class in config.hotpaths.values():
-                user = config.orm_provider.get_user(request)
-                if hotpath_class.get_path(user):
-                    return True
-            return False
-        except Exception as e:
-            logger.warning(f"Error checking hotpath permission: {e}")
-            return False
     
     def post(self, request, *args, **kwargs):
         channel_name = request.data.get("channel_name")
@@ -94,21 +39,7 @@ class EventsAuthView(APIView):
             )
 
         # Extract the namespace from the channel name.
-        # Handle both regular channels and hot path channels
-        if channel_name.startswith("private-hotpath-"):
-            # Hot path channel: private-hotpath-{group}
-            path = channel_name[len("private-hotpath-"):]
-            
-            # Check if user belongs to this trusted group
-            if not self._has_hotpath_permission(request, path):
-                return Response(
-                    {"error": "Permission denied for accessing hot path channel."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            namespace = path
-            
-        elif channel_name.startswith("private-"):
-            # Regular channel: private-{namespace}
+        if channel_name.startswith("private-"):
             namespace = channel_name[len("private-"):]
         else:
             namespace = channel_name
@@ -122,13 +53,12 @@ class EventsAuthView(APIView):
 
         event_emitter: AbstractEventEmitter = config.event_bus.broadcast_emitter
 
-        # Use the event emitter's permission check (skip for hot path since we already checked)
-        if not channel_name.startswith("private-hotpath-"):
-            if not event_emitter.has_permission(request, namespace):
-                return Response(
-                    {"error": "Permission denied for accessing channel."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        # Use the event emitter's permission check
+        if not event_emitter.has_permission(request, namespace):
+            return Response(
+                {"error": "Permission denied for accessing channel."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # Delegate authentication to the event emitter.
         response = event_emitter.authenticate(request)
