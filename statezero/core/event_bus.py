@@ -1,4 +1,4 @@
-from statezero.core.context_storage import current_operation_id
+from statezero.core.context_storage import current_operation_id, queryset_semantic_hash
 import logging
 from typing import Any, Type, Union, List
 
@@ -74,6 +74,7 @@ class EventBus:
                 "event": action_type.value,
                 "model": model_name,
                 "operation_id": current_operation_id.get(),
+                "queryset_semantic_hash": queryset_semantic_hash.get(),
                 "instances": [pk_value],
                 "pk_field_name": pk_field_name
             }
@@ -142,8 +143,9 @@ class EventBus:
                 "event": action_type.value,
                 "model": model_name,
                 "operation_id": current_operation_id.get(),
+                "queryset_semantic_hash": queryset_semantic_hash.get(),
                 "instances": pks,
-                "pk_field_name": pk_field_name
+                "pk_field_name": pk_field_name,
             }
             
             # Create a dictionary to group instances by namespace
