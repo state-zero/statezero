@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.test import Client
 import hashlib
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 User = get_user_model()
 
@@ -54,24 +54,57 @@ class ModelViewSubscription(models.Model):
         return self.generate_hash(channel_data)
     
     @classmethod
-    def initialize(cls, user: User, model_name: str, ast_query: Dict[str, Any], response_data: Dict[str, Any]) -> 'ModelViewSubscription':
-        """Create a new live subscription for a specific model and AST query."""
-        instance = cls(
-            user=user,
+    def update_or_create_subscription(
+        cls, 
+        user: User, 
+        model_name: str, 
+        ast_query: Dict[str, Any], 
+        response_data: Dict[str, Any]
+    ) -> Tuple['ModelViewSubscription', bool]:
+        """
+        Create or update a live subscription for a specific model and AST query.
+        Returns (subscription, created) tuple.
+        """
+        # First, generate the channel name we'll use for lookup
+        temp_instance = cls(
             model_name=model_name,
-            ast_query=ast_query  # Store the full AST structure
+            ast_query=ast_query
+        )
+        channel_name = temp_instance.generate_channel_key()
+        response_hash = temp_instance.generate_hash(response_data)
+        
+        # Use update_or_create with the unique constraint fields
+        subscription, created = cls.objects.update_or_create(
+            user=user,
+            channel_name=channel_name,
+            defaults={
+                'model_name': model_name,
+                'ast_query': ast_query,
+                'cached_response': response_data,
+                'response_hash': response_hash,
+                'has_error': False,
+                'is_active': True,
+                'last_checked': timezone.now(),
+                # Don't update last_updated if just reactivating existing subscription
+                # 'last_updated' will be set by auto_now=True only if other fields change
+            }
         )
         
-        # Generate channel name from model + query
-        instance.channel_name = instance.generate_channel_key()
+        # If updating existing subscription, ensure last_updated reflects the data change
+        if not created:
+            subscription.last_updated = timezone.now()
+            subscription.save(update_fields=['last_updated'])
         
-        # Set initial response and hash
-        instance.cached_response = response_data
-        instance.response_hash = instance.generate_hash(response_data)
-        instance.has_error = False
-        
-        instance.save()
-        return instance
+        return subscription, created
+    
+    @classmethod
+    def initialize(cls, user: User, model_name: str, ast_query: Dict[str, Any], response_data: Dict[str, Any]) -> 'ModelViewSubscription':
+        """
+        Legacy method - now delegates to update_or_create_subscription.
+        Kept for backward compatibility.
+        """
+        subscription, created = cls.update_or_create_subscription(user, model_name, ast_query, response_data)
+        return subscription
     
     def rerun(self) -> bool:
         """
@@ -129,3 +162,15 @@ class ModelViewSubscription(models.Model):
         self.has_error = True
         self.last_checked = timezone.now()
         self.save(update_fields=['cached_response', 'response_hash', 'has_error', 'last_checked'])
+        
+    def deactivate(self):
+        """Deactivate this subscription (soft delete)."""
+        self.is_active = False
+        self.save(update_fields=['is_active'])
+    
+    def reactivate(self):
+        """Reactivate this subscription."""
+        self.is_active = True
+        self.has_error = False
+        self.last_checked = timezone.now()
+        self.save(update_fields=['is_active', 'has_error', 'last_checked'])
