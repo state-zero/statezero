@@ -363,30 +363,19 @@ class AbstractEventHandler(ABC):
 class AbstractEventEmitter(ABC):
     @abstractmethod
     def emit(
-        self, event_type: ActionType, instance: Any, event_config: AbstractEventConfig
+        self, namespace: str, event_type: ActionType, data: Dict[str, Any]
     ) -> None:
         """
-        Emit an event using the provided event type, instance (to extract its primary key,
-        etc.), and the global event configuration.
-        """
-        pass
-    
-    @abstractmethod
-    def emit_bulk(
-        self, namespace: str, event_type: ActionType, model_class: Type, pks: List[Any]
-    ) -> None:
-        """
-        Emit a bulk event with multiple primary keys.
-        By default, this is not implemented and should be overridden by subclasses.
-        """
-        pass
-
-    @abstractmethod
-    def emit_hot_path_event(
-        self, trusted_group: str, event_data
-    ) -> None:
-        """
-        Emit a hot path event, event data should follow the HotPathEvent defined in core/event_emitters.py
+        Emit an event to the specified namespace with the given event type and data.
+        
+        Parameters:
+        -----------
+        namespace: str
+            The namespace/channel to emit the event to
+        event_type: ActionType
+            The type of event being emitted
+        data: Dict[str, Any]
+            The structured data payload to emit
         """
         pass
 

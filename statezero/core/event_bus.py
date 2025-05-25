@@ -1,3 +1,4 @@
+from statezero.core.context_storage import current_operation_id
 import logging
 from typing import Any, Type, Union, List
 
@@ -14,8 +15,7 @@ class EventBus:
         orm_provider: AbstractORMProvider = None,
     ) -> None:
         """
-        Initialize the EventBus with two explicit event emitters:
-          - broadcast_emitter: Handles broadcasting events to clients.
+        Initialize the EventBus with a broadcast emitter.
 
         Parameters:
         -----------
@@ -36,10 +36,6 @@ class EventBus:
         """
         Emit an event for a model instance to appropriate namespaces.
 
-        This method:
-        1. Determines applicable namespaces (default + additional)
-        2. Emits the event to each namespace via the broadcast emitter
-
         Parameters:
         -----------
         action_type: ActionType
@@ -49,9 +45,8 @@ class EventBus:
         """
         # Unused actions, no need to broadcast
         if action_type in (ActionType.PRE_DELETE, ActionType.PRE_UPDATE):
-            pass 
+            return
 
-        # Then handle broadcast with namespace resolution
         if not self.broadcast_emitter or not self.orm_provider:
             return
 
@@ -70,24 +65,23 @@ class EventBus:
             default_namespace = self.orm_provider.get_model_name(model_class)
             namespaces = [default_namespace]
 
-            # Add partition-specific namespaces if configured
-            if model_config and model_config.partition_fields:
-                for field_name in model_config.partition_fields:
-                    try:
-                        partition_value = getattr(instance, field_name, None)
-                        if partition_value is not None:
-                            partition_namespace = f"{default_namespace}-{field_name}-{partition_value}"
-                            namespaces.append(partition_namespace)
-                    except Exception as e:
-                        logger.warning(
-                            "Could not resolve partition field '%s' for model %s: %s",
-                            field_name, model_class.__name__, e
-                        )
+            # Create payload data from instance
+            model_name = self.orm_provider.get_model_name(instance)
+            pk_field_name = instance._meta.pk.name
+            pk_value = instance.pk
+            
+            data = {
+                "event": action_type.value,
+                "model": model_name,
+                "operation_id": current_operation_id.get(),
+                "instances": [pk_value],
+                "pk_field_name": pk_field_name
+            }
 
             for namespace in namespaces:
                 try:
-                    # Emit to this specific namespace
-                    self.broadcast_emitter.emit(namespace, action_type, instance)
+                    # Emit data to this namespace
+                    self.broadcast_emitter.emit(namespace, action_type, data)
                 except Exception as e:
                     logger.exception(
                         "Error emitting to namespace %s for event %s: %s",
@@ -107,10 +101,6 @@ class EventBus:
         """
         Emit a bulk event for multiple instances.
         
-        This method:
-        1. Groups instances by namespace
-        2. Emits bulk events to each namespace with the appropriate instances
-        
         Parameters:
         -----------
         action_type: ActionType
@@ -129,7 +119,6 @@ class EventBus:
         first_instance = instances[0]
         model_class = first_instance.__class__
 
-        # Handle broadcast with namespace resolution
         if not self.broadcast_emitter or not self.orm_provider:
             return
 
@@ -142,45 +131,28 @@ class EventBus:
                 except (ValueError, AttributeError):
                     pass
 
-            # Create a dictionary to group instances by namespace
-            # Use "global" as the universal key for all models
-            namespaced_instances = {
-                "global": instances
-            }
-
             default_namespace = self.orm_provider.get_model_name(model_class)
-            namespaced_instances[default_namespace] = instances
+            
+            # Create payload data from instances
+            model_name = self.orm_provider.get_model_name(first_instance)
+            pk_field_name = first_instance._meta.pk.name
+            pks = [instance.pk for instance in instances]
+            
+            data = {
+                "event": action_type.value,
+                "model": model_name,
+                "operation_id": current_operation_id.get(),
+                "instances": pks,
+                "pk_field_name": pk_field_name
+            }
+            
+            # Create a dictionary to group instances by namespace
+            namespaces = ["global", default_namespace]
 
-            # Add partition-specific groupings if configured
-            if model_config and model_config.partition_fields:
-                for field_name in model_config.partition_fields:
-                    # Group instances by partition value for this field
-                    partition_groups = {}
-                    for instance in instances:
-                        try:
-                            partition_value = getattr(instance, field_name, None)
-                            if partition_value is not None:
-                                partition_namespace = f"{default_namespace}-{field_name}-{partition_value}"
-                                if partition_namespace not in partition_groups:
-                                    partition_groups[partition_namespace] = []
-                                partition_groups[partition_namespace].append(instance)
-                        except Exception as e:
-                            logger.warning(
-                                "Could not resolve partition field '%s' for instance: %s",
-                                field_name, e
-                            )
-                    
-                    # Add partition groups to namespaced_instances
-                    namespaced_instances.update(partition_groups)
-
-            for namespace, ns_instances in namespaced_instances.items():
+            for namespace in namespaces:
                 try:
-                    self.broadcast_emitter.emit_bulk(
-                        namespace=namespace,
-                        event_type=action_type,
-                        model_class=model_class,
-                        instances=ns_instances
-                    )
+                    # Emit data to this namespace
+                    self.broadcast_emitter.emit(namespace, action_type, data)
                 except Exception as e:
                     logger.exception(
                         "Error emitting bulk event to namespace %s: %s",

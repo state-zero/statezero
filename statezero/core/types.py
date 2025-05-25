@@ -46,6 +46,10 @@ ORMModel = Union[object, DjangoModel, SQLAlchemyDeclarativeMeta]
 ORMQuerySet = Union[Any, DjangoQuerySet, SQLAlchemyQuery]
 RequestType = Union[DRFRequest, FastAPIRequest, FlaskRequest]
 
+class HotPathActionType(Enum):
+    CREATED = "created"
+    COMPLETED = "completed"
+    REJECTED = "rejected"
 
 class ActionType(Enum):
     CREATE = "create"

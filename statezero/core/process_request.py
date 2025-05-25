@@ -12,8 +12,7 @@ from statezero.core.exceptions import PermissionDenied, ValidationError
 from statezero.core.interfaces import (AbstractDataSerializer,
                                        AbstractORMProvider,
                                        AbstractSchemaGenerator)
-from statezero.core.types import ActionType
-from statezero.core.event_emitters import HotPathEvent
+from statezero.core.types import ActionType, HotPathActionType
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -113,12 +112,12 @@ class RequestProcessor:
             hotpath_names = [hotpath_names]
         
         # Create hot path event with full AST
-        hot_path_event = HotPathEvent(
-            operation_id=operation_id,
-            ast=ast,
-            model=model_name,
-            response=response
-        )
+        hot_path_event = {
+            "operation_id": operation_id,
+            "ast": ast,
+            "model": model_name,
+            "response": response
+        }
         
         emitter = self.config.event_bus.broadcast_emitter
         
@@ -136,7 +135,7 @@ class RequestProcessor:
                 logger.warning(f"User has no permission for hotpath: {hotpath_name}")
                 continue
                 
-            emitter.emit_hot_path_event(hotpath, event, hot_path_event)
+            emitter.emit(hotpath, event, hot_path_event)
 
     def process_schema(self, req: Any) -> Dict[str, Any]:
         try:
@@ -250,7 +249,7 @@ class RequestProcessor:
                 model_name=model_name,
                 ast=ast_body,
                 operation_id=operation_id,
-                event="created"
+                event=HotPathActionType.CREATED
             )
 
         try:
@@ -273,7 +272,7 @@ class RequestProcessor:
                     model_name=model_name,
                     ast=ast_body,
                     operation_id=operation_id,
-                    event="completed",
+                    event=HotPathActionType.COMPLETED,
                     response=result
                 )
 
@@ -284,7 +283,7 @@ class RequestProcessor:
                     model_name=model_name,
                     ast=ast_body,
                     operation_id=operation_id,
-                    event="rejected"
+                    event=HotPathActionType.REJECTED
                 )
             raise
 

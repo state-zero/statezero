@@ -1,28 +1,18 @@
-from typing import Optional, Type
-
+from typing import Optional
 import logging
-import pusher
 from django.conf import settings
 from rest_framework.request import Request
 from django.utils.module_loading import import_string
 
-from statezero.adaptors.django.config import config
-from statezero.core.event_emitters import (ConsoleEventEmitter,
-                                           PusherEventEmitter)
-from statezero.core.types import ActionType, ORMModel
+from statezero.core.event_emitters import ConsoleEventEmitter, PusherEventEmitter
 
 logger = logging.getLogger(__name__)
 
 
 class DjangoConsoleEventEmitter(ConsoleEventEmitter):
     def __init__(self) -> None:
-        """
-        Instantiate the Django console emitter by injecting the Django-specific get_model_name
-        and get_namespace functions.
-        """
-        super().__init__(get_model_name=config.orm_provider.get_model_name)
+        super().__init__()
         
-        # Get permission class from settings with a default fallback
         permission_class_path = getattr(
             settings,
             "STATEZERO_VIEW_ACCESS_CLASS",
@@ -32,15 +22,11 @@ class DjangoConsoleEventEmitter(ConsoleEventEmitter):
             self.permission_class = import_string(permission_class_path)()
             logger.debug("Using emitter permission class: %s", permission_class_path)
         except Exception as e:
-            logger.error(
-                "Error importing emitter permission class '%s': %s", permission_class_path, str(e)
-            )
-            # Default to requiring authentication as a safe fallback
+            logger.error("Error importing emitter permission class '%s': %s", permission_class_path, str(e))
             from rest_framework.permissions import IsAuthenticated
             self.permission_class = IsAuthenticated()
 
     def has_permission(self, request: Request, namespace: str) -> bool:
-        # Delegate to the configured permission class
         return self.permission_class.has_permission(request, None)
 
 
@@ -52,19 +38,19 @@ class DjangoPusherEventEmitter(PusherEventEmitter):
         secret: Optional[str] = None,
         cluster: Optional[str] = None,
     ) -> None:
-        """
-        Instantiate the Django Pusher emitter by resolving credentials from parameters or settings
-        and injecting the Django-specific get_model_name and get_namespace functions.
-        """
+        import pusher
+        
         app_id = app_id or settings.STATEZERO_PUSHER.get("APP_ID")
         key = key or settings.STATEZERO_PUSHER.get("KEY")
         secret = secret or settings.STATEZERO_PUSHER.get("SECRET")
         cluster = cluster or settings.STATEZERO_PUSHER.get("CLUSTER")
+        
         if not all([app_id, key, secret, cluster]):
             raise ValueError(
                 "Pusher credentials must be provided via parameters or defined in settings as "
                 "'APP_ID', 'KEY', 'SECRET', and 'CLUSTER'."
             )
+            
         pusher_client = pusher.Pusher(
             app_id=app_id,
             key=key,
@@ -72,12 +58,9 @@ class DjangoPusherEventEmitter(PusherEventEmitter):
             cluster=cluster,
             ssl=True,
         )
-        super().__init__(
-            pusher_client=pusher_client,
-            get_model_name=config.orm_provider.get_model_name,
-        )
         
-        # Get permission class from settings with a default fallback
+        super().__init__(pusher_client=pusher_client)
+        
         permission_class_path = getattr(
             settings,
             "STATEZERO_VIEW_ACCESS_CLASS",
@@ -87,13 +70,9 @@ class DjangoPusherEventEmitter(PusherEventEmitter):
             self.permission_class = import_string(permission_class_path)()
             logger.debug("Using emitter permission class: %s", permission_class_path)
         except Exception as e:
-            logger.error(
-                "Error importing emitter permission class '%s': %s", permission_class_path, str(e)
-            )
-            # Default to requiring authentication as a safe fallback
+            logger.error("Error importing emitter permission class '%s': %s", permission_class_path, str(e))
             from rest_framework.permissions import IsAuthenticated
             self.permission_class = IsAuthenticated()
 
     def has_permission(self, request: Request, namespace: str) -> bool:
-        # Delegate to the configured permission class
         return self.permission_class.has_permission(request, None)
