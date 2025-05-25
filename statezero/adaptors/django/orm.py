@@ -24,7 +24,6 @@ from statezero.core.exceptions import (StateZeroError, MultipleObjectsReturned,
                                        ValidationError)
 from statezero.core.interfaces import (AbstractCustomQueryset,
                                        AbstractEventEmitter,
-                                       AbstractEventHandler,
                                        AbstractORMProvider, AbstractPermission)
 from statezero.core.types import ActionType, ORMModel, RequestType
 

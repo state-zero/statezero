@@ -6,20 +6,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union,
 from statezero.core.classes import ModelSchemaMetadata, SchemaFieldMetadata
 from statezero.core.types import (ActionType, ORMField, ORMModel, ORMQuerySet, RequestType)
 
-class AbstractDependencyStore(ABC):
-    @abstractmethod
-    def add_cache_key(self, model_name: str, instance_pk: Any, cache_key: str) -> None:
-        pass
-
-    @abstractmethod
-    def get_cache_keys(self, model_name: str, instance_pk: Any) -> Set[str]:
-        pass
-
-    @abstractmethod
-    def clear_cache_keys(self, model_name: str, instance_pk: Any) -> None:
-        pass
-
-
 class AbstractORMProvider(ABC):
     """
     A merged ORM engine interface that combines both query building (filtering,
@@ -309,28 +295,6 @@ class AbstractSchemaOverride(ABC):
 
 
 # --- Event Emitter ---
-class AbstractEventConfig(ABC):
-    @abstractmethod
-    def get_namespace(
-        self, action_type: ActionType, model: ORMModel
-    ) -> str:  # type:ignore
-        """
-        Compute and return the namespace for the given action type and model.
-        """
-        pass
-
-
-class AbstractEventHandler(ABC):
-    @abstractmethod
-    def handle_event(
-        self, event_type: ActionType, instance: Any, event_config: AbstractEventConfig
-    ) -> None:
-        """
-        Handle an event (e.g. by emitting an event or invalidating a cache).
-        """
-        pass
-
-
 class AbstractEventEmitter(ABC):
     @abstractmethod
     def emit(

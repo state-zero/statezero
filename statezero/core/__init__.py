@@ -5,7 +5,6 @@ statezero: A framework for model synchronization and event handling across diffe
 from statezero.core.config import AppConfig, ModelConfig, Registry
 from statezero.core.interfaces import (AbstractCustomQueryset,
                                        AbstractDataSerializer,
-                                       AbstractEventConfig,
                                        AbstractEventEmitter,
                                        AbstractORMProvider, AbstractPermission,
                                        AbstractSchemaGenerator)
@@ -29,8 +28,7 @@ __all__ = [
     "AbstractDataSerializer",
     "AbstractSchemaGenerator",
     "AbstractEventEmitter",
-    "AbstractPermission",
-    "AbstractEventConfig",
+    "AbstractPermission"
 ]
 
 __version__ = "0.1.0"
