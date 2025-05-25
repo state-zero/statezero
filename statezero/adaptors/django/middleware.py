@@ -1,6 +1,6 @@
 from django.utils.deprecation import MiddlewareMixin
 
-from statezero.core.context_storage import current_operation_id, queryset_semantic_hash
+from statezero.core.context_storage import current_operation_id
 
 
 class OperationIDMiddleware(MiddlewareMixin):
@@ -8,6 +8,3 @@ class OperationIDMiddleware(MiddlewareMixin):
         # The header in Django is available via request.META (HTTP headers are prefixed with HTTP_)
         op_id = request.META.get("HTTP_X_OPERATION_ID")
         current_operation_id.set(op_id)
-
-        semantic_hash = request.META.get("HTTP_X_QUERYSET_SEMANTIC_HASH")
-        queryset_semantic_hash.set(semantic_hash)
