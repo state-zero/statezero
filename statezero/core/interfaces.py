@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, Literal
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, Literal, Protocol
 
 from statezero.core.classes import ModelSchemaMetadata, SchemaFieldMetadata
 from statezero.core.types import (ActionType, ORMField, ORMModel, ORMQuerySet, RequestType)
@@ -490,3 +490,57 @@ class AbstractQueryOptimizer(ABC):
                         for generation) are missing.
         """
         raise NotImplementedError
+
+class AbstractLiveSubscriptionManager(Protocol):
+    """
+    Protocol for managing live query subscriptions.
+    Framework-specific implementations handle the storage and notification details.
+    """
+    
+    @classmethod
+    def _update_or_create_subscription(
+        cls,
+        user: Any,
+        model_name: str,
+        ast_query: Dict[str, Any],
+        response_data: Dict[str, Any]
+    ) -> Tuple[Any, bool]:
+        """
+        Create or update a live subscription for a specific user, model, and query.
+        Returns (subscription, created) tuple.
+        """
+        ...
+    
+    @classmethod
+    def initialize(
+        cls,
+        user: Any,
+        model_name: str,
+        ast_query: Dict[str, Any],
+        response_data: Dict[str, Any]
+    ) -> Any:
+        """
+        initialize the subscription
+        """
+        ...
+    
+    def subscription_info(self) -> Dict[str, Any]:
+        """
+        Get subscription metadata for API responses.
+        Returns dictionary with subscription info like channel_name, hash, etc.
+        """
+        ...
+    
+    def rerun(self) -> bool:
+        """
+        Rerun the subscription request and return True if data changed.
+        """
+        ...
+    
+    def deactivate(self) -> None:
+        """Deactivate this subscription (soft delete)."""
+        ...
+    
+    def reactivate(self) -> None:
+        """Reactivate this subscription."""
+        ...

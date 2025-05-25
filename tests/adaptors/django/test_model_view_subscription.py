@@ -52,9 +52,9 @@ class ModelViewSubscriptionTest(TestCase):
         self.assertFalse(live_view.has_error)
         self.assertTrue(live_view.is_active)
 
-    def test_update_or_create_subscription_creates_new(self):
-        """Test that update_or_create_subscription creates a new subscription when none exists."""
-        subscription, created = ModelViewSubscription.update_or_create_subscription(
+    def test__update_or_create_subscription_creates_new(self):
+        """Test that _update_or_create_subscription creates a new subscription when none exists."""
+        subscription, created = ModelViewSubscription._update_or_create_subscription(
             user=self.user,
             model_name=self.model_name,
             ast_query=self.ast_query,
@@ -71,10 +71,10 @@ class ModelViewSubscriptionTest(TestCase):
         self.assertFalse(subscription.has_error)
         self.assertTrue(subscription.is_active)
 
-    def test_update_or_create_subscription_updates_existing(self):
-        """Test that update_or_create_subscription updates an existing subscription."""
+    def test__update_or_create_subscription_updates_existing(self):
+        """Test that _update_or_create_subscription updates an existing subscription."""
         # Create initial subscription
-        subscription1, created1 = ModelViewSubscription.update_or_create_subscription(
+        subscription1, created1 = ModelViewSubscription._update_or_create_subscription(
             user=self.user,
             model_name=self.model_name,
             ast_query=self.ast_query,
@@ -102,7 +102,7 @@ class ModelViewSubscriptionTest(TestCase):
         }
         
         # Update the same subscription
-        subscription2, created2 = ModelViewSubscription.update_or_create_subscription(
+        subscription2, created2 = ModelViewSubscription._update_or_create_subscription(
             user=self.user,
             model_name=self.model_name,
             ast_query=self.ast_query,  # Same query
@@ -117,7 +117,7 @@ class ModelViewSubscriptionTest(TestCase):
         self.assertTrue(subscription2.is_active)
         self.assertFalse(subscription2.has_error)
 
-    def test_update_or_create_subscription_different_queries_different_subscriptions(self):
+    def test__update_or_create_subscription_different_queries_different_subscriptions(self):
         """Test that different queries create different subscriptions for same user/model."""
         # First subscription
         ast_query1 = {
@@ -130,7 +130,7 @@ class ModelViewSubscriptionTest(TestCase):
             "serializerOptions": {}
         }
         
-        subscription1, created1 = ModelViewSubscription.update_or_create_subscription(
+        subscription1, created1 = ModelViewSubscription._update_or_create_subscription(
             user=self.user,
             model_name=self.model_name,
             ast_query=ast_query1,
@@ -149,7 +149,7 @@ class ModelViewSubscriptionTest(TestCase):
             "serializerOptions": {}
         }
         
-        subscription2, created2 = ModelViewSubscription.update_or_create_subscription(
+        subscription2, created2 = ModelViewSubscription._update_or_create_subscription(
             user=self.user,
             model_name=self.model_name,
             ast_query=ast_query2,
@@ -161,9 +161,9 @@ class ModelViewSubscriptionTest(TestCase):
         self.assertNotEqual(subscription1.id, subscription2.id)
         self.assertNotEqual(subscription1.channel_name, subscription2.channel_name)
 
-    def test_update_or_create_subscription_different_users_same_query(self):
+    def test__update_or_create_subscription_different_users_same_query(self):
         """Test that different users can have subscriptions for the same query."""
-        subscription1, created1 = ModelViewSubscription.update_or_create_subscription(
+        subscription1, created1 = ModelViewSubscription._update_or_create_subscription(
             user=self.user,
             model_name=self.model_name,
             ast_query=self.ast_query,
@@ -171,7 +171,7 @@ class ModelViewSubscriptionTest(TestCase):
         )
         self.assertTrue(created1)
         
-        subscription2, created2 = ModelViewSubscription.update_or_create_subscription(
+        subscription2, created2 = ModelViewSubscription._update_or_create_subscription(
             user=self.user2,  # Different user
             model_name=self.model_name,
             ast_query=self.ast_query,  # Same query
@@ -188,7 +188,7 @@ class ModelViewSubscriptionTest(TestCase):
     def test_update_or_create_reactivates_inactive_subscription(self):
         """Test that update_or_create reactivates an inactive subscription."""
         # Create and then deactivate a subscription
-        subscription1, created1 = ModelViewSubscription.update_or_create_subscription(
+        subscription1, created1 = ModelViewSubscription._update_or_create_subscription(
             user=self.user,
             model_name=self.model_name,
             ast_query=self.ast_query,
@@ -201,7 +201,7 @@ class ModelViewSubscriptionTest(TestCase):
         
         # Update with new data should reactivate
         new_response_data = {"different": "data"}
-        subscription2, created2 = ModelViewSubscription.update_or_create_subscription(
+        subscription2, created2 = ModelViewSubscription._update_or_create_subscription(
             user=self.user,
             model_name=self.model_name,
             ast_query=self.ast_query,
@@ -448,14 +448,14 @@ class ModelViewSubscriptionIntegrationTest(APITestCase):
         }
         
         # Create both subscriptions
-        subscription1, created1 = ModelViewSubscription.update_or_create_subscription(
+        subscription1, created1 = ModelViewSubscription._update_or_create_subscription(
             user=self.user,
             model_name=self.model_name,
             ast_query=ast_query1,
             response_data={"data": "response1"}
         )
         
-        subscription2, created2 = ModelViewSubscription.update_or_create_subscription(
+        subscription2, created2 = ModelViewSubscription._update_or_create_subscription(
             user=self.user,
             model_name=self.model_name,
             ast_query=ast_query2,

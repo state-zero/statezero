@@ -6,9 +6,10 @@ from fastapi.encoders import jsonable_encoder
 from statezero.core import AppConfig, ModelConfig, Registry
 from statezero.core.ast_parser import ASTParser
 from statezero.core.ast_validator import ASTValidator
-
+from statezero.core.context_storage import is_live_query
 from statezero.core.exceptions import PermissionDenied, ValidationError
 from statezero.core.interfaces import (AbstractDataSerializer,
+                                       AbstractLiveSubscriptionManager,
                                        AbstractORMProvider,
                                        AbstractSchemaGenerator)
 from statezero.core.types import ActionType
@@ -183,4 +184,14 @@ class RequestProcessor:
         )
         result: Dict[str, Any] = parser.parse(final_query_ast)
 
+        # This sets up a subscription manager, that will be used to notify the frontend when to refetch
+        if is_live_query.get():
+            ModelViewSubscription: AbstractLiveSubscriptionManager = self.config.model_view_subscription
+            subscription: Type[AbstractLiveSubscriptionManager] = ModelViewSubscription.initialize(
+                user= self.config.orm_provider.get_user(request=req),
+                model_name=model_name,
+                ast_query=body,
+                response_data=result
+            )
+            result['_subscription'] = subscription.subscription_info()
         return result

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -5,6 +6,7 @@ from django.test import Client
 import hashlib
 import json
 from typing import Optional, Dict, Any, Tuple
+from fastapi.encoders import jsonable_encoder
 
 User = get_user_model()
 
@@ -16,7 +18,6 @@ class ModelViewSubscription(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='live_requests')
     model_name = models.CharField(max_length=255)  # e.g. "django_app.DummyModel"
     ast_query = models.JSONField()  # The FULL AST structure (including "query" wrapper)
-    cached_response = models.JSONField(null=True, blank=True)
     response_hash = models.CharField(max_length=64, null=True, blank=True)
     channel_name = models.CharField(max_length=64)  # Hash of model_name + ast_query
     has_error = models.BooleanField(default=False)
@@ -38,6 +39,18 @@ class ModelViewSubscription(models.Model):
     def __str__(self):
         return f"ModelViewSubscription({self.user.username}, {self.model_name}, {self.channel_name[:8]}...)"
     
+    def subscription_info(self) -> Dict[str, Any]:
+        """Get subscription metadata for API response."""
+        return {
+            'id': self.id,
+            'channel_name': self.channel_name,
+            'response_hash': self.response_hash,
+            'last_updated': self.last_updated.isoformat(),
+            'is_active': self.is_active,
+            'has_error': self.has_error,
+            'model_name': self.model_name
+        }
+    
     def generate_hash(self, data: Optional[Dict[str, Any]]) -> Optional[str]:
         """Generate SHA-256 hash of data."""
         if data is None:
@@ -54,7 +67,7 @@ class ModelViewSubscription(models.Model):
         return self.generate_hash(channel_data)
     
     @classmethod
-    def update_or_create_subscription(
+    def _update_or_create_subscription(
         cls, 
         user: User, 
         model_name: str, 
@@ -80,13 +93,10 @@ class ModelViewSubscription(models.Model):
             defaults={
                 'model_name': model_name,
                 'ast_query': ast_query,
-                'cached_response': response_data,
                 'response_hash': response_hash,
                 'has_error': False,
                 'is_active': True,
-                'last_checked': timezone.now(),
-                # Don't update last_updated if just reactivating existing subscription
-                # 'last_updated' will be set by auto_now=True only if other fields change
+                'last_checked': timezone.now()
             }
         )
         
@@ -98,12 +108,13 @@ class ModelViewSubscription(models.Model):
         return subscription, created
     
     @classmethod
-    def initialize(cls, user: User, model_name: str, ast_query: Dict[str, Any], response_data: Dict[str, Any]) -> 'ModelViewSubscription':
+    def initialize(cls, user: User, model_name: str, ast_query: Dict[str, Any], response_data: Dict[str, Any]) -> ModelViewSubscription:
         """
-        Legacy method - now delegates to update_or_create_subscription.
+        Legacy method - now delegates to _update_or_create_subscription.
         Kept for backward compatibility.
         """
-        subscription, created = cls.update_or_create_subscription(user, model_name, ast_query, response_data)
+        jsonable_ast_query = jsonable_encoder(ast_query)
+        subscription, created = cls._update_or_create_subscription(user, model_name, jsonable_ast_query, response_data)
         return subscription
     
     def rerun(self) -> bool:
@@ -145,23 +156,21 @@ class ModelViewSubscription(models.Model):
         has_changed = self.response_hash != new_hash
         
         if has_changed:
-            self.cached_response = new_response_data
             self.response_hash = new_hash
             self.last_updated = timezone.now()
         
         self.has_error = False
         self.last_checked = timezone.now()
-        self.save(update_fields=['cached_response', 'response_hash', 'has_error', 'last_checked', 'last_updated'])
+        self.save(update_fields=['response_hash', 'has_error', 'last_checked', 'last_updated'])
         
         return has_changed
     
     def _set_error_state(self):
         """Set the error state for this subscription."""
-        self.cached_response = None
         self.response_hash = "ERROR"
         self.has_error = True
         self.last_checked = timezone.now()
-        self.save(update_fields=['cached_response', 'response_hash', 'has_error', 'last_checked'])
+        self.save(update_fields=['response_hash', 'has_error', 'last_checked'])
         
     def deactivate(self):
         """Deactivate this subscription (soft delete)."""

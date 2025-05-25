@@ -7,7 +7,7 @@ import networkx as nx
 
 from statezero.core.classes import AdditionalField
 from statezero.core.event_bus import EventBus
-from statezero.core.interfaces import (AbstractCustomQueryset,
+from statezero.core.interfaces import (AbstractCustomQueryset, AbstractLiveSubscriptionManager,
                                        AbstractDataSerializer,
                                        AbstractORMProvider, AbstractPermission,
                                        AbstractSchemaGenerator, AbstractSearchProvider, AbstractQueryOptimizer)
@@ -37,6 +37,7 @@ class AppConfig(ABC):
     default_limit: Optional[int] = 100
     orm_provider: AbstractORMProvider = None
     search_provider: AbstractSearchProvider = None
+    model_view_subscription: AbstractLiveSubscriptionManager = None
 
     # Query optimizers
     query_optimizer: Optional[AbstractQueryOptimizer] = None
