@@ -135,7 +135,7 @@ class RequestProcessor:
                 logger.warning(f"User has no permission for hotpath: {hotpath_name}")
                 continue
                 
-            emitter.emit(hotpath, event, hot_path_event)
+            emitter.emit(f"hotpath-{hotpath}", event, hot_path_event)
 
     def process_schema(self, req: Any) -> Dict[str, Any]:
         try:
