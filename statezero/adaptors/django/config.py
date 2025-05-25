@@ -24,7 +24,6 @@ class DjangoLocalConfig(AppConfig):
         from statezero.adaptors.django.schemas import DjangoSchemaGenerator
         from statezero.adaptors.django.serializers import DRFDynamicSerializer
         from statezero.adaptors.django.search_providers.basic_search import BasicSearchProvider
-        from statezero.adaptors.django.models import ModelViewSubscription
         from statezero.core.event_bus import EventBus
 
         # Initialize serializer, schema generator, and ORM adapter.
@@ -33,7 +32,6 @@ class DjangoLocalConfig(AppConfig):
         self.orm_provider = DjangoORMAdapter()
         self.context_manager = query_timeout
         self.query_optimizer = DjangoQueryOptimizer
-        self.model_view_subscription = ModelViewSubscription
 
         # Instantiate emitters by injecting only the necessary functions.
         if hasattr(settings, 'STATEZERO_PUSHER'):
