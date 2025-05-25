@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 class StateZeroDjangoConfig(DjangoAppConfig):
     name = "statezero.adaptors.django"
     verbose_name = "StateZero Django Integration"
+    label = "statezero"
 
     def ready(self):
         # Import crud modules which register models in the registry.
