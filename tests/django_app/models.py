@@ -212,7 +212,19 @@ class Product(models.Model):
     
     class Meta:
         app_label = "django_app"
+        
+class FileTest(models.Model):
+    """Test model for file upload testing"""
+    title = models.CharField(max_length=100)
+    document = models.FileField(upload_to='test_documents/', blank=True, null=True)
+    image = models.ImageField(upload_to='test_images/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return self.title
 
+    class Meta:
+        app_label = "django_app"
 
 class Order(models.Model):
     order_number = models.CharField(max_length=20, unique=True)

@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Type, Union
 from django.apps import apps
 from django.db import models
 from djmoney.models.fields import MoneyField
+from django.conf import settings
 
 from statezero.adaptors.django.config import config, registry
 from statezero.core.classes import (FieldFormat, FieldType,
@@ -136,6 +137,9 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
             default_ordering=default_ordering,
             definitions=merged_definitions,
             class_name=model.__name__,
+            date_format=getattr(settings, 'REST_FRAMEWORK', {}).get('DATE_FORMAT', 'iso-8601'),
+            datetime_format=getattr(settings, 'REST_FRAMEWORK', {}).get('DATETIME_FORMAT', 'iso-8601'),
+            time_format=getattr(settings, 'REST_FRAMEWORK', {}).get('TIME_FORMAT', 'iso-8601')
         )
         return schema_meta
 

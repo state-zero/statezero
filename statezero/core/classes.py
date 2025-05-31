@@ -131,7 +131,11 @@ class ModelSchemaMetadata(BaseModel):
     default_ordering: Optional[List[str]] = None
     # Extra definitions (for schemas referenced via $ref) are merged in if provided.
     definitions: Dict[str, Any] = field(default_factory=dict)
-
+    
+    # Date / time formatting templates
+    datetime_format: Optional[str] = None
+    date_format: Optional[str] = None
+    time_format: Optional[str] = None
 
 @dataclass
 class ModelSummaryRepresentation:
