@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser
 from django.core.files.storage import default_storage
 from django.utils.module_loading import import_string
+from datetime import datetime
 
 from statezero.adaptors.django.config import config, registry
 from statezero.adaptors.django.exception_handler import \
@@ -118,12 +119,35 @@ class FileUploadView(APIView):
         if not file:
             return Response({'error': 'No file provided'}, status=400)
         
-        file_path = default_storage.save(file.name, file)
+        upload_dir = getattr(settings, 'STATEZERO_UPLOAD_DIR', 'statezero')
+        full_path = f"{upload_dir}/{file.name}"
+        
+        file_path = default_storage.save(full_path, file)
         file_url = default_storage.url(file_path)
         
-        return Response({
+        response_data = {
             'file_path': file_path,
             'file_url': file_url,
             'original_name': file.name,
             'size': file.size
-        })
+        }
+        
+        # Execute callbacks
+        self._execute_callbacks(request, file, file_path, response_data)
+        
+        return Response(response_data)
+    
+    def _execute_callbacks(self, request, uploaded_file, file_path, response_data):
+        """Execute configured file upload callbacks"""
+        if config.file_upload_callbacks:
+            for callback_path in config.file_upload_callbacks:
+                try:
+                    callback = import_string(callback_path)
+                    callback(
+                        request=request,
+                        uploaded_file=uploaded_file,
+                        file_path=file_path,
+                        response_data=response_data
+                    )
+                except Exception as e:
+                    logger.error(f"File upload callback failed: {e}")

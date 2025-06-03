@@ -40,6 +40,7 @@ class AppConfig(ABC):
 
     # Query optimizers
     query_optimizer: Optional[AbstractQueryOptimizer] = None
+    file_upload_callbacks: Optional[List[str]] = None
 
     def __init__(self) -> None:
         self._orm_provider: Optional[AbstractORMProvider] = None

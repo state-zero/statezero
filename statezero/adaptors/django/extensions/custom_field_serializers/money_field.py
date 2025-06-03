@@ -9,49 +9,6 @@ from rest_framework import serializers
 from statezero.core.classes import FieldFormat, FieldType, SchemaFieldMetadata
 from statezero.core.interfaces import AbstractSchemaOverride
 
-
-class MoneyFieldSerializer(serializers.Field):
-
-    def __init__(self, **kwargs):
-        # Define max_digits and decimal_places based on your requirements
-        self.max_digits = kwargs.pop("max_digits", 14)
-        self.decimal_places = kwargs.pop("decimal_places", 2)
-        super().__init__(**kwargs)
-
-    def to_representation(self, value):
-        # Use djmoney's representation for the amount
-        print("money field to representation called")
-        djmoney_field = MoneyField(
-            max_digits=self.max_digits, decimal_places=self.decimal_places
-        )
-        amount_representation = djmoney_field.to_representation(value)
-        return {"amount": amount_representation, "currency": value.currency.code}
-
-    def to_internal_value(self, data):
-        if not isinstance(data, dict):
-            raise serializers.ValidationError(
-                "Input value for moneyfield must be an object with amount and currency keys"
-            )
-        try:
-            amount = data["amount"]
-            currency = data["currency"]
-
-            # Ensure the amount is converted to a Decimal, whether it's a string or a number
-            if isinstance(amount, (str, float, int)):
-                amount = Decimal(amount)
-
-            return Money(amount, currency)
-        except KeyError:
-            raise serializers.ValidationError(
-                "Invalid input for MoneyField. Expecting 'amount' and 'currency'."
-            )
-        except InvalidOperation:
-            raise serializers.ValidationError(
-                "Invalid amount format. Must be a valid decimal number."
-            )
-
-
-# Custom serializer for MoneyField.
 class MoneyFieldSerializer(serializers.Field):
     def __init__(self, **kwargs):
         self.max_digits = kwargs.pop("max_digits", 14)

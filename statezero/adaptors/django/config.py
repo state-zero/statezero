@@ -8,6 +8,14 @@ import warnings
 from statezero.adaptors.django.query_optimizer import DjangoQueryOptimizer
 from statezero.adaptors.django.context_manager import query_timeout
 from statezero.core.config import AppConfig, Registry
+from django.db.models import FileField
+
+try:
+    from django.db.models import ImageField
+    image_field_available = True
+except ImportError:
+    ImageField = None
+    image_field_available = False
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +26,6 @@ class DjangoLocalConfig(AppConfig):
     def initialize(self):
         from statezero.adaptors.django.event_emitters import \
             DjangoPusherEventEmitter, DjangoConsoleEventEmitter
-        from statezero.adaptors.django.extensions.custom_field_serializers.money_field import (
-            MoneyFieldSchema, MoneyFieldSerializer)
         from statezero.adaptors.django.orm import DjangoORMAdapter
         from statezero.adaptors.django.schemas import DjangoSchemaGenerator
         from statezero.adaptors.django.serializers import DRFDynamicSerializer
@@ -48,21 +54,34 @@ class DjangoLocalConfig(AppConfig):
 
         # Setup the search provider
         self.search_provider = BasicSearchProvider()
+        
+        self.file_upload_callbacks = None
 
         # Explicitly register event signals after both components are configured.
         self.orm_provider.register_event_signals(self.event_bus)
+        
+        from statezero.adaptors.django.extensions.custom_field_serializers.file_fields import (
+            FileFieldSerializer, ImageFieldSerializer)
 
+        # Initialize custom serializers
+        self.custom_serializers = {
+            FileField: FileFieldSerializer
+        }
+        
+        if image_field_available:
+            self.custom_serializers[ImageField] = ImageFieldSerializer
+
+        # Try to register djmoney support
         try:
+            from statezero.adaptors.django.extensions.custom_field_serializers.money_field import (
+            MoneyFieldSchema, MoneyFieldSerializer)
             from djmoney.models.fields import MoneyField
-
-            self.custom_serializers = {
-                MoneyField: MoneyFieldSerializer,
-            }
+            self.custom_serializers[MoneyField] = MoneyFieldSerializer
             self.schema_overrides = {
                 MoneyField: MoneyFieldSchema,
             }
         except Exception:
-            pass
+            self.schema_overrides = {}
 
 
 # Create the singleton instances.

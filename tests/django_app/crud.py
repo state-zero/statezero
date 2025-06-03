@@ -6,7 +6,7 @@ from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      DummyRelatedModel,
                                      ModelWithCustomPKRelation,
                                      NameFilterCustomPKModel, Product,
-                                     ProductCategory, Order, OrderItem)
+                                     ProductCategory, Order, OrderItem, FileTest)
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
 from statezero.core.classes import AdditionalField
@@ -35,6 +35,14 @@ registry.register(
         ordering_fields={"value"},
         permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
+)
+
+registry.register(
+    FileTest,
+    ModelConfig(
+        model=FileTest,
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"]
+    )
 )
 
 # Register DeepModelLevel3
