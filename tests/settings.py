@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "tests.django_app",
     "statezero.adaptors.django",
     "corsheaders",
+    "storages",  # Add django-storages
 ]
 
 DATABASES = {
@@ -57,16 +58,8 @@ DATABASES = {
 # First, configure Django's cache
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',  # Fast in-memory cache
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
         'LOCATION': 'statezero-cache',
-    },
-    # For production with Redis:
-    'redis': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://localhost:6379/1',
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-        }
     }
 }
 
@@ -117,3 +110,36 @@ REST_FRAMEWORK = {
 DEFAULT_CURRENCY = "USD"
 
 ROOT_URLCONF = "tests.django_app.urls"
+
+# Django Storages Configuration for DigitalOcean Spaces
+AWS_ACCESS_KEY_ID = os.getenv('SPACES_ACCESS_KEY')
+AWS_SECRET_ACCESS_KEY = os.getenv('SPACES_SECRET_KEY')
+AWS_STORAGE_BUCKET_NAME = 'state-zero'
+AWS_S3_ENDPOINT_URL = 'https://fra1.digitaloceanspaces.com'
+AWS_S3_REGION_NAME = 'fra1'
+
+# Security settings
+AWS_DEFAULT_ACL = 'private'
+AWS_S3_OBJECT_PARAMETERS = {
+    'CacheControl': 'max-age=86400'
+}
+
+STATEZERO_STORAGE_KEY = 'default'
+
+# File storage settings
+AWS_S3_FILE_OVERWRITE = False
+AWS_QUERYSTRING_AUTH = True
+AWS_QUERYSTRING_EXPIRE = 3600 
+
+# Media files configuration
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+MEDIA_URL = 'https://state-zero.fra1.digitaloceanspaces.com/'
+
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
