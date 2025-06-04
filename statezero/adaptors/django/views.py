@@ -9,6 +9,11 @@ from rest_framework.parsers import MultiPartParser
 from django.core.files.storage import storages
 from django.utils.module_loading import import_string
 from datetime import datetime
+from django.conf import settings
+from django.core.files.storage import default_storage
+import math
+import mimetypes
+import boto3
 
 from statezero.adaptors.django.config import config, registry
 from statezero.adaptors.django.exception_handler import \
@@ -152,17 +157,6 @@ class FileUploadView(APIView):
                     )
                 except Exception as e:
                     logger.error(f"File upload callback failed: {e}")
-                    
-import math
-import mimetypes
-import boto3
-from django.conf import settings
-from django.core.files.storage import default_storage
-from rest_framework.views import APIView
-from rest_framework.response import Response
-import logging
-
-logger = logging.getLogger(__name__)
 
 class FastUploadView(APIView):
     """Fast upload with S3 presigned URLs - single or multipart based on chunks"""
