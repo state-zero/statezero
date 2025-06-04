@@ -13,7 +13,6 @@ from django.conf import settings
 from django.core.files.storage import default_storage
 import math
 import mimetypes
-import boto3
 
 from statezero.adaptors.django.config import config, registry
 from statezero.adaptors.django.exception_handler import \
@@ -316,6 +315,7 @@ class FastUploadView(APIView):
     
     def _get_s3_client(self):
         """Get S3 client"""
+        import boto3
         return boto3.client(
             's3',
             region_name=settings.AWS_S3_REGION_NAME,
