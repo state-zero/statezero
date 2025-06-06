@@ -2,6 +2,7 @@ from rest_framework import fields
 from rest_framework.fields import empty
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.storage import default_storage
+import os
 
 image_fields_supported = False
 try:
@@ -28,26 +29,45 @@ class FileFieldSerializer(fields.FileField):
         self.max_length = kwargs.pop('max_length', None)
         self.allow_empty_file = kwargs.pop('allow_empty_file', False)
         super().__init__(**kwargs)
+    
+    def to_representation(self, value):
+        if not value:
+            return None
+        url = super().to_representation(value)
+        
+        return {
+            'file_path': value.name,
+            'file_name': os.path.basename(value.name),
+            'file_url': url,
+            'size': value.size
+        }
 
     def to_internal_value(self, data):
         if data is empty:
             return None
-
-        if not isinstance(data, str):
+        
+        if isinstance(data, dict) and 'file_path' in data:
+            file_path = data.get('file_path')
+        elif isinstance(data, str):
+            file_path = data
+        else:
+            self.fail('invalid')
+        
+        if not isinstance(file_path, str):
             self.fail('invalid')
 
-        if not data:
+        if not file_path:
             if self.allow_empty_file:
-                return data
+                return file_path
             self.fail('empty')
 
-        if self.max_length is not None and len(data) > self.max_length:
-            self.fail('max_length', max_length=self.max_length, length=len(data))
+        if self.max_length is not None and len(file_path) > self.max_length:
+            self.fail('max_length', max_length=self.max_length, length=len(file_path))
 
-        if not default_storage.exists(data):
+        if not default_storage.exists(file_path):
             self.fail('file_not_found')
 
-        return data
+        return file_path
 
 class ImageFieldSerializer(fields.ImageField):
     """
@@ -62,30 +82,49 @@ class ImageFieldSerializer(fields.ImageField):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        
+    def to_representation(self, value):
+        if not value:
+            return None
+        url = super().to_representation(value)
+        
+        return {
+            'file_path': value.name,
+            'file_name': os.path.basename(value.name),
+            'file_url': url,
+            'size': value.size
+        }
 
     def to_internal_value(self, data):
         # File path validation logic
         if data is empty:
             return None
-
-        if not isinstance(data, str):
+        
+        if isinstance(data, dict) and 'file_path' in data:
+            file_path = data.get('file_path')
+        elif isinstance(data, str):
+            file_path = data
+        else:
             self.fail('invalid')
 
-        if not data:
+        if not isinstance(file_path, str):
+            self.fail('invalid')
+
+        if not file_path:
             if self.allow_empty_file:
-                return data
+                return file_path
             self.fail('empty')
 
-        if self.max_length is not None and len(data) > self.max_length:
-            self.fail('max_length', max_length=self.max_length, length=len(data))
+        if self.max_length is not None and len(file_path) > self.max_length:
+            self.fail('max_length', max_length=self.max_length, length=len(file_path))
 
-        if not default_storage.exists(data):
+        if not default_storage.exists(file_path):
             self.fail('file_not_found')
 
         # Image validation logic
         if image_fields_supported:
             try:
-                with default_storage.open(data, 'rb') as f:
+                with default_storage.open(file_path, 'rb') as f:
                     image = Image.open(f)
                     image.verify()
                     
@@ -96,4 +135,4 @@ class ImageFieldSerializer(fields.ImageField):
             except Exception:
                 self.fail('invalid_image')
 
-        return data
+        return file_path
