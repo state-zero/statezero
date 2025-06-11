@@ -266,9 +266,6 @@ class FastUploadView(APIView):
         upload_id = request.data.get('upload_id')  # Only present for multipart
         parts = request.data.get('parts', [])  # Only present for multipart
         
-        print("_complete_upload request data:")
-        print(request.data)
-        
         if not file_path:
             return Response({'error': 'file_path required'}, status=400)
         

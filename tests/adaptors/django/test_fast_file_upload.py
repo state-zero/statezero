@@ -121,9 +121,9 @@ class FastUploadViewTests(APITestCase):
     def test_multipart_upload_complete_flow(self):
         """Test complete multipart upload flow with actual S3 upload"""
         # Create test content for multiple parts
-        part1_content = b'A' * 5242880  # 5MB
-        part2_content = b'B' * 5242880  # 5MB
-        part3_content = b'C' * 1048576  # 1MB
+        part1_content = b'A' * (5 * 1024 * 1024)  # 5MB
+        part2_content = b'B' * (5 * 1024 * 1024)  # 5MB  
+        part3_content = b'C' * (1 * 1024 * 1024)  # 1MB (last part can be smaller)
         total_size = len(part1_content) + len(part2_content) + len(part3_content)
         
         # Step 1: Initiate multipart upload
@@ -164,13 +164,17 @@ class FastUploadViewTests(APITestCase):
             })
         
         # Step 3: Complete multipart upload
-        complete_response = self.client.post(self.fast_upload_url, {
-            'action': 'complete',
-            'file_path': upload_data['file_path'],
-            'original_name': 'multipart-test.bin',
-            'upload_id': upload_data['upload_id'],
-            'parts': parts_info
-        })
+        complete_response = self.client.post(
+            self.fast_upload_url, 
+            data=json.dumps({
+                'action': 'complete',
+                'file_path': upload_data['file_path'],
+                'original_name': 'large-model-test.bin',
+                'upload_id': upload_data['upload_id'],
+                'parts': parts_info
+            }),
+            content_type='application/json'
+        )
         
         self.assertEqual(complete_response.status_code, status.HTTP_200_OK)
         self.assertEqual(complete_response.data['file_path'], upload_data['file_path'])
@@ -440,8 +444,8 @@ class FastUploadIntegrationWithModelTests(APITestCase):
     def test_large_multipart_upload_with_model(self):
         """Test large file multipart upload integration with model"""
         # Create larger content requiring multipart upload
-        part1_content = b'PART1-' + b'A' * 1048570  # ~1MB
-        part2_content = b'PART2-' + b'B' * 1048570  # ~1MB
+        part1_content = b'PART1-' + b'A' * (5 * 1024 * 1024 - 6)  # 5MB
+        part2_content = b'PART2-' + b'B' * (5 * 1024 * 1024 - 6)  # 5MB
         total_size = len(part1_content) + len(part2_content)
         
         # Initiate multipart upload
@@ -478,13 +482,17 @@ class FastUploadIntegrationWithModelTests(APITestCase):
             })
         
         # Complete upload
-        complete_response = self.client.post(self.fast_upload_url, {
-            'action': 'complete',
-            'file_path': upload_data['file_path'],
-            'original_name': 'large-model-test.bin',
-            'upload_id': upload_data['upload_id'],
-            'parts': parts_info
-        })
+        complete_response = self.client.post(
+            self.fast_upload_url, 
+            data=json.dumps({
+                'action': 'complete',
+                'file_path': upload_data['file_path'],
+                'original_name': 'large-model-test.bin',
+                'upload_id': upload_data['upload_id'],
+                'parts': parts_info
+            }),
+            content_type='application/json'
+        )
         
         self.assertEqual(complete_response.status_code, status.HTTP_200_OK)
         
