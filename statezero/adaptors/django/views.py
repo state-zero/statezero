@@ -5,6 +5,7 @@ from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework import serializers
 from rest_framework.parsers import MultiPartParser
 from django.core.files.storage import storages
 from django.utils.module_loading import import_string
@@ -176,7 +177,8 @@ class FastUploadView(APIView):
         filename = request.data.get('filename')
         content_type = request.data.get('content_type')
         file_size = request.data.get('file_size', 0)
-        num_chunks = request.data.get('num_chunks', 1)  # Client decides chunking
+        num_chunks_str = request.data.get('num_chunks', 1)  # Client decides chunking
+        num_chunks = int(num_chunks_str)
         
         if not filename:
             return Response({'error': 'filename required'}, status=400)
@@ -263,6 +265,9 @@ class FastUploadView(APIView):
         original_name = request.data.get('original_name')
         upload_id = request.data.get('upload_id')  # Only present for multipart
         parts = request.data.get('parts', [])  # Only present for multipart
+        
+        print("_complete_upload request data:")
+        print(request.data)
         
         if not file_path:
             return Response({'error': 'file_path required'}, status=400)
