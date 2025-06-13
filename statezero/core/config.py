@@ -154,23 +154,14 @@ class ModelConfig:
         Functions to run after serialization/deserialization
     additional_fields: List[AdditionalField], optional
         Additional computed fields to add to the model schema
-    cache_ttl: Optional[int], default=None
-        Time-to-live in seconds for cache entries. If None, uses the default TTL
-        from the cache backend. If 0, caching is disabled for this model.
-    anonymous_read_allowed: bool, default=False
-        Whether unauthenticated users can read this model
-    filterable_fields: Set[str], optional
+    filterable_fields: Optional[Union[Set[str], Literal["__all__"]]], optional
         Fields that can be used in filter queries
-    searchable_fields: Set[str], optional
+    searchable_fields: Optional[Union[Set[str], Literal["__all__"]]], optional
         Fields that can be used in search queries
-    ordering_fields: Set[str], optional
+    ordering_fields: Optional[Union[Set[str], Literal["__all__"]]], optional
         Fields that can be used for ordering
-    fields: Optional[Set[str]]
+    fields: Optional[Optional[Union[Set[str], Literal["__all__"]]]]
         Expose just a subset of the model fields
-    partition_fields: Optional[Set[str]], default=None
-        List of field names to use for partitioning events. When set, events will be
-        broadcast to partition-specific channels in addition to the main model channel.
-        Example: partition_fields=['user_id'] creates channels like 'model-user::123'
     DEBUG: bool, default=False
         Enable debug mode for this model
     """
@@ -184,13 +175,10 @@ class ModelConfig:
         pre_hooks: Optional[List] = None,
         post_hooks: Optional[List] = None,
         additional_fields: Optional[List[AdditionalField]] = None,
-        cache_ttl: Optional[int] = None,
-        anonymous_read_allowed: bool = False,
-        filterable_fields: Optional[Set[str]] = None,
-        searchable_fields: Optional[Set[str]] = None,
-        ordering_fields: Optional[Set[str]] = None,
-        fields: Optional[Set[str]] = None,
-        partition_fields: Optional[Set[str]] = None,
+        filterable_fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
+        searchable_fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
+        ordering_fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
+        fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
         DEBUG: bool = False,
     ):
         self.model = model
@@ -200,13 +188,10 @@ class ModelConfig:
         self.pre_hooks = pre_hooks or []
         self.post_hooks = post_hooks or []
         self.additional_fields = additional_fields or []
-        self.cache_ttl = cache_ttl
-        self.anonymous_read_allowed = anonymous_read_allowed
         self.filterable_fields = filterable_fields or set()
         self.searchable_fields = searchable_fields or set()
         self.ordering_fields = ordering_fields or set()
         self.fields = fields or "__all__"
-        self.partition_fields = partition_fields or set()
         self.DEBUG = DEBUG or False
 
     @property

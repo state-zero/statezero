@@ -719,7 +719,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         Return a set of the model fields.
         """
         model_config = registry.get_config(model)
-        if model_config.fields and "__all__" not in model_config.fields:
+        if model_config.fields and "__all__" != model_config.fields:
             resolved_fields = model_config.fields
         else:
             resolved_fields = set((field.name for field in model._meta.get_fields()))
