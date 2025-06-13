@@ -12,21 +12,7 @@ authors = [
     { name = "Robert Herring", email = "robert.herring@statezero.dev" }
 ]
 requires-python = ">=3.10"
-dependencies = [
-    "django_money==3.4.1",
-    "djangorestframework==3.15.2",
-    "fakeredis==2.27.0",
-    "fastapi==0.115.11",
-    "hypothesis==6.108.5",
-    "jsonschema==4.23.0",
-    "networkx==3.4.2",
-    "openapi_spec_validator==0.7.1",
-    "orjson==3.10.15",
-    "pusher==3.3.0",
-    "pydantic==2.10.6",
-    "rich==13.9.4",
-    "Django==5.1.6"
-]
+dynamic = ["dependencies"]
 
 [project.urls]
 homepage = "https://www.statezero.dev"
@@ -35,3 +21,6 @@ repository = "https://github.com/state-zero/statezero"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["statezero", "statezero.*"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
