@@ -20,7 +20,7 @@ _Last Updated: 2025-06-29_
 
   2.2. **License Philosophy**: If SaaS is like renting and open-source is like owning, our license is like a **999-year leasehold on fixed rent**. It provides the security you need to build and grow your company around StateZero, while allowing us to maintain and develop StateZero to a high standard.
 
-  2.3. **Rate Lock Guarantee**: You lock in the **full rate card for all tiers** at the time you sign up, meaning your fees remain predictable no matter how much your revenue or our pricing changes. To lock in your rates, simply contact us at **robert.herring@resipilot.com**.
+  2.3. **Rate Lock Guarantee**: You lock in the **full rate card for all tiers** at the time you sign up, meaning your fees remain predictable no matter how much your revenue or our pricing changes. To lock in your rates, simply contact us at **robert@statezero.dev**.
 
 ## **3. Pricing Structure**
 
@@ -55,7 +55,7 @@ _Last Updated: 2025-06-29_
 
 5.2. **LLM Training License Fee**: The annual license fee for LLM training usage is **$250,000 per year**.
 
-5.3. **Contact for LLM License**: Organizations requiring LLM training rights must contact **Airhome Sp Zoo** at **robert.herring@resipilot.com** to arrange a separate licensing agreement.
+5.3. **Contact for LLM License**: Organizations requiring LLM training rights must contact **Airhome Sp Zoo** at **robert@statezero.dev** to arrange a separate licensing agreement.
 
 ## **6. Restrictions**
 
@@ -75,7 +75,7 @@ _Last Updated: 2025-06-29_
 
 7.2. **Revenue Tier Reporting**: You are responsible for accurately reporting your revenue tier and upgrading to the appropriate pricing tier when revenue thresholds are exceeded.
 
-7.3. **Rate Lock Process**: To lock in current pricing for all tiers, contact us at **robert.herring@resipilot.com**.
+7.3. **Rate Lock Process**: To lock in current pricing for all tiers, contact us at **robert@statezero.dev**.
 
 ## **8. Disclaimer of Warranty**
 
@@ -109,8 +109,8 @@ _Last Updated: 2025-06-29_
 
 ## **12. Contact Information**
 
-12.1. For general inquiries and rate lock requests, contact **Airhome Sp Zoo** at **robert.herring@resipilot.com**.
-12.2. For LLM training license inquiries, contact **Airhome Sp Zoo** at **robert.herring@resipilot.com**.
+12.1. For general inquiries and rate lock requests, contact **Airhome Sp Zoo** at **robert@statezero.dev**.
+12.2. For LLM training license inquiries, contact **Airhome Sp Zoo** at **robert@statezero.dev**.
 
 ---
 

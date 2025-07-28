@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "statezero"
-version = "0.1.0-beta"
+version = "0.1.0b1"
 description = "A short description of your package"
 readme = "README.md"
 license = { file = "LICENSE" }
