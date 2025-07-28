@@ -1,0 +1,39 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Django stuff:
+*.log
+*.pot
+*.pyc
+__pycache__/
+db.sqlite3
+test_db.sqlite3-journal
+
+# Hypothesis
+.hypothesis/
+
+# If you have a local SQLite DB file, ignore it:
+*.sqlite3
+
+# Django migration files (if you don't want to commit them, though usually these are versioned)
+*/migrations/*.pyc
+*/migrations/__pycache__/
+
+# Environment variables
+.env
+*.env
+
+# Virtual environment
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# Editor files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace

@@ -1,0 +1,14 @@
+from django.urls import path
+
+from .views import EventsAuthView, ModelListView, ModelView, SchemaView, FileUploadView, FastUploadView
+
+app_name = "statezero"
+
+urlpatterns = [
+    path("events/auth/", EventsAuthView.as_view(), name="events_auth"),
+    path("models/", ModelListView.as_view(), name="model_list"),
+    path("files/upload/", FileUploadView.as_view(), name="file_upload"),
+    path("files/fast-upload/", FastUploadView.as_view(), name="fast_file_upload"),
+    path("<str:model_name>/", ModelView.as_view(), name="model_view"),
+    path("<str:model_name>/get-schema/", SchemaView.as_view(), name="schema_view")
+]
