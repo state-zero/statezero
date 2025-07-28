@@ -179,14 +179,14 @@ const workTodos = Todo.objects.filter({
 ### Backend
 
 ```bash
-pip install git+https://github.com/state-zero/statezero
+pip install statezero
 pip install django-cors-headers pusher
 ```
 
 ### Frontend
 
 ```bash
-npm install https://github.com/state-zero/statezero-client
+npm i @statezero/core
 ```
 
 ### Generate TypeScript Models
@@ -205,6 +205,12 @@ npx statezero sync-models
 
 **🆚 Traditional REST APIs:** Write 90% less boilerplate. Focus on features, not data plumbing.
 
+## Get Started
+
+Check out the docs at [Statezero Docs](https://statezero.dev)
+
+Run `pip install statezero` and `npm i @statezero/core` to begin.
+
 ## Pricing
 
 StateZero uses a no-rugpull license model:
@@ -216,7 +222,3 @@ StateZero uses a no-rugpull license model:
 - **$1,000/month** for companies with revenue above $100M
 
 Lock in your rate forever by signing up early. We can't change your fee or cancel your license.
-
-## Get Started
-
-Run `pip install git+https://github.com/state-zero/statezero` and `npm install https://github.com/state-zero/statezero-client` to begin.

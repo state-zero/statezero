@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "statezero"
-version = "0.1.0b1"
-description = "A short description of your package"
+version = "0.1.0b2"
+description = "Connect your Python backend to a modern JavaScript SPA frontend with 90% less complexity."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
-    { name = "Robert Herring", email = "robert.herring@statezero.dev" }
+    { name = "Robert", email = "robert.herring@statezero.dev" }
 ]
 requires-python = ">=3.10"
 dynamic = ["dependencies"]
