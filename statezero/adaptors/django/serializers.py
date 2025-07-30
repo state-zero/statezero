@@ -13,6 +13,7 @@ from statezero.adaptors.django.config import config, registry
 from statezero.core.interfaces import AbstractDataSerializer, AbstractQueryOptimizer
 from statezero.core.types import RequestType
 from statezero.adaptors.django.helpers import collect_from_queryset
+from statezero.core.hook_checks import _check_pre_hook_result, _check_post_hook_result
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class FlexiblePrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
         
         # Otherwise, use the standard to_internal_value
         return super().to_internal_value(data)
-    
+
 class FExpressionMixin:
     """
     A mixin that can handle F expression objects in serializer write operations.
@@ -344,7 +345,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                     fields_per_model=fields_map,
                     get_model_name_func=config.orm_provider.get_model_name,
                 )
-                
+
                 if "requested-fields::" in fields_map:
                     requested_fields = fields_map["requested-fields::"]
                     data = query_optimizer.optimize(
@@ -359,7 +360,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                     logger.debug(f"Query optimized for {model.__name__} with no explicit field selection")
             except Exception as e:
                 logger.error(f"Error optimizing query for {model.__name__}: {e}")
-        
+
         return data
 
     def serialize(
@@ -385,7 +386,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         """
         # Validate fields_map
         assert fields_map is not None, "fields_map is required and cannot be None"
-        
+
         # Handle None data
         if data is None:
             return {
@@ -393,10 +394,10 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 "included": {},
                 "model_name": None
             }
-        
+
         # Apply query optimization
         data = self._optimize_queryset(data, model, fields_map)
-        
+
         # Use the fields_map context for all operations
         with fields_map_context(fields_map):
             # Collect all model instances based on the fields_map
@@ -406,7 +407,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 get_model_name=config.orm_provider.get_model_name,
                 get_model=config.orm_provider.get_model_by_name
             )
-            
+
             # Extract primary keys for the top-level model
             model_name = config.orm_provider.get_model_name(model)
             pk_field = model._meta.pk.name
@@ -418,7 +419,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 "included": {},
                 "model_name": model_name
             }
-            
+
             # For QuerySets, gather all instances
             if isinstance(data, models.QuerySet):
                 top_level_instances = list(data)
@@ -428,26 +429,26 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             # For many=True with a list of instances
             elif many and isinstance(data, list):
                 top_level_instances = [item for item in data if isinstance(item, model)]
-            
+
             # Extract primary keys for top-level instances
             result["data"] = [getattr(instance, pk_field) for instance in top_level_instances]
-            
+
             # Apply zen-queries protection if configured
             query_protection = getattr(settings, 'ZEN_STRICT_SERIALIZATION', False)
-            
+
             # Serialize each group of models
             for model_type, instances in collected_models.items():
                 # Skip empty collections
                 if not instances:
                     continue
-                
+
                 try:
                     # Get the model class for this type
                     model_class = config.orm_provider.get_model_by_name(model_type)
-                    
+
                     # Create a serializer for this model type
                     serializer_class = DynamicModelSerializer.for_model(model_class)
-                    
+
                     # Apply zen-queries protection if configured
                     if query_protection:
                         with queries_disabled():
@@ -461,15 +462,15 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                     # [{pk: 1, ...}, {pk: 2, ...}] -> {1: {...}, 2: {...}}
                     # Create a dictionary indexed by primary key for easy lookup in the frontend
                     pk_indexed_data = dict(zip(pluck(pk_field_name, serialized_data), serialized_data))
-                    
+
                     # Add the serialized data to the result
                     result["included"][model_type] = pk_indexed_data
-                    
+
                 except Exception as e:
                     logger.error(f"Error serializing {model_type}: {e}")
                     # Include an empty list for this model type to maintain the expected structure
                     result["included"][model_type] = {}
-            
+
             return result
 
     def deserialize(
@@ -487,12 +488,22 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         with fields_map_context(fields_map):
             # Create serializer class
             serializer_class = DynamicModelSerializer.for_model(model)
+            available_fields = set(serializer_class().fields.keys())
 
             try:
                 model_config = registry.get_config(model)
                 if model_config.pre_hooks:
                     for hook in model_config.pre_hooks:
-                        data = hook(data, request=request)
+                        hook_result = hook(data, request=request)
+                        if settings.DEBUG:
+                            data = _check_pre_hook_result(
+                                original_data=data,
+                                result_data=hook_result,
+                                model=model,
+                                serializer_fields=available_fields
+                            )
+                        else:
+                            data = hook_result or data
             except ValueError:
                 # No model config available
                 model_config = None
@@ -508,10 +519,18 @@ class DRFDynamicSerializer(AbstractDataSerializer):
 
             if model_config and model_config.post_hooks:
                 for hook in model_config.post_hooks:
-                    validated_data = hook(validated_data, request=request)
-                    
+                    hook_result = hook(validated_data, request=request)
+                    if settings.DEBUG:
+                        validated_data = _check_post_hook_result(
+                            original_data=validated_data,
+                            result_data=hook_result,
+                            model=model
+                        )
+                    else:
+                        validated_data = hook_result or validated_data
+
             return validated_data
-    
+
     def save(
         self, 
         model: Type[models.Model], 
@@ -533,12 +552,12 @@ class DRFDynamicSerializer(AbstractDataSerializer):
 
         # Create an unrestricted fields map
         unrestricted_fields_map = {model_name: all_fields}
-        
+
         # Use the context manager with the unrestricted fields map
         with fields_map_context(unrestricted_fields_map):
             # Create serializer class
             serializer_class = DynamicModelSerializer.for_model(model)
-            
+
             # Create serializer
             serializer = serializer_class(
                 instance=instance,  # Will be None for creation
@@ -546,9 +565,9 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 partial=partial if instance else False,  # partial only makes sense for updates
                 request=request
             )
-            
+
             # Validate the data
             serializer.is_valid(raise_exception=True)
-            
+
             # Save and return the instance
             return serializer.save()
