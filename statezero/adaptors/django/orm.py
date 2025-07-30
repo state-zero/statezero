@@ -681,16 +681,16 @@ class DjangoORMAdapter(AbstractORMProvider):
         """
         offset = offset or 0
 
-        # First, get the paginated queryset
+        # FIXED: Perform bulk permission checks BEFORE slicing
+        if req is not None and permissions:
+            # Use the existing bulk permission check function on the unsliced queryset
+            check_bulk_permissions(req, self.queryset, ActionType.READ, permissions, self.model)
+
+        # THEN apply pagination/slicing
         if limit is None:
             qs = self.queryset[offset:]
         else:
             qs = self.queryset[offset : offset + limit]
-
-        # If permissions are provided, perform bulk permission checks
-        if req is not None and permissions:
-            # Use the existing bulk permission check function
-            check_bulk_permissions(req, qs, ActionType.READ, permissions, self.model)
 
         return qs
 
