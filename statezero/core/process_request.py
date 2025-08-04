@@ -170,13 +170,13 @@ class RequestProcessor:
                 )
 
         # Create and use the AST parser directly, instead of delegating to ORM provider
-        self.orm_provider.set_queryset(base_queryset)
         parser = ASTParser(
             engine=self.orm_provider,
             serializer=self.data_serializer,
             model=model,
             config=self.config,
             registry=self.registry,
+            base_queryset=base_queryset,  # Pass the queryset here
             serializer_options=serializer_options or {},
             request=req,
         )

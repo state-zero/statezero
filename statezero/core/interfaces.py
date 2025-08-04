@@ -1,104 +1,126 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, Literal, Protocol
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    Union,
+    Literal,
+    Protocol,
+)
 
 from statezero.core.classes import ModelSchemaMetadata, SchemaFieldMetadata
-from statezero.core.types import (ActionType, ORMField, ORMModel, ORMQuerySet, RequestType)
+from statezero.core.types import (
+    ActionType,
+    ORMField,
+    ORMModel,
+    ORMQuerySet,
+    RequestType,
+)
+
 
 class AbstractORMProvider(ABC):
     """
     A merged ORM engine interface that combines both query building (filtering,
     ordering, aggregation, etc.) and ORM provider responsibilities (queryset assembly,
     event signal registration, model graph construction, etc.).
+
+    UPDATED: All query manipulation methods now take queryset parameters and return
+    new querysets instead of mutating internal state.
     """
 
-    # === Query Engine Methods ===
+    # === Query Engine Methods (UPDATED: Now stateless) ===
 
     @abstractmethod
-    def get_fields(self) -> Set[str]:
+    def get_fields(self, model: ORMModel) -> Set[str]:
         """
         Get all of the model fields - doesn't apply permissions check.
         """
         pass
 
     @abstractmethod
-    def filter_node(self, node: Dict[str, Any]) -> None:
+    def filter_node(self, queryset: ORMQuerySet, node: Dict[str, Any]) -> ORMQuerySet:
         """
-        Apply filter/and/or/not logic to the current query.
-        """
-        pass
-
-    @abstractmethod
-    def search_node(self, search_query: str, search_fields: Set[str]) -> None:
-        """
-        Apply search to the current query.
+        Apply filter/and/or/not logic to the queryset and return new queryset.
         """
         pass
 
     @abstractmethod
-    def create(self, data: Dict[str, Any]) -> Any:
-        """Create a new record."""
-        pass
-
-    @abstractmethod
-    def update(self, node: Dict[str, Any]) -> int:
+    def search_node(
+        self, queryset: ORMQuerySet, search_query: str, search_fields: Set[str]
+    ) -> ORMQuerySet:
         """
-        Update records (by filter or primary key).
-        Returns the number of rows updated.
+        Apply search to the queryset and return new queryset.
         """
         pass
 
     @abstractmethod
-    def delete(self, node: Dict[str, Any]) -> int:
+    def exclude_node(self, queryset: ORMQuerySet, node: Dict[str, Any]) -> ORMQuerySet:
         """
-        Delete records (by filter or primary key).
-        Returns the number of rows deleted.
-        """
-        pass
-
-    @abstractmethod
-    def get(self, node: Dict[str, Any]) -> Any:
-        """
-        Retrieve a single record. Raises an error if multiple or none are found.
+        Apply exclude logic to the queryset and return new queryset.
         """
         pass
 
     @abstractmethod
-    def get_or_create(self, node: Dict[str, Any]) -> Tuple[Any, bool]:
+    def order_by(self, queryset: ORMQuerySet, order_list: List[str]) -> ORMQuerySet:
         """
-        Retrieve a record if it exists, otherwise create it.
-        Returns a tuple of (instance, created_flag).
-        """
-        pass
-
-    @abstractmethod
-    def update_or_create(self, node: Dict[str, Any]) -> Tuple[Any, bool]:
-        """
-        Update a record if it exists or create it if it doesn't.
-        Returns a tuple of (instance, created_flag).
+        Order the queryset based on a list of fields and return new queryset.
         """
         pass
 
     @abstractmethod
-    def first(self) -> Any:
-        """Return the first record from the current query."""
-        pass
-
-    @abstractmethod
-    def last(self) -> Any:
-        """Return the last record from the current query."""
-        pass
-
-    @abstractmethod
-    def exists(self) -> bool:
-        """Return True if the current query has any results; otherwise False."""
-        pass
-
-    @abstractmethod
-    def aggregate(self, agg_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def select_related(
+        self, queryset: ORMQuerySet, related_fields: List[str]
+    ) -> ORMQuerySet:
         """
-        Aggregate the current query based on the provided functions.
+        Optimize the queryset by eager loading the given related fields and return new queryset.
+        """
+        pass
+
+    @abstractmethod
+    def prefetch_related(
+        self, queryset: ORMQuerySet, related_fields: List[str]
+    ) -> ORMQuerySet:
+        """
+        Optimize the queryset by prefetching the given related fields and return new queryset.
+        """
+        pass
+
+    @abstractmethod
+    def select_fields(self, queryset: ORMQuerySet, fields: List[str]) -> ORMQuerySet:
+        """
+        Select only specific fields from the queryset and return new queryset.
+        """
+        pass
+
+    @abstractmethod
+    def fetch_list(
+        self,
+        queryset: ORMQuerySet,
+        offset: Optional[int] = None,
+        limit: Optional[int] = None,
+        req: Optional[RequestType] = None,
+        permissions: Optional[List[Type]] = None,
+    ) -> ORMQuerySet:
+        """
+        Return a sliced queryset based on pagination with permission checks.
+        """
+        pass
+
+    # === Aggregate Methods (UPDATED: Take queryset parameter) ===
+
+    @abstractmethod
+    def aggregate(
+        self, queryset: ORMQuerySet, agg_list: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Aggregate the queryset based on the provided functions.
         Example:
           [
             {'function': 'count', 'field': 'id', 'alias': 'id_count'},
@@ -108,60 +130,155 @@ class AbstractORMProvider(ABC):
         pass
 
     @abstractmethod
-    def count(self, field: str) -> int:
+    def count(self, queryset: ORMQuerySet, field: str) -> int:
         """Count the number of records for the given field."""
         pass
 
     @abstractmethod
-    def sum(self, field: str) -> Any:
+    def sum(self, queryset: ORMQuerySet, field: str) -> Any:
         """Sum the values of the given field."""
         pass
 
     @abstractmethod
-    def avg(self, field: str) -> Any:
+    def avg(self, queryset: ORMQuerySet, field: str) -> Any:
         """Calculate the average of the given field."""
         pass
 
     @abstractmethod
-    def min(self, field: str) -> Any:
+    def min(self, queryset: ORMQuerySet, field: str) -> Any:
         """Find the minimum value for the given field."""
         pass
 
     @abstractmethod
-    def max(self, field: str) -> Any:
+    def max(self, queryset: ORMQuerySet, field: str) -> Any:
         """Find the maximum value for the given field."""
         pass
 
     @abstractmethod
-    def order_by(self, order_list: List[Dict[str, str]]) -> None:
+    def first(self, queryset: ORMQuerySet) -> Any:
+        """Return the first record from the queryset."""
+        pass
+
+    @abstractmethod
+    def last(self, queryset: ORMQuerySet) -> Any:
+        """Return the last record from the queryset."""
+        pass
+
+    @abstractmethod
+    def exists(self, queryset: ORMQuerySet) -> bool:
+        """Return True if the queryset has any results; otherwise False."""
+        pass
+
+    # === CRUD Methods (UPDATED: Take model or queryset parameters explicitly) ===
+
+    @abstractmethod
+    def create(
+        self, model: Type[ORMModel], data: Dict[str, Any], *args, **kwargs
+    ) -> Any:
+        """Create a new record using the model class."""
+        pass
+
+    @abstractmethod
+    def update(
+        self,
+        queryset: ORMQuerySet,
+        node: Dict[str, Any],
+        req: RequestType,
+        permissions: List[Type],
+        readable_fields: Optional[Set[str]] = None,
+    ) -> Tuple[int, List[Any]]:
         """
-        Order the query based on a list of fields.
-        Each dict should contain 'field' and optionally 'direction' ('asc' or 'desc').
+        Update records in the queryset.
+        Returns tuple of (number of rows updated, updated instances).
         """
         pass
 
     @abstractmethod
-    def select_related(self, related_fields: List[str]) -> None:
+    def delete(
+        self,
+        queryset: ORMQuerySet,
+        node: Dict[str, Any],
+        req: RequestType,
+        permissions: List[Type],
+    ) -> Tuple[int, Any]:
         """
-        Optimize the query by eager loading the given related fields.
+        Delete records in the queryset.
+        Returns tuple of (number of rows deleted, deleted instance data).
         """
         pass
 
     @abstractmethod
-    def prefetch_related(self, related_fields: List[str]) -> None:
+    def get(
+        self,
+        queryset: ORMQuerySet,
+        node: Dict[str, Any],
+        req: RequestType,
+        permissions: List[Type],
+    ) -> Any:
         """
-        Optimize the query by prefetching the given related fields.
+        Retrieve a single record from the queryset.
+        Raises an error if multiple or none are found.
         """
         pass
 
     @abstractmethod
-    def fetch_list(self, offset: int, limit: int) -> List[Any]:
+    def get_or_create(
+        self,
+        queryset: ORMQuerySet,
+        node: Dict[str, Any],
+        serializer: Any,
+        req: RequestType,
+        permissions: List[Type],
+        create_fields_map: Dict[str, Set[str]],
+    ) -> Tuple[Any, bool]:
         """
-        Return a list of records (as dicts or objects) based on pagination.
+        Retrieve a record if it exists, otherwise create it.
+        Returns a tuple of (instance, created_flag).
         """
         pass
 
-    # === ORM Provider Methods ===
+    @abstractmethod
+    def update_or_create(
+        self,
+        queryset: ORMQuerySet,
+        node: Dict[str, Any],
+        req: RequestType,
+        serializer: Any,
+        permissions: List[Type],
+        update_fields_map: Dict[str, Set[str]],
+        create_fields_map: Dict[str, Set[str]],
+    ) -> Tuple[Any, bool]:
+        """
+        Update a record if it exists or create it if it doesn't.
+        Returns a tuple of (instance, created_flag).
+        """
+        pass
+
+    @abstractmethod
+    def update_instance(
+        self,
+        model: Type[ORMModel],
+        ast: Dict[str, Any],
+        req: RequestType,
+        permissions: List[Type],
+        serializer: Any,
+        fields_map: Dict[str, Set[str]],
+    ) -> Any:
+        """Update a single model instance by filter."""
+        pass
+
+    @abstractmethod
+    def delete_instance(
+        self,
+        model: Type[ORMModel],
+        ast: Dict[str, Any],
+        req: RequestType,
+        permissions: List[Type],
+    ) -> int:
+        """Delete a single model instance by filter."""
+        pass
+
+    # === ORM Provider Methods (Unchanged - these are utility methods) ===
 
     @abstractmethod
     def get_queryset(
@@ -205,18 +322,21 @@ class AbstractORMProvider(ABC):
         pass
 
     @abstractmethod
-    def get_user(self, request: RequestType): # returns User
+    def get_user(self, request: RequestType):  # returns User
         """
         Get the request user.
         """
         pass
 
     @abstractmethod
-    def build_model_graph(self, model: ORMModel) -> None:  # type:ignore
+    def build_model_graph(self, model: ORMModel) -> Any:  # type:ignore
         """
         Construct a graph representation of model relationships.
         """
         pass
+
+
+# === Other Abstract Classes (Unchanged) ===
 
 
 class AbstractCustomQueryset(ABC):
@@ -224,10 +344,10 @@ class AbstractCustomQueryset(ABC):
     def get_queryset(self, request: Optional[RequestType] = None) -> Any:
         """
         Return a custom queryset (e.g. a custom SQLAlchemy Query or Django QuerySet).
-        
+
         Args:
             request: The current request object, which may contain user information
-        
+
         Returns:
             A custom queryset
         """
@@ -302,7 +422,7 @@ class AbstractEventEmitter(ABC):
     ) -> None:
         """
         Emit an event to the specified namespace with the given event type and data.
-        
+
         Parameters:
         -----------
         namespace: str
@@ -406,23 +526,30 @@ class AbstractPermission(ABC):
         """
         pass
 
+
 class AbstractSearchProvider(ABC):
     """Base class for search providers in StateZero."""
-    
+
     @abstractmethod
-    def search(self, queryset: ORMQuerySet, query: str, search_fields: Union[Set[str], Literal["__all__"]]) -> ORMQuerySet:
+    def search(
+        self,
+        queryset: ORMQuerySet,
+        query: str,
+        search_fields: Union[Set[str], Literal["__all__"]],
+    ) -> ORMQuerySet:
         """
         Apply search filtering to a queryset.
-        
+
         Args:
             queryset: Django queryset
             query: The search query string
             search_fields: Set of field names to search in
-            
+
         Returns:
             Filtered queryset with search applied
         """
         pass
+
 
 class AbstractQueryOptimizer(ABC):
     """
@@ -436,7 +563,7 @@ class AbstractQueryOptimizer(ABC):
         self,
         depth: Optional[int] = None,
         fields_per_model: Optional[Dict[str, Set[str]]] = None,
-        get_model_name_func: Optional[Callable[[Type[ORMModel]], str]] = None
+        get_model_name_func: Optional[Callable[[Type[ORMModel]], str]] = None,
     ):
         """
         Initializes the optimizer with common configuration potentially
@@ -462,10 +589,7 @@ class AbstractQueryOptimizer(ABC):
 
     @abstractmethod
     def optimize(
-        self,
-        queryset: Any,
-        fields: Optional[List[str]] = None,
-        **kwargs: Any
+        self, queryset: Any, fields: Optional[List[str]] = None, **kwargs: Any
     ) -> Any:
         """
         Optimizes the given query object.
