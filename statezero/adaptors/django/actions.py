@@ -21,12 +21,9 @@ class DjangoActionSchemaGenerator:
                     f"Action '{action_name}' is missing a function and cannot be processed."
                 )
 
-            # --- START: New file-path based app discovery ---
             func_path = os.path.abspath(func.__code__.co_filename)
             found_app = None
 
-            # Find the app that contains this function's file.
-            # We look for the most specific app by finding the longest matching path.
             for app_config in all_app_configs:
                 app_path = os.path.abspath(app_config.path)
                 if func_path.startswith(app_path + os.sep):
@@ -42,12 +39,13 @@ class DjangoActionSchemaGenerator:
                 )
 
             app_name = found_app.label
-            # --- END: New discovery logic ---
+            docstring = action_config.get("docstring")
 
             schema_info = {
                 "action_name": action_name,
                 "app": app_name,
                 "title": action_name.replace("_", " ").title(),
+                "docstring": docstring,
                 "class_name": "".join(
                     word.capitalize() for word in action_name.split("_")
                 ),
@@ -65,7 +63,6 @@ class DjangoActionSchemaGenerator:
 
         return Response({"actions": actions_schema, "count": len(actions_schema)})
 
-    # ... The rest of the helper methods are unchanged ...
     @staticmethod
     def _get_serializer_schema(serializer_class):
         if not serializer_class:
