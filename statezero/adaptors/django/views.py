@@ -341,6 +341,7 @@ class FastUploadView(APIView):
 
 class ActionView(APIView):
     """Django view to handle StateZero action execution"""
+    permission_classes = [ORMBridgeViewAccessGate]
 
     def post(self, request, action_name):
         """Execute a registered action"""
@@ -433,7 +434,8 @@ class ActionView(APIView):
 
 class ActionSchemaView(APIView):
     """Django view to provide action schema information for frontend generation"""
-
+    permission_classes = [ORMBridgeViewAccessGate]
+    
     def get(self, request):
         """Return schema information for all registered actions"""
         return DjangoActionSchemaGenerator.generate_actions_schema()
