@@ -1,3 +1,5 @@
+import os
+from django.apps import apps
 from rest_framework.response import Response
 from rest_framework import fields
 from statezero.core.actions import action_registry
@@ -10,15 +12,45 @@ class DjangoActionSchemaGenerator:
     def generate_actions_schema():
         """Generate schema for all registered actions matching StateZero model schema format"""
         actions_schema = {}
+        all_app_configs = list(apps.get_app_configs())
 
         for action_name, action_config in action_registry.get_actions().items():
+            func = action_config.get("function")
+            if not func:
+                raise ValueError(
+                    f"Action '{action_name}' is missing a function and cannot be processed."
+                )
+
+            # --- START: New file-path based app discovery ---
+            func_path = os.path.abspath(func.__code__.co_filename)
+            found_app = None
+
+            # Find the app that contains this function's file.
+            # We look for the most specific app by finding the longest matching path.
+            for app_config in all_app_configs:
+                app_path = os.path.abspath(app_config.path)
+                if func_path.startswith(app_path + os.sep):
+                    if not found_app or len(app_path) > len(
+                        os.path.abspath(found_app.path)
+                    ):
+                        found_app = app_config
+
+            if not found_app:
+                raise LookupError(
+                    f"Action '{action_name}' from file '{func_path}' does not belong to any "
+                    f"installed Django app. Please ensure the parent app is in INSTALLED_APPS."
+                )
+
+            app_name = found_app.label
+            # --- END: New discovery logic ---
+
             schema_info = {
                 "action_name": action_name,
+                "app": app_name,
                 "title": action_name.replace("_", " ").title(),
                 "class_name": "".join(
                     word.capitalize() for word in action_name.split("_")
                 ),
-                "module": action_config["module"],
                 "input_properties": DjangoActionSchemaGenerator._get_serializer_schema(
                     action_config["serializer"]
                 ),
@@ -33,17 +65,14 @@ class DjangoActionSchemaGenerator:
 
         return Response({"actions": actions_schema, "count": len(actions_schema)})
 
+    # ... The rest of the helper methods are unchanged ...
     @staticmethod
     def _get_serializer_schema(serializer_class):
-        """Extract schema information from a DRF serializer matching StateZero field format"""
         if not serializer_class:
             return {}
-
         try:
-            # Create temporary instance to inspect fields
             serializer_instance = serializer_class()
             properties = {}
-
             for field_name, field in serializer_instance.fields.items():
                 field_info = {
                     "type": DjangoActionSchemaGenerator._get_field_type(field),
@@ -56,31 +85,25 @@ class DjangoActionSchemaGenerator:
                     "max_length": getattr(field, "max_length", None),
                     "choices": DjangoActionSchemaGenerator._get_field_choices(field),
                     "default": DjangoActionSchemaGenerator._get_field_default(field),
-                    "validators": [],  # Could be populated with validator info if needed
+                    "validators": [],
                     "max_digits": getattr(field, "max_digits", None),
                     "decimal_places": getattr(field, "decimal_places", None),
                     "read_only": field.read_only,
-                    "ref": None,  # Actions don't have model references like ForeignKeys
+                    "ref": None,
                 }
-
-                # Add min/max values for numeric fields
                 if hasattr(field, "max_value") and field.max_value is not None:
                     field_info["max_value"] = field.max_value
                 if hasattr(field, "min_value") and field.min_value is not None:
                     field_info["min_value"] = field.min_value
                 if hasattr(field, "min_length") and field.min_length is not None:
                     field_info["min_length"] = field.min_length
-
                 properties[field_name] = field_info
-
             return properties
         except Exception as e:
-            # Return minimal info if serializer inspection fails
             return {"error": f"Could not inspect serializer: {str(e)}"}
 
     @staticmethod
     def _get_field_type(field):
-        """Get field type matching StateZero schema format"""
         type_mapping = {
             fields.BooleanField: "boolean",
             fields.CharField: "string",
@@ -89,7 +112,7 @@ class DjangoActionSchemaGenerator:
             fields.UUIDField: "string",
             fields.IntegerField: "integer",
             fields.FloatField: "number",
-            fields.DecimalField: "string",  # StateZero uses string for decimals
+            fields.DecimalField: "string",
             fields.DateField: "string",
             fields.DateTimeField: "string",
             fields.TimeField: "string",
@@ -97,15 +120,10 @@ class DjangoActionSchemaGenerator:
             fields.DictField: "object",
             fields.ListField: "array",
         }
-
-        field_type = type(field)
-        return type_mapping.get(
-            field_type, "string"
-        )  # Default to string like StateZero
+        return type_mapping.get(type(field), "string")
 
     @staticmethod
     def _get_field_format(field):
-        """Get field format matching StateZero schema format"""
         format_mapping = {
             fields.EmailField: "email",
             fields.URLField: "uri",
@@ -113,30 +131,21 @@ class DjangoActionSchemaGenerator:
             fields.DateField: "date",
             fields.DateTimeField: "date-time",
             fields.TimeField: "time",
-            fields.IntegerField: None,  # No format for basic integer
-            fields.CharField: None,  # No format for basic string
         }
-
-        field_type = type(field)
-        return format_mapping.get(field_type, None)
+        return format_mapping.get(type(field))
 
     @staticmethod
     def _get_field_choices(field):
-        """Get field choices in the format StateZero expects"""
         if hasattr(field, "choices") and field.choices:
-            # Return list of choice values (not tuples)
             return [choice[0] for choice in field.choices]
         return None
 
     @staticmethod
     def _get_field_default(field):
-        """Get field default value, handling DRF's special cases"""
         if hasattr(field, "default"):
             default = field.default
-            # Handle DRF's special empty/missing values
             if default is fields.empty:
                 return None
-            # For callable defaults, we can't evaluate them safely
             if callable(default):
                 return None
             return default

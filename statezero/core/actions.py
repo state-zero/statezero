@@ -39,6 +39,7 @@ class ActionRegistry:
                 "permissions": permission_list,
                 "name": action_name,
                 "module": func.__module__,
+                "app": None,
             }
             return func
 
