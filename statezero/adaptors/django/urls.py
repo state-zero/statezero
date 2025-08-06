@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import EventsAuthView, ModelListView, ModelView, SchemaView, FileUploadView, FastUploadView
+from .views import EventsAuthView, ModelListView, ModelView, SchemaView, FileUploadView, FastUploadView, ActionSchemaView, ActionView
 
 app_name = "statezero"
 
@@ -9,6 +9,8 @@ urlpatterns = [
     path("models/", ModelListView.as_view(), name="model_list"),
     path("files/upload/", FileUploadView.as_view(), name="file_upload"),
     path("files/fast-upload/", FastUploadView.as_view(), name="fast_file_upload"),
+    path("actions/<str:action_name>/", ActionView.as_view(), name="action"),
+    path("actions-schema/", ActionSchemaView.as_view(), name="actions_schema"),
     path("<str:model_name>/", ModelView.as_view(), name="model_view"),
-    path("<str:model_name>/get-schema/", SchemaView.as_view(), name="schema_view")
+    path("<str:model_name>/get-schema/", SchemaView.as_view(), name="schema_view"),
 ]

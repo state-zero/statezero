@@ -452,6 +452,29 @@ class AbstractEventEmitter(ABC):
 # --- Permissions ---
 
 
+class AbstractActionPermission(ABC):
+    """
+    Permission class for StateZero actions.
+    Similar to DRF BasePermission but with access to validated data and
+    gives the action instead of the view.
+    """
+
+    @abstractmethod
+    def has_permission(self, request, action_name: str) -> bool:
+        """
+        View-level permission check (before validation).
+        Similar to DRF BasePermission.has_permission
+        """
+        pass
+
+    @abstractmethod
+    def has_action_permission(self, request, action_name: str, validated_data: dict) -> bool:
+        """
+        Action-level permission check (after validation).
+        This is where you check permissions that depend on the actual data.
+        """
+        pass
+
 class AbstractPermission(ABC):
     @abstractmethod
     def filter_queryset(
@@ -525,7 +548,6 @@ class AbstractPermission(ABC):
         Return the set of fields that the user is allowed to specify in their create method
         """
         pass
-
 
 class AbstractSearchProvider(ABC):
     """Base class for search providers in StateZero."""
