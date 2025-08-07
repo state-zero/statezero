@@ -192,7 +192,7 @@ npm i @statezero/core
 ### Generate TypeScript Models
 
 ```bash
-npx statezero sync-models
+npx statezero sync
 ```
 
 ## Why Choose StateZero Over...
