@@ -134,7 +134,29 @@ class DjangoActionSchemaGenerator:
     @staticmethod
     def _get_field_choices(field):
         if hasattr(field, "choices") and field.choices:
-            return [choice[0] for choice in field.choices]
+            choices = field.choices
+            
+            # Handle dict format: {'low': 'Low', 'high': 'High'}
+            if isinstance(choices, dict):
+                return list(choices.keys())
+            
+            # Handle list/tuple format: [('low', 'Low'), ('high', 'High')]
+            elif isinstance(choices, (list, tuple)):
+                try:
+                    return [choice[0] for choice in choices]
+                except (IndexError, TypeError) as e:
+                    raise ValueError(
+                        f"Invalid choice format for field '{field}'. Expected list of tuples "
+                        f"like [('value', 'display')], but got: {choices}. Error: {e}"
+                    )
+            
+            # Handle unexpected format
+            else:
+                raise ValueError(
+                    f"Unsupported choice format for field '{field}'. Expected dict or list of tuples, "
+                    f"but got {type(choices)}: {choices}"
+                )
+        
         return None
 
     @staticmethod

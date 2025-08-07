@@ -109,7 +109,7 @@ class StateZeroDjangoConfig(DjangoAppConfig):
             # Append the npm command instruction only in debug mode.
             if (published_models or registered_actions) and settings.DEBUG:
                 npm_message = (
-                    "\n[bold blue]Next step:[/bold blue] Run [italic]npm run sync-models[/italic] in your frontend project directory "
+                    "\n[bold blue]Next step:[/bold blue] Run [italic]npm run sync[/italic] in your frontend project directory "
                     "to generate or update the client-side code corresponding to these models and actions. "
                     "Note: This command should only be executed in a development environment."
                 )
