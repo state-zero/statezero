@@ -18,4 +18,4 @@ def get_or_create_test_user(
         user.set_password(password)
         user.save()
     print(f"test user updated/created")
-    return user, created
+    return user

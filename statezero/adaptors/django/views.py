@@ -12,7 +12,9 @@ from django.utils.module_loading import import_string
 from datetime import datetime
 from django.conf import settings
 from django.core.files.storage import default_storage
+from statezero.core.exceptions import NotFound, PermissionDenied
 import math
+from typing import Type
 import mimetypes
 
 from statezero.adaptors.django.config import config, registry
@@ -20,7 +22,7 @@ from statezero.adaptors.django.exception_handler import \
     explicit_exception_handler
 from statezero.adaptors.django.permissions import ORMBridgeViewAccessGate
 from statezero.adaptors.django.actions import DjangoActionSchemaGenerator
-from statezero.core.interfaces import AbstractEventEmitter
+from statezero.core.interfaces import AbstractEventEmitter, AbstractActionPermission
 from statezero.core.process_request import RequestProcessor
 from statezero.core.actions import action_registry
 from statezero.core.interfaces import AbstractActionPermission
@@ -340,55 +342,54 @@ class FastUploadView(APIView):
 
 
 class ActionView(APIView):
-    """Django view to handle StateZero action execution"""
+    """
+    Django view to handle StateZero action execution.
+    It uses a single try/except block to catch all errors, including
+    not found actions and permission denials, and formats them with the
+    explicit_exception_handler.
+    """
+
     permission_classes = [ORMBridgeViewAccessGate]
 
     def post(self, request, action_name):
-        """Execute a registered action"""
-        action_config = action_registry.get_action(action_name)
-
-        if not action_config:
-            return Response(
-                {"error": f"Action '{action_name}' not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        # Check permissions
-        if not self._check_permissions(request, action_config, action_name):
-            return Response(
-                {"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN
-            )
-
-        # Validate input if serializer provided
-        validated_data = {}
-        if action_config["serializer"]:
-            serializer = action_config["serializer"](
-                data=request.data, context={"request": request}
-            )
-            if not serializer.is_valid():
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            validated_data = serializer.validated_data
-        else:
-            # No input serializer - pass raw data
-            validated_data = request.data
-
-        # Check action-level permissions (after validation)
-        if not self._check_action_permissions(
-            request, action_config, action_name, validated_data
-        ):
-            return Response(
-                {"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN
-            )
-
+        """Execute a registered action."""
         try:
-            # Execute the action function
+            action_config = action_registry.get_action(action_name)
+
+            if not action_config:
+                # Raise an exception to be handled by the central handler
+                raise NotFound(detail=f"Action '{action_name}' not found")
+
+            # This will raise PermissionDenied on failure
+            self._check_permissions(request, action_config, action_name)
+
+            # Validate input data
+            validated_data = {}
+            if action_config["serializer"]:
+                serializer = action_config["serializer"](
+                    data=request.data, context={"request": request}
+                )
+                # Using raise_exception=True automatically triggers the handler
+                # for validation errors.
+                serializer.is_valid(raise_exception=True)
+                validated_data = serializer.validated_data
+            else:
+                validated_data = request.data
+
+            # This will also raise PermissionDenied on failure
+            self._check_action_permissions(
+                request, action_config, action_name, validated_data
+            )
+
+            # Execute the core action function
             action_func = action_config["function"]
             result = action_func(**validated_data, request=request)
 
-            # Validate response if response_serializer provided
+            # Validate the response data
             if action_config["response_serializer"]:
                 response_serializer = action_config["response_serializer"](data=result)
                 if not response_serializer.is_valid():
+                    # This indicates an issue with the action's implementation
                     return Response(
                         {
                             "error": f"Action returned invalid response: {response_serializer.errors}"
@@ -397,39 +398,35 @@ class ActionView(APIView):
                     )
                 return Response(response_serializer.validated_data)
             else:
-                # No response serializer - return raw result
                 return Response(result)
 
-        except Exception as e:
-            return Response(
-                {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        except Exception as original_exception:
+            # This single block now handles all runtime exceptions
+            return explicit_exception_handler(original_exception)
 
-    def _check_permissions(self, request, action_config, action_name) -> bool:
-        """Check view-level permissions (before validation)"""
+    def _check_permissions(self, request, action_config, action_name) -> None:
+        """Check view-level permissions, raising an exception on failure."""
         permissions = action_config.get("permissions", [])
-
         for permission_class in permissions:
             permission_instance = permission_class()
             if not permission_instance.has_permission(request, action_name):
-                return False
-
-        return True
+                raise PermissionDenied(
+                    detail="You do not have permission to perform this action."
+                )
 
     def _check_action_permissions(
         self, request, action_config, action_name, validated_data
-    ) -> bool:
-        """Check action-level permissions (after validation)"""
+    ) -> None:
+        """Check action-level permissions, raising an exception on failure."""
         permissions = action_config.get("permissions", [])
-
         for permission_class in permissions:
-            permission_instance = permission_class()
+            permission_instance: Type[AbstractActionPermission] = permission_class()
             if not permission_instance.has_action_permission(
                 request, action_name, validated_data
             ):
-                return False
-
-        return True
+                raise PermissionDenied(
+                    detail="You do not have permission for this specific request."
+                )
 
 
 class ActionSchemaView(APIView):

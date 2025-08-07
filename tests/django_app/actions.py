@@ -1,3 +1,4 @@
+# tests/django_app/actions.py
 from statezero.core.actions import action
 from statezero.core.interfaces import AbstractActionPermission
 from rest_framework import serializers
@@ -49,6 +50,43 @@ class ProcessDataResponseSerializer(serializers.Serializer):
     result = serializers.FloatField()
     processed_count = serializers.IntegerField()
     execution_time_ms = serializers.IntegerField()
+
+
+# ADD MISSING SERIALIZERS
+class CalculateHashInputSerializer(serializers.Serializer):
+    text = serializers.CharField(help_text="Text to hash")
+    algorithm = serializers.ChoiceField(
+        choices=[("md5", "MD5"), ("sha1", "SHA1"), ("sha256", "SHA256")],
+        default="sha256",
+        help_text="Hash algorithm to use",
+    )
+
+
+class CalculateHashResponseSerializer(serializers.Serializer):
+    original_text = serializers.CharField()
+    algorithm = serializers.CharField()
+    hash = serializers.CharField()
+    text_length = serializers.IntegerField()
+    processed_by = serializers.CharField()
+    processed_at = serializers.DateTimeField()
+
+
+class GetServerStatusResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()
+    timestamp = serializers.DateTimeField()
+    random_number = serializers.IntegerField()
+    server_info = serializers.DictField()
+    demo_data = serializers.DictField()
+
+
+class GetUserInfoResponseSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    email = serializers.EmailField()
+    is_staff = serializers.BooleanField()
+    is_superuser = serializers.BooleanField()
+    date_joined = serializers.DateTimeField()
+    last_login = serializers.DateTimeField(allow_null=True)
+    server_time = serializers.DateTimeField()
 
 
 # Permissions
@@ -155,7 +193,10 @@ def process_data(data: List[int], operation: str, *, request=None) -> dict:
     }
 
 
-@action(permissions=[IsAuthenticated])
+@action(
+    permissions=[IsAuthenticated],
+    response_serializer=GetUserInfoResponseSerializer,
+)
 def get_user_info(*, request=None) -> dict:
     """Get current user information (no serializers - simple action)"""
 
@@ -164,21 +205,21 @@ def get_user_info(*, request=None) -> dict:
         "email": request.user.email,
         "is_staff": request.user.is_staff,
         "is_superuser": request.user.is_superuser,
-        "date_joined": request.user.date_joined.isoformat(),
-        "last_login": (
-            request.user.last_login.isoformat() if request.user.last_login else None
-        ),
-        "server_time": timezone.now().isoformat(),
+        "date_joined": request.user.date_joined,
+        "last_login": request.user.last_login,
+        "server_time": timezone.now(),
     }
 
 
-@action()
-def get_server_status() -> dict:
+@action(
+    response_serializer=GetServerStatusResponseSerializer,
+)
+def get_server_status(*, request=None) -> dict:
     """Get server status and random data (no authentication required)"""
 
     return {
         "status": "healthy",
-        "timestamp": timezone.now().isoformat(),
+        "timestamp": timezone.now(),
         "random_number": random.randint(1, 1000),
         "server_info": {
             "django_version": "5.2+",
@@ -193,8 +234,12 @@ def get_server_status() -> dict:
     }
 
 
-@action(permissions=[IsAuthenticated])
-def calculate_hash(text: str, algorithm: str = "md5", *, request=None) -> dict:
+@action(
+    serializer=CalculateHashInputSerializer,
+    response_serializer=CalculateHashResponseSerializer,
+    permissions=[IsAuthenticated],
+)
+def calculate_hash(text: str, algorithm: str = "sha256", *, request=None) -> dict:
     """Calculate hash of input text (demonstrates string processing)"""
 
     import hashlib
@@ -202,7 +247,7 @@ def calculate_hash(text: str, algorithm: str = "md5", *, request=None) -> dict:
     # Validate algorithm
     available_algorithms = ["md5", "sha1", "sha256"]
     if algorithm not in available_algorithms:
-        algorithm = "md5"
+        algorithm = "sha256"
 
     # Calculate hash
     if algorithm == "md5":
@@ -218,5 +263,5 @@ def calculate_hash(text: str, algorithm: str = "md5", *, request=None) -> dict:
         "hash": hash_value,
         "text_length": len(text),
         "processed_by": request.user.username,
-        "processed_at": timezone.now().isoformat(),
+        "processed_at": timezone.now(),
     }
