@@ -262,6 +262,6 @@ def calculate_hash(text: str, algorithm: str = "sha256", *, request=None) -> dic
         "algorithm": algorithm,
         "hash": hash_value,
         "text_length": len(text),
-        "processed_by": request.user.username,
+        "processed_by": request.user.get_username(),
         "processed_at": timezone.now(),
     }
