@@ -349,7 +349,7 @@ class ActionView(APIView):
     explicit_exception_handler.
     """
 
-    permission_classes = [ORMBridgeViewAccessGate]
+    permission_classes = [permission_class]
 
     def post(self, request, action_name):
         """Execute a registered action."""

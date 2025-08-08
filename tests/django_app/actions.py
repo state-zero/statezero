@@ -1,4 +1,3 @@
-# tests/django_app/actions.py
 from statezero.core.actions import action
 from statezero.core.interfaces import AbstractActionPermission
 from rest_framework import serializers
@@ -87,6 +86,11 @@ class GetUserInfoResponseSerializer(serializers.Serializer):
     date_joined = serializers.DateTimeField()
     last_login = serializers.DateTimeField(allow_null=True)
     server_time = serializers.DateTimeField()
+
+
+class GetUsernameResponseSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    retrieved_at = serializers.DateTimeField()
 
 
 # Permissions
@@ -208,6 +212,19 @@ def get_user_info(*, request=None) -> dict:
         "date_joined": request.user.date_joined,
         "last_login": request.user.last_login,
         "server_time": timezone.now(),
+    }
+
+
+@action(
+    permissions=[IsAuthenticated],
+    response_serializer=GetUsernameResponseSerializer,
+)
+def get_current_username(*, request=None) -> dict:
+    """Get current user's username - simple focused action"""
+
+    return {
+        "username": request.user.username,
+        "retrieved_at": timezone.now(),
     }
 
 
