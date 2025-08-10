@@ -963,3 +963,102 @@ class DjangoORMAdapter(AbstractORMProvider):
     def get_user(self, request):
         """Return the user from the request."""
         return request.user
+
+    def validate(
+        self,
+        model: Type[models.Model],
+        data: Dict[str, Any],
+        validate_type: str,
+        partial: bool,
+        request: RequestType,
+        permissions: List[Type[AbstractPermission]],
+        serializer,
+    ) -> bool:
+        """
+        Fast validation without database queries.
+        Only checks model-level permissions and serializer validation.
+
+        Args:
+            model: Django model class
+            data: Data to validate
+            validate_type: 'create' or 'update'
+            partial: Whether to allow partial validation (only validate provided fields)
+            request: Request object
+            permissions: Permission classes
+            serializer: Serializer instance
+
+        Returns:
+            bool: True if validation passes
+
+        Raises:
+            ValidationError: For serializer validation failures
+            PermissionDenied: For permission failures
+        """
+        # Basic model-level permission check (no DB query)
+        required_action = (
+            ActionType.CREATE if validate_type == "create" else ActionType.UPDATE
+        )
+
+        has_permission = False
+        for permission_class in permissions:
+            perm_instance = permission_class()
+            allowed_actions = perm_instance.allowed_actions(request, model)
+            if required_action in allowed_actions:
+                has_permission = True
+                break
+
+        if not has_permission:
+            # Let StateZero exception handling deal with this
+            raise PermissionDenied(f"{validate_type.title()} not allowed")
+
+        # Get field permissions
+        allowed_fields = self._get_allowed_fields(
+            model, permissions, request, validate_type
+        )
+
+        # Filter data to only allowed fields
+        filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
+
+        # Create minimal fields map for serializer
+        model_name = config.orm_provider.get_model_name(model)
+        fields_map = {model_name: allowed_fields}
+
+        # Validate using serializer with partial flag - let ValidationError bubble up naturally
+        serializer.deserialize(
+            model=model,
+            data=filtered_data,
+            partial=partial,
+            request=request,
+            fields_map=fields_map,
+        )
+
+        # Only return success case - exceptions handle failures
+        return True
+
+    def _get_allowed_fields(
+        self,
+        model: Type[models.Model],
+        permissions: List[Type[AbstractPermission]],
+        request: RequestType,
+        validate_type: str,
+    ) -> Set[str]:
+        """Helper to get allowed fields based on validate_type."""
+        allowed_fields = set()
+
+        for permission_class in permissions:
+            perm_instance = permission_class()
+
+            if validate_type == "create":
+                create_fields = perm_instance.create_fields(request, model)
+                if create_fields == "__all__":
+                    return config.orm_provider.get_fields(model)
+                elif isinstance(create_fields, set):
+                    allowed_fields.update(create_fields)
+            else:  # update
+                editable_fields = perm_instance.editable_fields(request, model)
+                if editable_fields == "__all__":
+                    return config.orm_provider.get_fields(model)
+                elif isinstance(editable_fields, set):
+                    allowed_fields.update(editable_fields)
+
+        return allowed_fields

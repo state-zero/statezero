@@ -432,7 +432,56 @@ class ActionView(APIView):
 class ActionSchemaView(APIView):
     """Django view to provide action schema information for frontend generation"""
     permission_classes = [ORMBridgeViewAccessGate]
-    
+
     def get(self, request):
         """Return schema information for all registered actions"""
         return DjangoActionSchemaGenerator.generate_actions_schema()
+
+
+class ValidateView(APIView):
+    """
+    Fast validation endpoint that bypasses the AST system for performance.
+    """
+
+    permission_classes = [ORMBridgeViewAccessGate]
+
+    def post(self, request, model_name):
+        """Validate model data without saving."""
+        try:
+            # Create processor following the same pattern as other views
+            processor = RequestProcessor(config=config, registry=registry)
+
+            # Get model and config using the processor's ORM provider
+            model = processor.orm_provider.get_model_by_name(model_name)
+            if not model:
+                return Response({"error": f"Model {model_name} not found"}, status=404)
+
+            try:
+                model_config = processor.registry.get_config(model)
+            except ValueError:
+                return Response(
+                    {"error": f"Model {model_name} not registered"}, status=404
+                )
+
+            # Extract request data
+            data = request.data.get("data", {})
+            validate_type = request.data.get("validate_type", "create")
+            partial = request.data.get("partial", False)  # Default to False
+
+            # Call validate - let exceptions bubble up to explicit_exception_handler
+            result = processor.orm_provider.validate(
+                model=model,
+                data=data,
+                validate_type=validate_type,
+                partial=partial,
+                request=request,
+                permissions=model_config.permissions,
+                serializer=processor.data_serializer,
+            )
+
+            # Only success case returns here - return simple boolean
+            return Response({"valid": True}, status=200)
+
+        except Exception as original_exception:
+            # Let StateZero's exception handler deal with ValidationError, PermissionDenied, etc.
+            return explicit_exception_handler(original_exception)

@@ -38,6 +38,38 @@ class AbstractORMProvider(ABC):
     # === Query Engine Methods (UPDATED: Now stateless) ===
 
     @abstractmethod
+    def validate(
+        self,
+        model: Type,
+        data: Dict[str, Any],
+        validate_type: str,
+        partial: bool,
+        request: Any,
+        permissions: List[Type],
+        serializer: Any,
+    ) -> bool:
+        """
+        Validate model data without saving to database.
+
+        Args:
+            model: The model class to validate against
+            data: Data to validate
+            validate_type: 'create' or 'update'
+            partial: Whether to allow partial validation (only validate provided fields)
+            request: Request object for permission context
+            permissions: List of permission classes
+            serializer: Serializer instance for validation
+
+        Returns:
+            bool: True if validation passes
+
+        Raises:
+            ValidationError: For serializer validation failures
+            PermissionDenied: For permission failures
+        """
+        pass
+
+    @abstractmethod
     def get_fields(self, model: ORMModel) -> Set[str]:
         """
         Get all of the model fields - doesn't apply permissions check.
