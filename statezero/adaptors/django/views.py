@@ -443,7 +443,7 @@ class ValidateView(APIView):
     Fast validation endpoint that bypasses the AST system for performance.
     """
 
-    permission_classes = [ORMBridgeViewAccessGate]
+    permission_classes = [permission_class]
 
     def post(self, request, model_name):
         """Validate model data without saving."""
