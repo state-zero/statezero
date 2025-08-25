@@ -62,7 +62,7 @@ def map_exception(exc):
 def explicit_exception_handler(exc):
     """
     Extended explicit exception handler that builds a structured JSON response.
-    It maps known Django/DRF exceptions to your library's standard errors and
+    It maps known Django/DRF exceptions to StateZero's standard errors and
     uses jsonable_encoder to ensure the output is JSON serializable.
     """
     traceback.print_exc()
