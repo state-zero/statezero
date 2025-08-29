@@ -111,7 +111,6 @@ class ConcurrencyFixTestCase(TestCase):
 
         print(f"Final result for Request A: {len(result_A['data']['data'])} items")
 
-        # ***** UPDATED ASSERTION - NOW EXPECTS CORRECT BEHAVIOR *****
         # With the stateless ORM adapter, Request A should get the correct result (5 items)
         # regardless of Request B's interference.
         self.assertEqual(

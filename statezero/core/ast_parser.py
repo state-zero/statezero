@@ -416,7 +416,7 @@ class ASTParser:
         return handler(ast)
 
     def _apply_related(self, ast: Dict[str, Any]) -> None:
-        """UPDATED: Apply select_related and prefetch_related, updating current queryset."""
+        """ Apply select_related and prefetch_related, updating current queryset."""
         if "selectRelated" in ast and isinstance(ast["selectRelated"], list):
             self.current_queryset = self.engine.select_related(
                 self.current_queryset, ast["selectRelated"]
@@ -427,28 +427,28 @@ class ASTParser:
             )
 
     def _apply_filter(self, ast: Dict[str, Any]) -> None:
-        """UPDATED: Apply filter from AST to the queryset, updating current queryset."""
+        """ Apply filter from AST to the queryset, updating current queryset."""
         if "filter" in ast and ast["filter"]:
             self.current_queryset = self.engine.filter_node(
                 self.current_queryset, ast["filter"]
             )
 
     def _apply_exclude(self, ast: Dict[str, Any]) -> None:
-        """UPDATED: Apply exclude from AST to the queryset, updating current queryset."""
+        """ Apply exclude from AST to the queryset, updating current queryset."""
         if "exclude" in ast and ast["exclude"]:
             self.current_queryset = self.engine.exclude_node(
                 self.current_queryset, ast["exclude"]
             )
 
     def _apply_ordering(self, ast: Dict[str, Any]) -> None:
-        """UPDATED: Apply ordering, updating current queryset."""
+        """ Apply ordering, updating current queryset."""
         if "orderBy" in ast:
             self.current_queryset = self.engine.order_by(
                 self.current_queryset, ast["orderBy"]
             )
 
     def _apply_field_selection(self, ast: Dict[str, Any]) -> None:
-        """UPDATED: Apply field selection, updating current queryset."""
+        """ Apply field selection, updating current queryset."""
         if "fields" in ast and isinstance(ast["fields"], list):
             self.current_queryset = self.engine.select_fields(
                 self.current_queryset, ast["fields"]
@@ -456,7 +456,7 @@ class ASTParser:
 
     def _apply_search(self, ast: Dict[str, Any]) -> None:
         """
-        UPDATED: If search properties are present at the top level of the AST,
+        If search properties are present at the top level of the AST,
         apply the search using the adapter's search_node() method.
 
         Expects the AST to have a top-level "search" key containing:
@@ -489,7 +489,7 @@ class ASTParser:
         else:
             final_search_fields = config_search_fields
 
-        # UPDATED: Delegate to the ORM adapter's search_node() method with queryset.
+        # Delegate to the ORM adapter's search_node() method with queryset.
         self.current_queryset = self.engine.search_node(
             self.current_queryset, search_query, final_search_fields
         )
@@ -497,7 +497,7 @@ class ASTParser:
     # --- Operation Handlers with Hard-Coded Response Types ---
 
     def _handle_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass model explicitly to create method."""
+        """ Pass model explicitly to create method."""
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
             model=self.model,
@@ -526,7 +526,7 @@ class ASTParser:
         }
 
     def _handle_update(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass current queryset to update method."""
+        """ Pass current queryset to update method."""
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
             model=self.model,
@@ -543,7 +543,7 @@ class ASTParser:
         # Get the readable fields for this model using our existing method
         readable_fields = self._get_operation_fields(self.model, "read")
 
-        # UPDATED: Update records and get the count and affected instance IDs
+        # Update records and get the count and affected instance IDs
         updated_count, updated_instances = self.engine.update(
             self.current_queryset,  # Pass current queryset
             ast,
@@ -570,7 +570,7 @@ class ASTParser:
         }
 
     def _handle_delete(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass current queryset to delete method."""
+        """ Pass current queryset to delete method."""
         permissions = self.registry.get_config(self.model).permissions
         deleted_count, rows_deleted = self.engine.delete(
             self.current_queryset, ast, self.request, permissions
@@ -586,7 +586,7 @@ class ASTParser:
         }
 
     def _handle_update_instance(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass model explicitly to update_instance method."""
+        """ Pass model explicitly to update_instance method."""
         # Extract and deserialize the data.
         raw_data = ast.get("data", {})
         # Allow partial updates.
@@ -603,7 +603,7 @@ class ASTParser:
         # Retrieve permissions from the self.registry.
         permissions = self.registry.get_config(self.model).permissions
 
-        # UPDATED: Delegate to the engine's instance-based update method.
+        # Delegate to the engine's instance-based update method.
         updated_instance = self.engine.update_instance(
             self.model,
             ast,
@@ -628,7 +628,7 @@ class ASTParser:
 
     def _handle_delete_instance(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """
-        UPDATED: Handles deletion of a single instance.
+        Handles deletion of a single instance.
         Typically, no additional data deserialization is needed beyond the filter,
         so we simply verify that a filter is provided and then delegate to the engine.
         """
@@ -643,7 +643,7 @@ class ASTParser:
         # Retrieve permissions from the self.registry.
         permissions = self.registry.get_config(self.model).permissions
 
-        # UPDATED: Delegate to the engine's instance-based delete method.
+        # Delegate to the engine's instance-based delete method.
         deleted_count = self.engine.delete_instance(
             self.model, ast, self.request, permissions
         )
@@ -654,7 +654,7 @@ class ASTParser:
         }
 
     def _handle_get(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass current queryset to get method."""
+        """ Pass current queryset to get method."""
         # Retrieve permissions from the registry
         permissions = self.registry.get_config(self.model).permissions
         record = self.engine.get(self.current_queryset, ast, self.request, permissions)
@@ -671,7 +671,7 @@ class ASTParser:
         }
 
     def _handle_get_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass current queryset to get_or_create method."""
+        """ Pass current queryset to get_or_create method."""
         # Validate and split lookup/defaults (without extra wrapping)
         validated_lookup, validated_defaults = self._validate_and_split_lookup_defaults(
             ast, partial=True
@@ -684,7 +684,7 @@ class ASTParser:
         # Retrieve permissions from configuration
         permissions = self.registry.get_config(self.model).permissions
 
-        # UPDATED: Call the ORM layer and pass the serializer and request/permissions
+        # Call the ORM layer and pass the serializer and request/permissions
         record, created = self.engine.get_or_create(
             self.current_queryset,  # Pass current queryset
             {"lookup": ast.get("lookup", {}), "defaults": ast.get("defaults", {})},
@@ -710,7 +710,7 @@ class ASTParser:
         }
 
     def _handle_update_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass current queryset to update_or_create method."""
+        """ Pass current queryset to update_or_create method."""
         # Validate and split lookup/defaults.
         validated_lookup, validated_defaults = self._validate_and_split_lookup_defaults(
             ast, partial=True
@@ -723,7 +723,7 @@ class ASTParser:
         # Retrieve permissions from configuration.
         permissions = self.registry.get_config(self.model).permissions
 
-        # UPDATED: Call the ORM update_or_create method, passing the serializer, request, and permissions.
+        # Call the ORM update_or_create method, passing the serializer, request, and permissions.
         record, created = self.engine.update_or_create(
             self.current_queryset,  # Pass current queryset
             {"lookup": ast.get("lookup", {}), "defaults": ast.get("defaults", {})},
@@ -750,7 +750,7 @@ class ASTParser:
         }
 
     def _handle_first(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass current queryset to first method."""
+        """ Pass current queryset to first method."""
         record = self.engine.first(self.current_queryset)
         serialized = self.serializer.serialize(
             record,
@@ -765,7 +765,7 @@ class ASTParser:
         }
 
     def _handle_last(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass current queryset to last method."""
+        """ Pass current queryset to last method."""
         record = self.engine.last(self.current_queryset)
         serialized = self.serializer.serialize(
             record,
@@ -780,7 +780,7 @@ class ASTParser:
         }
 
     def _handle_exists(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass current queryset to exists method."""
+        """ Pass current queryset to exists method."""
         exists_flag = self.engine.exists(self.current_queryset)
         return {
             "data": exists_flag,
@@ -791,7 +791,7 @@ class ASTParser:
         }
 
     def _handle_aggregate(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass current queryset to all aggregate methods."""
+        """ Pass current queryset to all aggregate methods."""
         op_type = ast.get("type")
         if op_type == "aggregate":
             aggs = ast.get("aggregates", {})
@@ -859,7 +859,7 @@ class ASTParser:
                 }
 
     def _handle_read(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """UPDATED: Pass current queryset to fetch_list method."""
+        """ Pass current queryset to fetch_list method."""
         offset_raw = self.serializer_options.get("offset", 0)
         limit_raw = self.serializer_options.get("limit", self.config.default_limit)
         offset_val = int(offset_raw) if offset_raw is not None else None
@@ -868,7 +868,7 @@ class ASTParser:
         # Retrieve permissions from configuration
         permissions = self.registry.get_config(self.model).permissions
 
-        # UPDATED: Fetch list with bulk permission checks
+        # Fetch list with bulk permission checks
         rows = self.engine.fetch_list(
             self.current_queryset,  # Pass current queryset
             offset=offset_val,

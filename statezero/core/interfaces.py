@@ -30,12 +30,9 @@ class AbstractORMProvider(ABC):
     A merged ORM engine interface that combines both query building (filtering,
     ordering, aggregation, etc.) and ORM provider responsibilities (queryset assembly,
     event signal registration, model graph construction, etc.).
-
-    UPDATED: All query manipulation methods now take queryset parameters and return
-    new querysets instead of mutating internal state.
     """
 
-    # === Query Engine Methods (UPDATED: Now stateless) ===
+    # === Query Engine Methods ===
 
     @abstractmethod
     def validate(
@@ -145,7 +142,7 @@ class AbstractORMProvider(ABC):
         """
         pass
 
-    # === Aggregate Methods (UPDATED: Take queryset parameter) ===
+    # === Aggregate Methods ===
 
     @abstractmethod
     def aggregate(
@@ -201,7 +198,7 @@ class AbstractORMProvider(ABC):
         """Return True if the queryset has any results; otherwise False."""
         pass
 
-    # === CRUD Methods (UPDATED: Take model or queryset parameters explicitly) ===
+    # === CRUD Methods ===
 
     @abstractmethod
     def create(
