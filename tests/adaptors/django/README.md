@@ -1,0 +1,2 @@
+These tests were used during development. The main tests are in the frontend end to end tests which require the backend server to be running with python manage.py run_test_server. These tests are not actively used and are maintined for future reference and to help explain the expected behaviour. For example the ORM tests test the old version of the ORM before we
+migrated to an immutable ORM class.

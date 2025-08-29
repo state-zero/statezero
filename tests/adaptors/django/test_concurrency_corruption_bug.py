@@ -1,4 +1,3 @@
-# Save this file as e.g., your_app/tests/test_concurrency_fix.py
 from django.test import TestCase, RequestFactory
 from unittest.mock import patch
 
@@ -6,7 +5,7 @@ from statezero.core.process_request import RequestProcessor
 from statezero.adaptors.django.config import config, registry
 from statezero.core.config import ModelConfig
 from statezero.adaptors.django.permissions import AllowAllPermission
-from tests.django_app.models import DummyModel  # Make sure this import path is correct
+from tests.django_app.models import DummyModel
 
 
 class ConcurrencyFixTestCase(TestCase):
