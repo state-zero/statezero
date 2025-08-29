@@ -210,15 +210,3 @@ npx statezero sync
 Check out the docs at [Statezero Docs](https://statezero.dev)
 
 Run `pip install statezero` and `npm i @statezero/core` to begin.
-
-## Pricing
-
-StateZero uses a no-rugpull license model:
-
-- **$0/month** for companies with revenue up to $3M
-- **$75/month** for companies with revenue up to $7.5M
-- **$200/month** for companies with revenue up to $20M
-- **$500/month** for companies with revenue up to $100M
-- **$1,000/month** for companies with revenue above $100M
-
-Lock in your rate forever by signing up early. We can't change your fee or cancel your license.
