@@ -1,9 +1,9 @@
 import os
 from django.apps import apps
 from rest_framework.response import Response
-from rest_framework import fields
+from rest_framework import fields, serializers
+from django.db import models
 from statezero.core.actions import action_registry
-
 
 class DjangoActionSchemaGenerator:
     """Django-specific action schema generator that matches StateZero model schema format"""
@@ -41,6 +41,13 @@ class DjangoActionSchemaGenerator:
             app_name = found_app.label
             docstring = action_config.get("docstring")
 
+            input_properties, input_relationships = DjangoActionSchemaGenerator._get_serializer_schema(
+                action_config["serializer"]
+            )
+            response_properties, response_relationships = DjangoActionSchemaGenerator._get_serializer_schema(
+                action_config["response_serializer"]
+            )
+
             schema_info = {
                 "action_name": action_name,
                 "app": app_name,
@@ -49,12 +56,9 @@ class DjangoActionSchemaGenerator:
                 "class_name": "".join(
                     word.capitalize() for word in action_name.split("_")
                 ),
-                "input_properties": DjangoActionSchemaGenerator._get_serializer_schema(
-                    action_config["serializer"]
-                ),
-                "response_properties": DjangoActionSchemaGenerator._get_serializer_schema(
-                    action_config["response_serializer"]
-                ),
+                "input_properties": input_properties,
+                "response_properties": response_properties,
+                "relationships": {**input_relationships, **response_relationships},
                 "permissions": [
                     perm.__name__ for perm in action_config.get("permissions", [])
                 ],
@@ -66,11 +70,16 @@ class DjangoActionSchemaGenerator:
     @staticmethod
     def _get_serializer_schema(serializer_class):
         if not serializer_class:
-            return {}
+            return {}, {}
         try:
             serializer_instance = serializer_class()
             properties = {}
+            relationships = {}
             for field_name, field in serializer_instance.fields.items():
+                relation_info = DjangoActionSchemaGenerator._get_relation_info(field)
+                if relation_info:
+                    relationships[field_name] = relation_info
+                
                 field_info = {
                     "type": DjangoActionSchemaGenerator._get_field_type(field),
                     "title": getattr(field, "label")
@@ -95,12 +104,19 @@ class DjangoActionSchemaGenerator:
                 if hasattr(field, "min_length") and field.min_length is not None:
                     field_info["min_length"] = field.min_length
                 properties[field_name] = field_info
-            return properties
+            return properties, relationships
         except Exception as e:
-            return {"error": f"Could not inspect serializer: {str(e)}"}
+            print(f"Could not inspect serializer: {str(e)}")
+            raise e
 
     @staticmethod
     def _get_field_type(field):
+        if isinstance(field, serializers.PrimaryKeyRelatedField):
+            pk_field = field.queryset.model._meta.pk
+            if isinstance(pk_field, (models.UUIDField, models.CharField)):
+                return "string"
+            return "integer"
+
         type_mapping = {
             fields.BooleanField: "boolean",
             fields.CharField: "string",
@@ -116,6 +132,7 @@ class DjangoActionSchemaGenerator:
             fields.JSONField: "object",
             fields.DictField: "object",
             fields.ListField: "array",
+            serializers.ManyRelatedField: "array",
         }
         return type_mapping.get(type(field), "string")
 
@@ -128,6 +145,8 @@ class DjangoActionSchemaGenerator:
             fields.DateField: "date",
             fields.DateTimeField: "date-time",
             fields.TimeField: "time",
+            serializers.ManyRelatedField: "many-to-many",
+            serializers.PrimaryKeyRelatedField: "foreign-key",
         }
         return format_mapping.get(type(field))
 
@@ -168,4 +187,28 @@ class DjangoActionSchemaGenerator:
             if callable(default):
                 return None
             return default
+        return None
+    
+    @staticmethod
+    def _get_relation_info(field):
+        relation_type = DjangoActionSchemaGenerator._get_field_format(field)
+        if not relation_type in ["foreign-key", "one-to-one", "many-to-many"]:
+            return None
+
+        if isinstance(field, serializers.PrimaryKeyRelatedField):
+            model = field.queryset.model
+            return {
+                "type": relation_type,
+                "model": f"{model._meta.app_label}.{model._meta.model_name}",
+                "class_name": model.__name__,
+                "primary_key_field": model._meta.pk.name,
+            }
+        if isinstance(field, serializers.ManyRelatedField):
+            model = field.child_relation.queryset.model
+            return {
+                "type": relation_type,
+                "model": f"{model._meta.app_label}.{model._meta.model_name}",
+                "class_name": model.__name__,
+                "primary_key_field": model._meta.pk.name,
+            }
         return None
