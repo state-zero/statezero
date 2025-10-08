@@ -157,12 +157,13 @@ class DjangoActionSchemaGenerator:
             
             # Handle dict format: {'low': 'Low', 'high': 'High'}
             if isinstance(choices, dict):
-                return list(choices.keys())
+                return choices
             
             # Handle list/tuple format: [('low', 'Low'), ('high', 'High')]
             elif isinstance(choices, (list, tuple)):
                 try:
-                    return [choice[0] for choice in choices]
+                    # Return dict with value->label mapping (same as model)
+                    return {str(choice[0]): choice[1] for choice in choices}
                 except (IndexError, TypeError) as e:
                     raise ValueError(
                         f"Invalid choice format for field '{field}'. Expected list of tuples "
