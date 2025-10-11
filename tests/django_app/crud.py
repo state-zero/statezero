@@ -9,7 +9,7 @@ from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      ProductCategory, Order, OrderItem, FileTest)
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
-from statezero.core.classes import AdditionalField
+from statezero.core.classes import AdditionalField, DisplayMetadata, FieldGroup, FieldDisplayConfig
 from statezero.adaptors.django.permissions import AllowAllPermission
 from django.db import models
 
@@ -171,7 +171,52 @@ registry.register(
         custom_querysets={
             'active_products': "tests.django_app.custom_querysets.ActiveProductsQuerySet",
             'by_price_range': "tests.django_app.custom_querysets.PricingQuerySet"
-        }
+        },
+        # Add display metadata for frontend customization
+        display=DisplayMetadata(
+            display_title="Product Management",
+            display_description="Create and manage products in your catalog",
+            field_groups=[
+                FieldGroup(
+                    display_title="Basic Information",
+                    display_description="Essential product details",
+                    field_names=["name", "description", "category"]
+                ),
+                FieldGroup(
+                    display_title="Pricing & Availability",
+                    display_description="Product pricing and stock information",
+                    field_names=["price", "in_stock"]
+                ),
+                FieldGroup(
+                    display_title="Metadata",
+                    display_description="System information",
+                    field_names=["created_at", "created_by"]
+                )
+            ],
+            field_display_configs=[
+                FieldDisplayConfig(
+                    field_name="description",
+                    display_component="RichTextEditor",
+                    display_help_text="Provide a detailed description of the product"
+                ),
+                FieldDisplayConfig(
+                    field_name="category",
+                    display_component="CategorySelector",
+                    filter_queryset={"name__icontains": ""},
+                    display_help_text="Select the product category"
+                ),
+                FieldDisplayConfig(
+                    field_name="price",
+                    display_component="CurrencyInput",
+                    display_help_text="Enter the product price (tax will be calculated automatically)"
+                ),
+                FieldDisplayConfig(
+                    field_name="in_stock",
+                    display_component="StockToggle",
+                    display_help_text="Toggle product availability"
+                )
+            ]
+        )
     ),
 )
 

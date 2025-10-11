@@ -127,6 +127,11 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         if hasattr(model._meta, "ordering") and model._meta.ordering:
             default_ordering = list(model._meta.ordering)
 
+        # Serialize display metadata if present
+        display_data = None
+        if model_config.display:
+            display_data = self._serialize_display_metadata(model_config.display)
+
         schema_meta = ModelSchemaMetadata(
             model_name=config.orm_provider.get_model_name(model),
             title=model._meta.verbose_name.title(),
@@ -153,6 +158,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
             time_format=getattr(settings, "REST_FRAMEWORK", {}).get(
                 "TIME_FORMAT", "iso-8601"
             ),
+            display=display_data,
         )
         return schema_meta
 
@@ -322,3 +328,20 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         if isinstance(target_field, (models.UUIDField, models.CharField)):
             return FieldType.STRING
         return FieldType.INTEGER
+
+    @staticmethod
+    def _serialize_display_metadata(display) -> Dict[str, Any]:
+        """Convert DisplayMetadata dataclass to dict for JSON serialization"""
+        from dataclasses import asdict, is_dataclass
+
+        if display is None:
+            return None
+
+        if is_dataclass(display):
+            return asdict(display)
+
+        # If it's already a dict, return as-is
+        if isinstance(display, dict):
+            return display
+
+        return None

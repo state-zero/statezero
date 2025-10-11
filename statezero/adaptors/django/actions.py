@@ -48,6 +48,13 @@ class DjangoActionSchemaGenerator:
                 action_config["response_serializer"]
             )
 
+            # Serialize display metadata if present
+            display_data = None
+            if action_config.get("display"):
+                display_data = DjangoActionSchemaGenerator._serialize_display_metadata(
+                    action_config["display"]
+                )
+
             schema_info = {
                 "action_name": action_name,
                 "app": app_name,
@@ -62,6 +69,7 @@ class DjangoActionSchemaGenerator:
                 "permissions": [
                     perm.__name__ for perm in action_config.get("permissions", [])
                 ],
+                "display": display_data,
             }
             actions_schema[action_name] = schema_info
 
@@ -212,4 +220,21 @@ class DjangoActionSchemaGenerator:
                 "class_name": model.__name__,
                 "primary_key_field": model._meta.pk.name,
             }
+        return None
+
+    @staticmethod
+    def _serialize_display_metadata(display):
+        """Convert DisplayMetadata dataclass to dict for JSON serialization"""
+        from dataclasses import asdict, is_dataclass
+
+        if display is None:
+            return None
+
+        if is_dataclass(display):
+            return asdict(display)
+
+        # If it's already a dict, return as-is
+        if isinstance(display, dict):
+            return display
+
         return None

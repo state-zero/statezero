@@ -1,5 +1,6 @@
 from statezero.core.actions import action
 from statezero.core.interfaces import AbstractActionPermission
+from statezero.core.classes import DisplayMetadata, FieldGroup, FieldDisplayConfig
 from rest_framework import serializers
 from typing import List
 from django.utils import timezone
@@ -143,6 +144,39 @@ class HasValidApiKey(AbstractActionPermission):
     serializer=SendNotificationInputSerializer,
     response_serializer=SendNotificationResponseSerializer,
     permissions=[CanSendNotifications],
+    display=DisplayMetadata(
+        display_title="Send Notifications",
+        display_description="Send notifications to multiple recipients with priority control",
+        field_groups=[
+            FieldGroup(
+                display_title="Message Content",
+                display_description="The notification message and priority level",
+                field_names=["message", "priority"]
+            ),
+            FieldGroup(
+                display_title="Recipients",
+                display_description="Email addresses to send notifications to",
+                field_names=["recipients"]
+            )
+        ],
+        field_display_configs=[
+            FieldDisplayConfig(
+                field_name="message",
+                display_component="TextArea",
+                display_help_text="Enter your notification message here (max 500 characters)"
+            ),
+            FieldDisplayConfig(
+                field_name="priority",
+                display_component="RadioGroup",
+                display_help_text="High priority notifications are processed first"
+            ),
+            FieldDisplayConfig(
+                field_name="recipients",
+                display_component="EmailListInput",
+                display_help_text="Add one or more email addresses"
+            )
+        ]
+    )
 )
 def send_notification(
     message: str, recipients: List[str], priority: str = "low", *, request=None

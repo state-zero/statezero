@@ -162,6 +162,8 @@ class ModelConfig:
         Fields that can be used for ordering
     fields: Optional[Optional[Union[Set[str], Literal["__all__"]]]]
         Expose just a subset of the model fields
+    display: Optional[Any], optional
+        Display metadata for frontend customization (DisplayMetadata instance)
     DEBUG: bool, default=False
         Enable debug mode for this model
     """
@@ -179,6 +181,7 @@ class ModelConfig:
         searchable_fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
         ordering_fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
         fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
+        display: Optional[Any] = None,
         DEBUG: bool = False,
     ):
         self.model = model
@@ -192,6 +195,7 @@ class ModelConfig:
         self.searchable_fields = searchable_fields or set()
         self.ordering_fields = ordering_fields or set()
         self.fields = fields or "__all__"
+        self.display = display
         self.DEBUG = DEBUG or False
 
     @property

@@ -20,8 +20,9 @@ class ActionRegistry:
             List[AbstractActionPermission], AbstractActionPermission, None
         ] = None,
         name: Optional[str] = None,
+        display: Optional[Any] = None,
     ):
-        """Register an action function with an optional, explicit docstring."""
+        """Register an action function with an optional, explicit docstring and display metadata."""
 
         def decorator(func: Callable):
             action_name = name or func.__name__
@@ -47,6 +48,7 @@ class ActionRegistry:
                 "name": action_name,
                 "module": func.__module__,
                 "docstring": final_docstring,  # Store the determined docstring
+                "display": display,  # Store display metadata
             }
             return func
 
@@ -76,8 +78,9 @@ def action(
         List[AbstractActionPermission], AbstractActionPermission, None
     ] = None,
     name: Optional[str] = None,
+    display: Optional[Any] = None,
 ):
-    """Framework-agnostic decorator to register an action."""
+    """Framework-agnostic decorator to register an action with optional display metadata."""
     return action_registry.register(
         func,
         docstring=docstring,
@@ -85,4 +88,5 @@ def action(
         response_serializer=response_serializer,
         permissions=permissions,
         name=name,
+        display=display,
     )

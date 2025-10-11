@@ -131,11 +131,14 @@ class ModelSchemaMetadata(BaseModel):
     default_ordering: Optional[List[str]] = None
     # Extra definitions (for schemas referenced via $ref) are merged in if provided.
     definitions: Dict[str, Any] = field(default_factory=dict)
-    
+
     # Date / time formatting templates
     datetime_format: Optional[str] = None
     date_format: Optional[str] = None
     time_format: Optional[str] = None
+
+    # Display customization
+    display: Optional[Dict[str, Any]] = None
 
 @dataclass
 class ModelSummaryRepresentation:
@@ -165,3 +168,56 @@ class FieldNode:
     is_relation: bool
     related_model: Optional[str] = None  # The object name of the related model, if any
     type: str = "field"
+
+
+@dataclass
+class FieldDisplayConfig:
+    """
+    Configuration for customizing how a field is displayed in the frontend.
+
+    Attributes:
+        field_name: The name of the field this config applies to
+        display_component: Custom UI component name (e.g., "AddressAutocomplete", "DatePicker")
+        filter_queryset: Filter options for select/multi-select fields (dict passed to backend)
+        display_help_text: Additional help text for the field
+        extra: Additional custom metadata for framework-specific or UI-specific extensions
+    """
+    field_name: str
+    display_component: Optional[str] = None
+    filter_queryset: Optional[Dict[str, Any]] = None
+    display_help_text: Optional[str] = None
+    extra: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class FieldGroup:
+    """
+    Group related fields together for better UX.
+
+    Attributes:
+        display_title: Group heading
+        display_description: Group description
+        field_names: List of field names in this group
+    """
+    display_title: str
+    display_description: Optional[str] = None
+    field_names: Optional[List[str]] = None
+
+
+@dataclass
+class DisplayMetadata:
+    """
+    Rich display information for models and actions to customize frontend rendering.
+
+    Attributes:
+        display_title: Main heading/title override
+        display_description: Explanatory text about the model/action
+        field_groups: Logical grouping of fields (e.g., "Contact Info", "Address Details")
+        field_display_configs: Per-field customization (custom components, filters, help text)
+        extra: Additional custom metadata for framework-specific or UI-specific extensions
+    """
+    display_title: Optional[str] = None
+    display_description: Optional[str] = None
+    field_groups: Optional[List[FieldGroup]] = None
+    field_display_configs: Optional[List[FieldDisplayConfig]] = None
+    extra: Optional[Dict[str, Any]] = None
