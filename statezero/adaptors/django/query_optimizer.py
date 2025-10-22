@@ -477,7 +477,34 @@ def optimize_query(queryset, fields=None, fields_map=None, depth=0, use_only=Tru
             related_fields_to_fetch = set()
 
             if fields_map and related_model_name in fields_map:
-                related_fields_to_fetch.update(fields_map[related_model_name])
+                # Process each field, checking for custom serializers
+                from statezero.adaptors.django.serializers import get_custom_serializer
+                related_meta = _get_model_meta(related_model)
+                for field_name in fields_map[related_model_name]:
+                    try:
+                        field_obj = related_meta.get_field(field_name)
+                        if not field_obj.is_relation:
+                            # Check if this field has a custom serializer with explicit DB field requirements
+                            custom_serializer = get_custom_serializer(field_obj.__class__)
+                            if custom_serializer and hasattr(custom_serializer, 'get_prefetch_db_fields'):
+                                # Use the explicit list from the custom serializer
+                                db_fields = custom_serializer.get_prefetch_db_fields(field_name)
+                                for db_field in db_fields:
+                                    related_fields_to_fetch.add(db_field)
+                                logger.debug(f"Using custom DB fields {db_fields} for field '{field_name}' in {related_model_name}")
+                            else:
+                                # No custom serializer, just add the field itself
+                                related_fields_to_fetch.add(field_name)
+                        else:
+                            # Relation field, add as-is
+                            related_fields_to_fetch.add(field_name)
+                    except FieldDoesNotExist:
+                        # Field doesn't exist, add it anyway (might be computed)
+                        related_fields_to_fetch.add(field_name)
+                    except Exception as e:
+                        logger.error(f"Error checking custom serializer for field '{field_name}' in {related_model_name}: {e}")
+                        # On error, add the field anyway to be safe
+                        related_fields_to_fetch.add(field_name)
             else:
                 # If no field restrictions are provided, get all fields
                 all_fields = [f.name for f in related_model._meta.get_fields() if f.concrete]
@@ -531,7 +558,18 @@ def optimize_query(queryset, fields=None, fields_map=None, depth=0, use_only=Tru
                     try:
                         field_obj = root_meta.get_field(field_name)
                         if not field_obj.is_relation:
-                           root_fields_to_fetch.add(field_name)
+                           # Check if this field has a custom serializer with explicit DB field requirements
+                           from statezero.adaptors.django.serializers import get_custom_serializer
+                           custom_serializer = get_custom_serializer(field_obj.__class__)
+                           if custom_serializer and hasattr(custom_serializer, 'get_prefetch_db_fields'):
+                               # Use the explicit list from the custom serializer
+                               db_fields = custom_serializer.get_prefetch_db_fields(field_name)
+                               for db_field in db_fields:
+                                   root_fields_to_fetch.add(db_field)
+                               logger.debug(f"Using custom DB fields {db_fields} for field '{field_name}'")
+                           else:
+                               # No custom serializer, just add the field itself
+                               root_fields_to_fetch.add(field_name)
                         elif isinstance(field_obj, (ForeignKey, OneToOneField)):
                              # If FK/O2O itself is requested directly, include its id field
                              root_fields_to_fetch.add(field_obj.attname)

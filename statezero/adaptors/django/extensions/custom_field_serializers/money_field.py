@@ -15,6 +15,14 @@ class MoneyFieldSerializer(serializers.Field):
         self.decimal_places = kwargs.pop("decimal_places", 2)
         super().__init__(**kwargs)
 
+    @classmethod
+    def get_prefetch_db_fields(cls, field_name: str):
+        """
+        Return all database fields required for this field to serialize.
+        MoneyField creates two database columns: field_name and field_name_currency.
+        """
+        return [field_name, f"{field_name}_currency"]
+
     def to_representation(self, value):
         djmoney_field = MoneyField(
             max_digits=self.max_digits, decimal_places=self.decimal_places
