@@ -41,9 +41,9 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         all_field_names: Set[str] = set()
         db_field_names: Set[str] = set()
 
-        if model_config.fields != "__all__":
+        if model_config.frontend_fields != "__all__":
             all_fields = [
-                field for field in all_fields if field.name in model_config.fields
+                field for field in all_fields if field.name in model_config.frontend_fields
             ]
 
         for field in all_fields:

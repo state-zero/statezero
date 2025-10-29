@@ -181,6 +181,7 @@ class ModelConfig:
         searchable_fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
         ordering_fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
         fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
+        frontend_fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
         display: Optional[Any] = None,
         DEBUG: bool = False,
     ):
@@ -195,6 +196,7 @@ class ModelConfig:
         self.searchable_fields = searchable_fields or set()
         self.ordering_fields = ordering_fields or set()
         self.fields = fields or "__all__"
+        self.frontend_fields = frontend_fields or self.fields
         self.display = display
         self.DEBUG = DEBUG or False
 
