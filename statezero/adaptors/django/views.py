@@ -485,3 +485,104 @@ class ValidateView(APIView):
         except Exception as original_exception:
             # Let StateZero's exception handler deal with ValidationError, PermissionDenied, etc.
             return explicit_exception_handler(original_exception)
+
+
+class FieldPermissionsView(APIView):
+    """
+    Returns user-specific field permissions for a given model.
+    Used by frontend forms to determine which fields to show/enable at runtime.
+    """
+
+    permission_classes = [permission_class]
+
+    def get(self, request, model_name):
+        """Get field permissions for the current user."""
+        try:
+            # Create processor following the same pattern as other views
+            processor = RequestProcessor(config=config, registry=registry)
+
+            # Get model using the processor's ORM provider
+            try:
+                model = processor.orm_provider.get_model_by_name(model_name)
+            except (LookupError, ValueError):
+                return Response({"error": f"Model {model_name} not found"}, status=404)
+
+            if not model:
+                return Response({"error": f"Model {model_name} not found"}, status=404)
+
+            try:
+                model_config = processor.registry.get_config(model)
+            except ValueError:
+                return Response(
+                    {"error": f"Model {model_name} not registered"}, status=404
+                )
+
+            # Compute field permissions using the same logic as ASTParser._get_operation_fields
+            all_fields = processor.orm_provider.get_fields(model)
+
+            visible_fields = self._compute_operation_fields(
+                model, model_config, all_fields, request, "read"
+            )
+            creatable_fields = self._compute_operation_fields(
+                model, model_config, all_fields, request, "create"
+            )
+            editable_fields = self._compute_operation_fields(
+                model, model_config, all_fields, request, "update"
+            )
+
+            return Response(
+                {
+                    "visible_fields": list(visible_fields),
+                    "creatable_fields": list(creatable_fields),
+                    "editable_fields": list(editable_fields),
+                },
+                status=200,
+            )
+
+        except Exception as original_exception:
+            # Let StateZero's exception handler deal with errors
+            return explicit_exception_handler(original_exception)
+
+    def _compute_operation_fields(self, model, model_config, all_fields, request, operation_type):
+        """
+        Compute allowed fields for a specific operation type.
+        Replicates the logic from ASTParser._get_operation_fields.
+        """
+        from typing import Union, Set, Literal
+
+        allowed_fields = set()
+
+        for permission_cls in model_config.permissions:
+            permission = permission_cls()
+
+            # Get the appropriate field set based on operation
+            if operation_type == "read":
+                fields = permission.visible_fields(request, model)
+            elif operation_type == "create":
+                fields = permission.create_fields(request, model)
+            elif operation_type == "update":
+                fields = permission.editable_fields(request, model)
+            else:
+                fields = set()
+
+            # If any permission allows all fields
+            if fields == "__all__":
+                # For read operations, default "__all__" to frontend_fields
+                if operation_type == "read":
+                    # If frontend_fields is also "__all__", then return all fields
+                    if model_config.frontend_fields == "__all__":
+                        return all_fields
+                    # Otherwise, use frontend_fields as the default for "__all__"
+                    else:
+                        fields = model_config.frontend_fields
+                        fields &= all_fields  # Ensure fields actually exist
+                        allowed_fields |= fields
+                else:
+                    # For create/update operations, "__all__" means truly all fields
+                    return all_fields
+            else:
+                # Add allowed fields from this permission
+                fields &= all_fields  # Ensure fields actually exist
+                allowed_fields |= fields
+
+        return allowed_fields
