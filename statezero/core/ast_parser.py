@@ -386,19 +386,8 @@ class ASTParser:
 
                 # If any permission allows all fields
                 if fields == "__all__":
-                    # NEW: For read operations, default "__all__" to frontend_fields
-                    if operation_type == "read":
-                        # If frontend_fields is also "__all__", then return all fields
-                        if model_config.frontend_fields == "__all__":
-                            return all_fields
-                        # Otherwise, use frontend_fields as the default for "__all__"
-                        else:
-                            fields = model_config.frontend_fields
-                            fields &= all_fields  # Ensure fields actually exist
-                            allowed_fields |= fields
-                    else:
-                        # For create/update operations, "__all__" means truly all fields
-                        return all_fields
+                    return all_fields
+
                 # Add allowed fields from this permission
                 else:  # Ensure we're not operating on the string "__all__"
                     fields &= all_fields  # Ensure fields actually exist
