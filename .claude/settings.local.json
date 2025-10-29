@@ -1,10 +1,11 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(python manage.py test:*)",
+      "WebSearch"
+    ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"
-    ],
-    "allow": [
-      "Bash(python manage.py test:*)"
     ]
   }
 }

@@ -71,6 +71,7 @@ class FieldFormat(str, Enum):
     TEXT = "text"
     DATE = "date"
     DATETIME = "date-time"
+    TIME = "time"
     FOREIGN_KEY = "foreign-key"
     ONE_TO_ONE = "one-to-one"
     MANY_TO_MANY = "many-to-many"

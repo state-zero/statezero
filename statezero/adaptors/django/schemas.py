@@ -260,6 +260,9 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         elif isinstance(field, models.DateField):
             field_type = FieldType.STRING
             field_format = FieldFormat.DATE
+        elif isinstance(field, models.TimeField):
+            field_type = FieldType.STRING
+            field_format = FieldFormat.TIME
         elif isinstance(field, (models.ForeignKey, models.OneToOneField)):
             field_type = self.get_pk_type(field)
             field_format = self.get_relation_type(field)
@@ -292,7 +295,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
 
         # Check if field should be read-only (auto_now or auto_now_add)
         read_only = False
-        if isinstance(field, (models.DateTimeField, models.DateField)):
+        if isinstance(field, (models.DateTimeField, models.DateField, models.TimeField)):
             if getattr(field, "auto_now", False) or getattr(field, "auto_now_add", False):
                 read_only = True
 
