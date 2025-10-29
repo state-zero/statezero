@@ -763,6 +763,7 @@ class DjangoORMAdapter(AbstractORMProvider):
     def get_fields(self, model: models.Model) -> Set[str]:
         """
         Return a set of the model fields.
+        Includes both database fields and additional_fields (computed fields).
         """
         model_config = registry.get_config(model)
         if model_config.fields and "__all__" != model_config.fields:
@@ -774,6 +775,14 @@ class DjangoORMAdapter(AbstractORMProvider):
             )
             resolved_fields = resolved_fields.union(additional_fields)
         return resolved_fields
+
+    def get_db_fields(self, model: models.Model) -> Set[str]:
+        """
+        Return only actual database fields for the model.
+        Excludes read-only additional_fields (computed fields).
+        Used for deserialization - hooks can write to any DB field.
+        """
+        return set(field.name for field in model._meta.get_fields())
 
     def build_model_graph(
         self, model: Type[models.Model], model_graph: nx.DiGraph = None

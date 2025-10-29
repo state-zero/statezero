@@ -6,7 +6,7 @@ from rest_framework import serializers
 import contextvars
 from contextlib import contextmanager
 import logging
-from cytoolz import pluck
+from cytoolz import pluck, keyfilter
 from zen_queries import queries_disabled
 
 from statezero.adaptors.django.config import config, registry
@@ -484,33 +484,42 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
 
-        # Use the context manager for the duration of deserialization
-        with fields_map_context(fields_map):
-            # Create serializer class
-            serializer_class = DynamicModelSerializer.for_model(model)
-            available_fields = set(serializer_class().fields.keys())
+        # Get model name and allowed fields from fields_map
+        model_name = config.orm_provider.get_model_name(model)
+        allowed_fields = fields_map.get(model_name, set())
 
-            try:
-                model_config = registry.get_config(model)
-                if model_config.pre_hooks:
-                    for hook in model_config.pre_hooks:
-                        hook_result = hook(data, request=request)
-                        if settings.DEBUG:
-                            data = _check_pre_hook_result(
-                                original_data=data,
-                                result_data=hook_result,
-                                model=model,
-                                serializer_fields=available_fields
-                            )
-                        else:
-                            data = hook_result or data
-            except ValueError:
-                # No model config available
-                model_config = None
+        # Filter user input to only allowed fields (security boundary)
+        data = dict(keyfilter(lambda k: k in allowed_fields, data))
+
+        try:
+            model_config = registry.get_config(model)
+        except ValueError:
+            # No model config available
+            model_config = None
+
+        # Run pre-hooks on filtered data (hooks can add any DB fields)
+        if model_config and model_config.pre_hooks:
+            for hook in model_config.pre_hooks:
+                hook_result = hook(data, request=request)
+                if settings.DEBUG:
+                    # Note: available_fields check removed since hooks can add any DB field
+                    data = hook_result or data
+                else:
+                    data = hook_result or data
+
+        # Expand fields_map to all DB fields for serializer validation
+        # This allows hooks to add fields that aren't in the original fields_map
+        all_db_fields = config.orm_provider.get_db_fields(model)
+        expanded_fields_map = {model_name: all_db_fields}
+
+        # Use the context manager with expanded fields map
+        with fields_map_context(expanded_fields_map):
+            # Create serializer class with all DB fields available
+            serializer_class = DynamicModelSerializer.for_model(model)
 
             # Create serializer
             serializer = serializer_class(
-                data=data, 
+                data=data,
                 partial=partial,
                 request=request
             )

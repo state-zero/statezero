@@ -70,6 +70,16 @@ class AbstractORMProvider(ABC):
     def get_fields(self, model: ORMModel) -> Set[str]:
         """
         Get all of the model fields - doesn't apply permissions check.
+        Includes both database fields and additional_fields (computed fields).
+        """
+        pass
+
+    @abstractmethod
+    def get_db_fields(self, model: ORMModel) -> Set[str]:
+        """
+        Get only the actual database fields for a model.
+        Excludes read-only additional_fields (computed fields).
+        Used for deserialization - hooks can write to any DB field.
         """
         pass
 

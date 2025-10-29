@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(python manage.py test:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(python test_hook_fields.py:*)",
+      "Bash(move test_hook_fields.py testsadaptorsdjangotest_hook_fields.py)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"

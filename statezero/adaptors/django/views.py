@@ -570,11 +570,11 @@ class FieldPermissionsView(APIView):
                 # For read operations, default "__all__" to frontend_fields
                 if operation_type == "read":
                     # If frontend_fields is also "__all__", then return all fields
-                    if model_config.frontend_fields == "__all__":
+                    if model_config.fields == "__all__":
                         return all_fields
                     # Otherwise, use frontend_fields as the default for "__all__"
                     else:
-                        fields = model_config.frontend_fields
+                        fields = model_config.fields
                         fields &= all_fields  # Ensure fields actually exist
                         allowed_fields |= fields
                 else:
