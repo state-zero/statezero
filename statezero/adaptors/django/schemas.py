@@ -323,8 +323,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
     @staticmethod
     def is_field_required(field: models.Field) -> bool:
         return (
-            not field.blank
-            and not field.null
+            not field.null
             and field.default == models.fields.NOT_PROVIDED
         )
 
