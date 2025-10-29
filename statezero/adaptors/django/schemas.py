@@ -178,6 +178,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
                 nullable=False,
                 format=FieldFormat.ID,
                 description=description,
+                read_only=True,
             )
         elif isinstance(field, models.UUIDField):
             return SchemaFieldMetadata(
@@ -187,6 +188,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
                 nullable=False,
                 format=FieldFormat.UUID,
                 description=description,
+                read_only=True,
             )
         elif isinstance(field, models.CharField):
             return SchemaFieldMetadata(
@@ -197,6 +199,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
                 format=FieldFormat.ID,
                 max_length=field.max_length,
                 description=description,
+                read_only=True,
             )
         else:
             return SchemaFieldMetadata(
@@ -206,6 +209,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
                 nullable=False,
                 format=FieldFormat.ID,
                 description=description,
+                read_only=True,
             )
 
     def get_field_metadata(
@@ -286,6 +290,12 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         elif callable(default):
             default = default()
 
+        # Check if field should be read-only (auto_now or auto_now_add)
+        read_only = False
+        if isinstance(field, (models.DateTimeField, models.DateField)):
+            if getattr(field, "auto_now", False) or getattr(field, "auto_now_add", False):
+                read_only = True
+
         return SchemaFieldMetadata(
             type=field_type,
             title=title,
@@ -299,6 +309,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
             max_digits=max_digits,
             decimal_places=decimal_places,
             description=description,
+            read_only=read_only,
         )
 
     def get_field_title(self, field: models.Field) -> str:
