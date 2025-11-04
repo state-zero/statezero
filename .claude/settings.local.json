@@ -4,7 +4,8 @@
       "Bash(python manage.py test:*)",
       "WebSearch",
       "Bash(python test_hook_fields.py:*)",
-      "Bash(move test_hook_fields.py testsadaptorsdjangotest_hook_fields.py)"
+      "Bash(move test_hook_fields.py testsadaptorsdjangotest_hook_fields.py)",
+      "Bash(python:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"

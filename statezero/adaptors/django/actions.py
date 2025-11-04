@@ -125,6 +125,14 @@ class DjangoActionSchemaGenerator:
                 return "string"
             return "integer"
 
+        # Handle nested serializers (many=True creates a ListSerializer)
+        if isinstance(field, serializers.ListSerializer):
+            return "array"
+
+        # Handle nested serializers (single nested serializer)
+        if isinstance(field, serializers.Serializer):
+            return "object"
+
         type_mapping = {
             fields.BooleanField: "boolean",
             fields.CharField: "string",
