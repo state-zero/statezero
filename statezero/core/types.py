@@ -22,6 +22,7 @@ class ActionType(Enum):
     READ = "read"
     UPDATE = "update"
     DELETE = "delete"
+    BULK_CREATE = "bulk_create"
     BULK_UPDATE = "bulk_update"
     BULK_DELETE = "bulk_delete"
     # new pre-operation types

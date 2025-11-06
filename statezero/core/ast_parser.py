@@ -5,6 +5,7 @@ import networkx as nx
 
 
 from statezero.core.config import AppConfig, Registry
+from statezero.core.exceptions import PermissionDenied
 from statezero.core.interfaces import (
     AbstractDataSerializer,
     AbstractPermission,
@@ -86,6 +87,7 @@ class ASTParser:
         # Lookup table mapping AST op types to handler methods.
         self.handlers: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
             "create": self._handle_create,
+            "bulk_create": self._handle_bulk_create,
             "update": self._handle_update,
             "delete": self._handle_delete,
             "get": self._handle_get,
@@ -525,6 +527,46 @@ class ASTParser:
             "metadata": {"created": True, "response_type": ResponseType.INSTANCE.value},
         }
 
+    def _handle_bulk_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
+        """ Handle bulk create operation."""
+        data_list = ast.get("data", [])
+
+        # Check model-level CREATE permission
+        if not self._has_operation_permission(self.model, operation_type="create"):
+            raise PermissionDenied("Create not allowed")
+
+        # Validate all data items using many=True
+        validated_data_list = self.serializer.deserialize(
+            model=self.model,
+            data=data_list,
+            partial=False,
+            request=self.request,
+            fields_map=self.create_fields_map,
+            many=True,
+        )
+
+        # Bulk create all records
+        records = self.engine.bulk_create(
+            self.model,
+            validated_data_list,
+            self.serializer,
+            self.request,
+            self.create_fields_map,
+        )
+
+        # Serialize the created records
+        serialized = self.serializer.serialize(
+            records,
+            self.model,
+            many=True,
+            depth=self.depth,
+            fields_map=self.read_fields_map,
+        )
+        return {
+            "data": serialized,
+            "metadata": {"created": True, "response_type": ResponseType.QUERYSET.value},
+        }
+
     def _handle_update(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to update method."""
         data = ast.get("data", {})
@@ -942,6 +984,7 @@ class ASTParser:
         all_ops = ASTParser._extract_all_operations(ast)
         OPERATION_MAPPING = {
             "create": ActionType.CREATE,
+            "bulk_create": ActionType.BULK_CREATE,
             "update": ActionType.UPDATE,
             "update_or_create": ActionType.UPDATE,
             "delete": ActionType.DELETE,

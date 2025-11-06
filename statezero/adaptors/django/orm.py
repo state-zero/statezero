@@ -258,6 +258,26 @@ class DjangoORMAdapter(AbstractORMProvider):
             fields_map=fields_map,
         )
 
+    def bulk_create(
+        self,
+        model: Type[models.Model],
+        data_list: List[Dict[str, Any]],
+        serializer,
+        req,
+        fields_map,
+    ) -> List[models.Model]:
+        """Create multiple model instances using Django's bulk_create."""
+        # Create instances without saving to DB yet
+        instances = [model(**data) for data in data_list]
+
+        # Use Django's bulk_create for efficiency
+        created_instances = model.objects.bulk_create(instances)
+
+        # Emit bulk create event for cache invalidation and frontend notification
+        config.event_bus.emit_bulk_event(ActionType.BULK_CREATE, created_instances)
+
+        return created_instances
+
     def update_instance(
         self,
         model: Type[models.Model],

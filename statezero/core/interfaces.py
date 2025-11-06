@@ -218,6 +218,20 @@ class AbstractORMProvider(ABC):
         pass
 
     @abstractmethod
+    def bulk_create(
+        self,
+        model: Type[ORMModel],
+        data_list: List[Dict[str, Any]],
+        *args,
+        **kwargs
+    ) -> List[Any]:
+        """
+        Create multiple records using the model class.
+        Returns a list of created instances.
+        """
+        pass
+
+    @abstractmethod
     def update(
         self,
         queryset: ORMQuerySet,
@@ -416,13 +430,15 @@ class AbstractDataSerializer(ABC):
     def deserialize(
         self,
         model: ORMModel,  # type:ignore
-        data: dict,
+        data: Union[dict, List[dict]],
         allowed_fields: Optional[Dict[str, Set[str]]] = None,
         request: Optional[Any] = None,
-    ) -> dict:
+        many: bool = False,
+    ) -> Union[dict, List[dict]]:
         """
         Deserialize the input data into validated Python types for the specified model.
         - `allowed_fields`: a mapping (by model name) of fields the user is allowed to edit.
+        - `many`: if True, expects data to be a list of dicts and returns a list of validated dicts.
 
         Only keys that appear in the allowed set will be processed.
         """

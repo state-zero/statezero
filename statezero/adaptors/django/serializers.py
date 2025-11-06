@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Set, Type, Union
+from functools import partial
 from django.db import models
 from django.conf import settings
 from django.utils.module_loading import import_string
@@ -6,7 +7,7 @@ from rest_framework import serializers
 import contextvars
 from contextlib import contextmanager
 import logging
-from cytoolz import pluck, keyfilter
+from cytoolz import pluck, keyfilter, pipe
 from zen_queries import queries_disabled
 
 from statezero.adaptors.django.config import config, registry
@@ -476,11 +477,12 @@ class DRFDynamicSerializer(AbstractDataSerializer):
     def deserialize(
         self,
         model: Type[models.Model],
-        data: Dict[str, Any],
+        data: Union[Dict[str, Any], List[Dict[str, Any]]],
         fields_map: Optional[Dict[str, Set[str]]],
         partial: bool = False,
         request: Optional[RequestType] = None,
-    ) -> Dict[str, Any]:
+        many: bool = False,
+    ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
         # Serious security issue if fields_map is None
         assert fields_map is not None, "fields_map is required and cannot be None"
 
@@ -489,7 +491,10 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         allowed_fields = fields_map.get(model_name, set())
 
         # Filter user input to only allowed fields (security boundary)
-        data = dict(keyfilter(lambda k: k in allowed_fields, data))
+        if many:
+            data = [dict(keyfilter(lambda k: k in allowed_fields, item)) for item in data]
+        else:
+            data = dict(keyfilter(lambda k: k in allowed_fields, data))
 
         try:
             model_config = registry.get_config(model)
@@ -499,13 +504,11 @@ class DRFDynamicSerializer(AbstractDataSerializer):
 
         # Run pre-hooks on filtered data (hooks can add any DB fields)
         if model_config and model_config.pre_hooks:
-            for hook in model_config.pre_hooks:
-                hook_result = hook(data, request=request)
-                if settings.DEBUG:
-                    # Note: available_fields check removed since hooks can add any DB field
-                    data = hook_result or data
-                else:
-                    data = hook_result or data
+            hook_funcs = [partial(hook, request=request) for hook in model_config.pre_hooks]
+            if many:
+                data = [pipe(item, *hook_funcs) for item in data]
+            else:
+                data = pipe(data, *hook_funcs)
 
         # Expand fields_map to include fields that hooks may have added
         # For partial updates, only include allowed_fields + any fields in the data
@@ -526,6 +529,7 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             # Create serializer
             serializer = serializer_class(
                 data=data,
+                many=many,
                 partial=partial,
                 request=request
             )
@@ -533,16 +537,20 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             validated_data = serializer.validated_data
 
             if model_config and model_config.post_hooks:
-                for hook in model_config.post_hooks:
-                    hook_result = hook(validated_data, request=request)
-                    if settings.DEBUG:
-                        validated_data = _check_post_hook_result(
-                            original_data=validated_data,
-                            result_data=hook_result,
-                            model=model
-                        )
-                    else:
-                        validated_data = hook_result or validated_data
+                if many:
+                    hook_funcs = [partial(hook, request=request) for hook in model_config.post_hooks]
+                    validated_data = [pipe(item, *hook_funcs) for item in validated_data]
+                else:
+                    for hook in model_config.post_hooks:
+                        hook_result = hook(validated_data, request=request)
+                        if settings.DEBUG:
+                            validated_data = _check_post_hook_result(
+                                original_data=validated_data,
+                                result_data=hook_result,
+                                model=model
+                            )
+                        else:
+                            validated_data = hook_result or validated_data
 
             return validated_data
 
