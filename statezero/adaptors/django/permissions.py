@@ -25,6 +25,7 @@ class AllowAllPermission(AbstractPermission):
             ActionType.DELETE,
             ActionType.READ,
             ActionType.UPDATE,
+            ActionType.BULK_CREATE,
         }
 
     def allowed_object_actions(self, request, obj, model: Type[ORMModel]) -> Set[ActionType]:  # type: ignore
@@ -33,6 +34,7 @@ class AllowAllPermission(AbstractPermission):
             ActionType.DELETE,
             ActionType.READ,
             ActionType.UPDATE,
+            ActionType.BULK_CREATE,
         }
     
     def _get_user_fields(self) -> Set[str]:
@@ -74,6 +76,7 @@ class IsAuthenticatedPermission(AbstractPermission):
             ActionType.DELETE,
             ActionType.READ,
             ActionType.UPDATE,
+            ActionType.BULK_CREATE,
         }
 
     def allowed_object_actions(
@@ -86,6 +89,7 @@ class IsAuthenticatedPermission(AbstractPermission):
             ActionType.DELETE,
             ActionType.READ,
             ActionType.UPDATE,
+            ActionType.BULK_CREATE,
         }
     
     def _get_user_fields(self) -> Set[str]:
@@ -134,6 +138,7 @@ class IsStaffPermission(AbstractPermission):
             ActionType.DELETE,
             ActionType.READ,
             ActionType.UPDATE,
+            ActionType.BULK_CREATE,
         }
 
     def allowed_object_actions(
@@ -146,6 +151,7 @@ class IsStaffPermission(AbstractPermission):
             ActionType.DELETE,
             ActionType.READ,
             ActionType.UPDATE,
+            ActionType.BULK_CREATE,
         }
     
     def _get_user_fields(self) -> Set[str]:

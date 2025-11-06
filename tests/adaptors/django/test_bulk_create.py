@@ -4,7 +4,7 @@ from unittest.mock import Mock
 from statezero.adaptors.django.config import config, registry
 from statezero.adaptors.django.serializers import DRFDynamicSerializer
 from statezero.core.ast_parser import ASTParser
-from tests.django_app.models import DummyModel, DummyRelatedModel
+from tests.django_app.models import DummyModel, DummyRelatedModel, Order
 
 
 class BulkCreateSerializerTests(TestCase):
@@ -216,6 +216,146 @@ class BulkCreateEndToEndTests(TestCase):
 
         item2 = DummyModel.objects.get(name="Item 2")
         self.assertEqual(item2.related, self.related)
+
+    def test_bulk_create_with_hooks(self):
+        """Test bulk_create with pre and post hooks using Order model"""
+        mock_request = Mock()
+
+        # Order model has:
+        # - pre_hooks=[normalize_email] - normalizes email to lowercase/stripped
+        # - post_hooks=[generate_order_number] - generates order number if not provided or if it's DUMMY
+
+        ast = {
+            "type": "bulk_create",
+            "data": [
+                {
+                    "customer_name": "John Doe",
+                    "customer_email": "  JOHN@EXAMPLE.COM  ",  # Should be normalized to lowercase and stripped
+                    "order_number": "ORD-BULK-001",  # Valid order number, won't trigger post-hook
+                    "total": "100.00"
+                },
+                {
+                    "customer_name": "Jane Smith",
+                    "customer_email": "JANE@TEST.COM",  # Should be normalized
+                    "order_number": "ORD-BULK-002",  # Valid order number, won't trigger post-hook
+                    "total": "200.00"
+                },
+                {
+                    "customer_name": "Bob Wilson",
+                    "customer_email": "  BOB@EXAMPLE.COM",  # Should be normalized
+                    "order_number": "ORD-BULK-003",  # Valid order number, won't trigger post-hook
+                    "total": "150.00"
+                }
+            ]
+        }
+
+        order_model_name = config.orm_provider.get_model_name(Order)
+        parser = ASTParser(
+            engine=config.orm_provider,
+            serializer=config.serializer,
+            model=Order,
+            config=config,
+            registry=registry,
+            base_queryset=Order.objects.all(),
+            serializer_options={"fields": ["customer_name", "customer_email", "order_number", "total"]},
+            request=mock_request
+        )
+
+        result = parser.parse(ast)
+
+        # Verify creation
+        self.assertTrue(result["metadata"]["created"])
+
+        # Verify items were created
+        created_orders = Order.objects.filter(customer_name__in=["John Doe", "Jane Smith", "Bob Wilson"])
+        self.assertEqual(created_orders.count(), 3)
+
+        # Verify pre-hook (normalize_email) worked
+        john_order = Order.objects.get(customer_name="John Doe")
+        self.assertEqual(john_order.customer_email, "john@example.com")  # Normalized
+
+        jane_order = Order.objects.get(customer_name="Jane Smith")
+        self.assertEqual(jane_order.customer_email, "jane@test.com")  # Normalized
+
+        bob_order = Order.objects.get(customer_name="Bob Wilson")
+        self.assertEqual(bob_order.customer_email, "bob@example.com")  # Normalized
+
+        # Verify order numbers were preserved (no DUMMY in them, so post-hook didn't change them)
+        self.assertEqual(john_order.order_number, "ORD-BULK-001")
+        self.assertEqual(jane_order.order_number, "ORD-BULK-002")
+        self.assertEqual(bob_order.order_number, "ORD-BULK-003")
+
+        # Verify all order numbers are unique (important for bulk operations)
+        order_numbers = {john_order.order_number, jane_order.order_number, bob_order.order_number}
+        self.assertEqual(len(order_numbers), 3, "All order numbers should be unique")
+
+
+    def test_bulk_create_with_dummy_order_numbers(self):
+        """Test that post-hook generates unique order numbers for DUMMY values in bulk operations"""
+        mock_request = Mock()
+
+        ast = {
+            "type": "bulk_create",
+            "data": [
+                {
+                    "customer_name": "Test Order 1",
+                    "customer_email": "test1@example.com",
+                    "order_number": "DUMMY-1",  # Should be replaced with unique UUID-based number
+                    "total": "100.00"
+                },
+                {
+                    "customer_name": "Test Order 2",
+                    "customer_email": "test2@example.com",
+                    "order_number": "DUMMY-2",  # Should be replaced with unique UUID-based number
+                    "total": "200.00"
+                },
+                {
+                    "customer_name": "Test Order 3",
+                    "customer_email": "test3@example.com",
+                    "order_number": "DUMMY-3",  # Should be replaced with unique UUID-based number
+                    "total": "150.00"
+                }
+            ]
+        }
+
+        parser = ASTParser(
+            engine=config.orm_provider,
+            serializer=config.serializer,
+            model=Order,
+            config=config,
+            registry=registry,
+            base_queryset=Order.objects.all(),
+            serializer_options={"fields": ["customer_name", "customer_email", "order_number", "total"]},
+            request=mock_request
+        )
+
+        result = parser.parse(ast)
+
+        # Verify creation
+        self.assertTrue(result["metadata"]["created"])
+
+        # Verify items were created
+        created_orders = Order.objects.filter(customer_name__startswith="Test Order")
+        self.assertEqual(created_orders.count(), 3)
+
+        # Get all the orders
+        order1 = Order.objects.get(customer_name="Test Order 1")
+        order2 = Order.objects.get(customer_name="Test Order 2")
+        order3 = Order.objects.get(customer_name="Test Order 3")
+
+        # Verify post-hook replaced DUMMY values with ORD- prefixed numbers
+        self.assertTrue(order1.order_number.startswith("ORD-"))
+        self.assertNotIn("DUMMY", order1.order_number)
+
+        self.assertTrue(order2.order_number.startswith("ORD-"))
+        self.assertNotIn("DUMMY", order2.order_number)
+
+        self.assertTrue(order3.order_number.startswith("ORD-"))
+        self.assertNotIn("DUMMY", order3.order_number)
+
+        # CRITICAL: Verify all order numbers are unique (no duplicates)
+        order_numbers = {order1.order_number, order2.order_number, order3.order_number}
+        self.assertEqual(len(order_numbers), 3, "All generated order numbers must be unique")
 
 
 if __name__ == "__main__":

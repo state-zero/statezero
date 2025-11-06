@@ -19,6 +19,7 @@ class ReadOnlyPermission(AbstractPermission):
                 ActionType.READ,
                 ActionType.UPDATE,
                 ActionType.DELETE,
+                ActionType.BULK_CREATE,
             }
         return {ActionType.READ}
 
@@ -31,6 +32,7 @@ class ReadOnlyPermission(AbstractPermission):
                 ActionType.READ,
                 ActionType.UPDATE,
                 ActionType.DELETE,
+                ActionType.BULK_CREATE,
             }
         return {ActionType.READ}
 
@@ -62,8 +64,9 @@ class RestrictedFieldsPermission(AbstractPermission):
                 ActionType.READ,
                 ActionType.UPDATE,
                 ActionType.DELETE,
+                ActionType.BULK_CREATE,
             }
-        return {ActionType.CREATE, ActionType.READ, ActionType.UPDATE}
+        return {ActionType.CREATE, ActionType.READ, ActionType.UPDATE, ActionType.BULK_CREATE}
 
     def allowed_object_actions(
         self, request, obj, model: Type[ORMModel]
@@ -74,8 +77,9 @@ class RestrictedFieldsPermission(AbstractPermission):
                 ActionType.READ,
                 ActionType.UPDATE,
                 ActionType.DELETE,
+                ActionType.BULK_CREATE,
             }
-        return {ActionType.CREATE, ActionType.READ, ActionType.UPDATE}
+        return {ActionType.CREATE, ActionType.READ, ActionType.UPDATE, ActionType.BULK_CREATE}
 
     def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
         if hasattr(request, "user") and request.user.is_superuser:
@@ -114,12 +118,14 @@ class NameFilterPermission(AbstractPermission):
                 ActionType.READ,
                 ActionType.UPDATE,
                 ActionType.DELETE,
+                ActionType.BULK_CREATE,
             }
         return {
             ActionType.CREATE,
             ActionType.READ,
             ActionType.UPDATE,
             ActionType.DELETE,
+            ActionType.BULK_CREATE,
         }
 
     def allowed_object_actions(
@@ -131,6 +137,7 @@ class NameFilterPermission(AbstractPermission):
                 ActionType.READ,
                 ActionType.UPDATE,
                 ActionType.DELETE,
+                ActionType.BULK_CREATE,
             }
         if obj.name.startswith("Allowed"):
             return {
@@ -138,6 +145,7 @@ class NameFilterPermission(AbstractPermission):
                 ActionType.READ,
                 ActionType.UPDATE,
                 ActionType.DELETE,
+                ActionType.BULK_CREATE,
             }
         return set()
 
@@ -166,12 +174,14 @@ class NameFilterPermission(AbstractPermission):
                 ActionType.READ,
                 ActionType.UPDATE,
                 ActionType.DELETE,
+                ActionType.BULK_CREATE,
             }
         return {
             ActionType.CREATE,
             ActionType.READ,
             ActionType.UPDATE,
             ActionType.DELETE,
+            ActionType.BULK_CREATE,
         }
 
     def allowed_object_actions(
@@ -183,6 +193,7 @@ class NameFilterPermission(AbstractPermission):
                 ActionType.READ,
                 ActionType.UPDATE,
                 ActionType.DELETE,
+                ActionType.BULK_CREATE,
             }
         # Only objects with an allowed prefix can be acted upon.
         if obj.name.startswith("Allowed"):
@@ -191,6 +202,7 @@ class NameFilterPermission(AbstractPermission):
                 ActionType.READ,
                 ActionType.UPDATE,
                 ActionType.DELETE,
+                ActionType.BULK_CREATE,
             }
         return set()
 

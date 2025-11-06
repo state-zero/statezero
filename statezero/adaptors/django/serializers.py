@@ -1,5 +1,4 @@
 from typing import Any, Dict, List, Optional, Set, Type, Union
-from functools import partial
 from django.db import models
 from django.conf import settings
 from django.utils.module_loading import import_string
@@ -7,7 +6,8 @@ from rest_framework import serializers
 import contextvars
 from contextlib import contextmanager
 import logging
-from cytoolz import pluck, keyfilter, pipe
+from cytoolz import pluck, keyfilter
+from cytoolz.functoolz import thread_first
 from zen_queries import queries_disabled
 
 from statezero.adaptors.django.config import config, registry
@@ -504,11 +504,30 @@ class DRFDynamicSerializer(AbstractDataSerializer):
 
         # Run pre-hooks on filtered data (hooks can add any DB fields)
         if model_config and model_config.pre_hooks:
-            hook_funcs = [partial(hook, request=request) for hook in model_config.pre_hooks]
-            if many:
-                data = [pipe(item, *hook_funcs) for item in data]
+            # Wrap hooks with validation in DEBUG mode
+            if settings.DEBUG:
+                # Get all DB fields for validation
+                all_db_fields = config.orm_provider.get_db_fields(model)
+
+                def make_validated_pre_hook(hook):
+                    def validated_hook(data, request=None):
+                        original_data = data
+                        result = hook(data, request=request)
+                        return _check_pre_hook_result(
+                            original_data=original_data,
+                            result_data=result,
+                            model=model,
+                            serializer_fields=all_db_fields
+                        )
+                    return validated_hook
+                hook_funcs = [(make_validated_pre_hook(hook), request) for hook in model_config.pre_hooks]
             else:
-                data = pipe(data, *hook_funcs)
+                hook_funcs = [(hook, request) for hook in model_config.pre_hooks]
+
+            if many:
+                data = [thread_first(item, *hook_funcs) for item in data]
+            else:
+                data = thread_first(data, *hook_funcs)
 
         # Expand fields_map to include fields that hooks may have added
         # For partial updates, only include allowed_fields + any fields in the data
@@ -537,20 +556,26 @@ class DRFDynamicSerializer(AbstractDataSerializer):
             validated_data = serializer.validated_data
 
             if model_config and model_config.post_hooks:
-                if many:
-                    hook_funcs = [partial(hook, request=request) for hook in model_config.post_hooks]
-                    validated_data = [pipe(item, *hook_funcs) for item in validated_data]
-                else:
-                    for hook in model_config.post_hooks:
-                        hook_result = hook(validated_data, request=request)
-                        if settings.DEBUG:
-                            validated_data = _check_post_hook_result(
-                                original_data=validated_data,
-                                result_data=hook_result,
+                # Wrap hooks with validation in DEBUG mode
+                if settings.DEBUG:
+                    def make_validated_hook(hook):
+                        def validated_hook(data, request=None):
+                            original_data = data
+                            result = hook(data, request=request)
+                            return _check_post_hook_result(
+                                original_data=original_data,
+                                result_data=result,
                                 model=model
                             )
-                        else:
-                            validated_data = hook_result or validated_data
+                        return validated_hook
+                    hook_funcs = [(make_validated_hook(hook), request) for hook in model_config.post_hooks]
+                else:
+                    hook_funcs = [(hook, request) for hook in model_config.post_hooks]
+
+                if many:
+                    validated_data = [thread_first(item, *hook_funcs) for item in validated_data]
+                else:
+                    validated_data = thread_first(validated_data, *hook_funcs)
 
             return validated_data
 
