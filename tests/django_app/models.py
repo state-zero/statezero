@@ -256,13 +256,51 @@ class OrderItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
-    
+
     def __str__(self):
         return f"{self.quantity}x {self.product.name}"
-    
+
     @property
     def subtotal(self):
         return float(self.price) * self.quantity
-    
+
     class Meta:
         app_label = "django_app"
+
+
+class RatePlan(models.Model):
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        app_label = "django_app"
+
+
+class DailyRate(models.Model):
+    rate_plan = models.ForeignKey(RatePlan, on_delete=models.CASCADE, related_name="daily_rates")
+    date = models.DateField()
+    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    min_stay_arrival = models.IntegerField(null=True, blank=True)
+    min_stay_through = models.IntegerField(null=True, blank=True)
+    max_stay = models.IntegerField(null=True, blank=True)
+    closed_to_arrival = models.BooleanField(default=False)
+    closed_to_departure = models.BooleanField(default=False)
+    stop_sell = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.rate_plan.name} - {self.date}"
+
+    class Meta:
+        app_label = "django_app"
+        indexes = [
+            models.Index(fields=["rate_plan", "date"]),
+            models.Index(fields=["date"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["rate_plan", "date"],
+                name="unique_rate_plan_date"
+            )
+        ]

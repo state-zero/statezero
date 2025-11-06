@@ -507,10 +507,16 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                 else:
                     data = hook_result or data
 
-        # Expand fields_map to all DB fields for serializer validation
-        # This allows hooks to add fields that aren't in the original fields_map
-        all_db_fields = config.orm_provider.get_db_fields(model)
-        expanded_fields_map = {model_name: all_db_fields}
+        # Expand fields_map to include fields that hooks may have added
+        # For partial updates, only include allowed_fields + any fields in the data
+        # This prevents validation errors on required fields that were filtered out
+        if partial:
+            # For partial updates: only include fields that are either allowed or in the data
+            expanded_fields = allowed_fields | set(data.keys())
+        else:
+            # For creates: include all DB fields to allow hooks to add any field
+            expanded_fields = config.orm_provider.get_db_fields(model)
+        expanded_fields_map = {model_name: expanded_fields}
 
         # Use the context manager with expanded fields map
         with fields_map_context(expanded_fields_map):

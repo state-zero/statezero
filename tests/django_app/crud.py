@@ -6,7 +6,8 @@ from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      DummyRelatedModel,
                                      ModelWithCustomPKRelation,
                                      NameFilterCustomPKModel, Product,
-                                     ProductCategory, Order, OrderItem, FileTest)
+                                     ProductCategory, Order, OrderItem, FileTest,
+                                     RatePlan, DailyRate)
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
 from statezero.core.classes import AdditionalField, DisplayMetadata, FieldGroup, FieldDisplayConfig
@@ -257,5 +258,29 @@ registry.register(
                 title="Subtotal"
             )
         ],
+    ),
+)
+
+# Register RatePlan
+registry.register(
+    RatePlan,
+    ModelConfig(
+        model=RatePlan,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+# Register DailyRate
+registry.register(
+    DailyRate,
+    ModelConfig(
+        model=DailyRate,
+        filterable_fields="__all__",
+        searchable_fields={},
+        ordering_fields={"date", "rate_plan"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )

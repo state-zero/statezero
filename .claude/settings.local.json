@@ -5,7 +5,8 @@
       "WebSearch",
       "Bash(python test_hook_fields.py:*)",
       "Bash(move test_hook_fields.py testsadaptorsdjangotest_hook_fields.py)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "WebFetch(domain:www.django-rest-framework.org)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"
