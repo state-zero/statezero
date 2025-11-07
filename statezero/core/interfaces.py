@@ -339,13 +339,12 @@ class AbstractORMProvider(ABC):
         request: RequestType,
         model: ORMModel,  # type:ignore
         initial_ast: Dict[str, Any],
-        custom_querysets: Dict[str, Type],
         registered_permissions: List[Type],
     ) -> Any:
         """
         Assemble and return the base QuerySet (or equivalent) for the given model.
         This method considers the request context, initial AST (filters, sorting, etc.),
-        custom query sets, and any model-specific permission restrictions.
+        and any model-specific permission restrictions.
         """
         pass
 

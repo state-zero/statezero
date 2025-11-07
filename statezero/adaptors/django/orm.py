@@ -770,14 +770,9 @@ class DjangoORMAdapter(AbstractORMProvider):
         req: RequestType,
         model: Type,
         initial_ast: Dict[str, Any],
-        custom_querysets: Dict[str, Type[AbstractCustomQueryset]],
         registered_permissions: List[Type[AbstractPermission]],
     ) -> Any:
         """Assemble and return the base QuerySet for the given model."""
-        custom_name = initial_ast.get("custom_queryset")
-        if custom_name and custom_name in custom_querysets:
-            custom_queryset_class = custom_querysets[custom_name]
-            return custom_queryset_class().get_queryset(req)
         return model.objects.all()
 
     def get_fields(self, model: models.Model) -> Set[str]:

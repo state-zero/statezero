@@ -144,8 +144,6 @@ class ModelConfig:
     -----------
     model: Type
         The model class to register
-    custom_querysets: Dict[str, Type[AbstractCustomQueryset]], optional
-        Custom queryset methods for this model
     permissions: List[Type[AbstractPermission]], optional
         Permission classes that control access to this model
     pre_hooks: List[Callable], optional
@@ -171,8 +169,6 @@ class ModelConfig:
     def __init__(
         self,
         model: Type,
-        custom_querysets: Optional[Dict[str, Type[AbstractCustomQueryset]]] = None,
-        custom_querysets_user_scoped: Optional[Dict[str, bool]] = None,
         permissions: Optional[List[Type[AbstractPermission]]] = None,
         pre_hooks: Optional[List] = None,
         post_hooks: Optional[List] = None,
@@ -185,8 +181,6 @@ class ModelConfig:
         DEBUG: bool = False,
     ):
         self.model = model
-        self._custom_querysets = custom_querysets or {}
-        self._custom_querysets_user_scoped = custom_querysets_user_scoped or {}
         self._permissions = permissions or []
         self.pre_hooks = pre_hooks or []
         self.post_hooks = post_hooks or []
@@ -214,37 +208,6 @@ class ModelConfig:
                 resolved.append(perm)
         return resolved
 
-    @property
-    def custom_querysets(self):
-        """Resolve queryset class strings to actual classes on each access"""
-        resolved = {}
-        for key, queryset in self._custom_querysets.items():
-            if isinstance(queryset, str):
-                from django.utils.module_loading import import_string
-                try:
-                    qs_class = import_string(queryset)
-                    resolved[key] = qs_class
-                except ImportError:
-                    raise ImportError(f"Could not import queryset class: {queryset}")
-            else:
-                resolved[key] = queryset
-        return resolved
-    
-    @property
-    def custom_querysets_user_scoped(self):
-        """Resolve queryset class strings to actual classes on each access"""
-        resolved = {}
-        for key, queryset in self._custom_querysets_user_scoped.items():
-            if isinstance(queryset, str):
-                from django.utils.module_loading import import_string
-                try:
-                    qs_class = import_string(queryset)
-                    resolved[key] = qs_class
-                except ImportError:
-                    raise ImportError(f"Could not import queryset class: {queryset}")
-            else:
-                resolved[key] = queryset
-        return resolved
 
 class Registry:
     """

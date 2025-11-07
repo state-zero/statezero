@@ -168,11 +168,6 @@ registry.register(
         ],
         # Add pre-processing hooks
         pre_hooks=[set_created_by],
-        # Add custom querysets here
-        custom_querysets={
-            'active_products': "tests.django_app.custom_querysets.ActiveProductsQuerySet",
-            'by_price_range': "tests.django_app.custom_querysets.PricingQuerySet"
-        },
         # Add display metadata for frontend customization
         display=DisplayMetadata(
             display_title="Product Management",
@@ -232,12 +227,7 @@ registry.register(
         permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
         # Use pre and post hooks
         pre_hooks=[normalize_email],
-        post_hooks=[generate_order_number],
-        # Add custom querysets here
-        custom_querysets={
-            'recent_orders': "tests.django_app.custom_querysets.RecentOrdersQuerySet",
-            'orders_by_status': "tests.django_app.custom_querysets.OrderStatusQuerySet"
-        }
+        post_hooks=[generate_order_number]
     ),
 )
 

@@ -113,7 +113,6 @@ class RequestProcessor:
             req=req,
             model=model,
             initial_ast=initial_query_ast,
-            custom_querysets=model_config.custom_querysets,
             registered_permissions=model_config.permissions,
         )
 
