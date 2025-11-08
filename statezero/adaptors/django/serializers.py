@@ -468,9 +468,19 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                     result["included"][model_type] = pk_indexed_data
 
                 except Exception as e:
-                    logger.error(f"Error serializing {model_type}: {e}")
-                    # Include an empty list for this model type to maintain the expected structure
+                    logger.error(
+                        f"Error serializing {model_type}: {e}",
+                        exc_info=True,  # This logs the full traceback
+                        extra={
+                            "model_type": model_type,
+                            "instance_count": len(instances),
+                            "instance_pks": [getattr(inst, inst._meta.pk.name, None) for inst in instances[:5]]  # First 5 PKs for debugging
+                        }
+                    )
+                    # Include an empty dict for this model type to maintain the expected structure
                     result["included"][model_type] = {}
+                    # Re-raise to propagate the error
+                    raise
 
             return result
 
