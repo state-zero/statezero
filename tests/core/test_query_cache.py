@@ -1264,3 +1264,106 @@ class QueryCacheIntegrationTest(TransactionTestCase):
         # First should be ascending, second descending
         self.assertEqual(names1, sorted(names1))
         self.assertEqual(names2, sorted(names2, reverse=True))
+
+    def test_pagination_with_permission_filter_queryset(self):
+        """
+        Test that pagination works with permission classes that filter the queryset
+        in bulk_operation_allowed.
+
+        This test reproduces the original bug where passing a sliced queryset to
+        check_bulk_permissions would cause:
+        "TypeError: Cannot filter a query once a slice has been taken"
+
+        The fix was to call check_bulk_permissions BEFORE slicing the queryset.
+        """
+        from tests.django_app.models import NameFilterCustomPKModel
+        from statezero.adaptors.django.config import registry
+        from statezero.core.config import ModelConfig
+        from tests.django_app.permissions import FilterInBulkPermission
+
+        # Save original config
+        original_config = registry._models_config.get(NameFilterCustomPKModel)
+
+        # Override registration with FilterInBulkPermission at runtime for this test
+        registry._models_config[NameFilterCustomPKModel] = ModelConfig(
+            model=NameFilterCustomPKModel,
+            filterable_fields={"name", "custom_pk"},
+            searchable_fields={"name"},
+            ordering_fields={"name", "custom_pk"},
+            permissions=[FilterInBulkPermission],
+        )
+
+        try:
+            url = reverse("statezero:model_view", args=["django_app.NameFilterCustomPKModel"])
+
+            # Clean up and create test data
+            NameFilterCustomPKModel.objects.all().delete()
+
+            # Create items - the FilterInBulkPermission filters by name__startswith="Allowed"
+            # Create 5 items that match the permission filter
+            for i in range(5):
+                NameFilterCustomPKModel.objects.create(name=f"Allowed{i:02d}")
+
+            # Create 5 items that don't match (should be filtered out by permission)
+            for i in range(5):
+                NameFilterCustomPKModel.objects.create(name=f"Denied{i:02d}")
+
+            # Request with pagination (limit 3, offset 0)
+            # This would have failed before the fix with:
+            # "TypeError: Cannot filter a query once a slice has been taken"
+            # Because the permission's bulk_operation_allowed would receive a sliced queryset
+            payload = {
+                "ast": {
+                    "query": {
+                        "type": "read",
+                    },
+                    "serializerOptions": {"limit": 3, "offset": 0},
+                }
+            }
+
+            response = self.client.post(url, data=payload, format="json")
+            self.assertEqual(response.status_code, 200)
+
+            ids = response.data["data"]["data"]
+            included = response.data["data"]["included"]["django_app.namefiltercustompkmodel"]
+            names = [included[id]["name"] for id in ids]
+
+            # Should only return 3 items due to limit
+            self.assertEqual(len(names), 3)
+
+            # All returned items should start with "Allowed" (permission filter)
+            for name in names:
+                self.assertTrue(name.startswith("Allowed"),
+                              f"Expected name to start with 'Allowed', got {name}")
+
+            # Test second page
+            payload2 = {
+                "ast": {
+                    "query": {
+                        "type": "read",
+                    },
+                    "serializerOptions": {"limit": 3, "offset": 3},
+                }
+            }
+
+            response2 = self.client.post(url, data=payload2, format="json")
+            self.assertEqual(response2.status_code, 200)
+
+            ids2 = response2.data["data"]["data"]
+            included2 = response2.data["data"]["included"]["django_app.namefiltercustompkmodel"]
+            names2 = [included2[id]["name"] for id in ids2]
+
+            # Should return 2 items (5 total matching, 3 on first page, 2 on second)
+            self.assertEqual(len(names2), 2)
+
+            # All should still start with "Allowed"
+            for name in names2:
+                self.assertTrue(name.startswith("Allowed"),
+                              f"Expected name to start with 'Allowed', got {name}")
+        finally:
+            # Restore original registration
+            if original_config:
+                registry._models_config[NameFilterCustomPKModel] = original_config
+            else:
+                # If it wasn't registered before, remove it
+                registry._models_config.pop(NameFilterCustomPKModel, None)

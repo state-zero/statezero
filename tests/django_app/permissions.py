@@ -214,3 +214,70 @@ class NameFilterPermission(AbstractPermission):
 
     def create_fields(self, request: RequestType, model: Type) -> Set[str]:
         return "__all__"
+
+
+    def get_permission_group_identifier(self, request: RequestType, model: ORMModel) -> str:
+        if hasattr(request, "user") and request.user.is_superuser:
+            return f"superuser:{request.user.id}"
+        return "name_filtered"
+
+
+# A permission class that filters in bulk_operation_allowed to test pagination bug fix
+class FilterInBulkPermission(AbstractPermission):
+    def filter_queryset(self, request: RequestType, queryset: Any) -> Any:
+        # Filter by name prefix in filter_queryset
+        return queryset.filter(name__startswith="Allowed")
+
+    def bulk_operation_allowed(
+        self,
+        request: RequestType,
+        items: Any,
+        action_type: ActionType,
+        model: type,
+    ) -> bool:
+        """
+        This method filters the queryset to check bulk permissions.
+        This reproduces the bug where if 'items' is already sliced,
+        calling .filter() would raise:
+        "TypeError: Cannot filter a query once a slice has been taken"
+        """
+        # Try to filter the queryset - this would fail if items is already sliced
+        filtered_count = items.filter(name__startswith="Allowed").count()
+        # Allow the operation if we found items matching the filter
+        return filtered_count > 0
+
+    def allowed_actions(
+        self, request: RequestType, model: Type[ORMModel]
+    ) -> Set[ActionType]:
+        return {
+            ActionType.CREATE,
+            ActionType.READ,
+            ActionType.UPDATE,
+            ActionType.DELETE,
+            ActionType.BULK_CREATE,
+        }
+
+    def allowed_object_actions(
+        self, request, obj, model: Type[ORMModel]
+    ) -> Set[ActionType]:
+        if obj.name.startswith("Allowed"):
+            return {
+                ActionType.CREATE,
+                ActionType.READ,
+                ActionType.UPDATE,
+                ActionType.DELETE,
+                ActionType.BULK_CREATE,
+            }
+        return set()
+
+    def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
+        return "__all__"
+
+    def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
+        return "__all__"
+
+    def create_fields(self, request: RequestType, model: Type) -> Set[str]:
+        return "__all__"
+
+    def get_permission_group_identifier(self, request: RequestType, model: ORMModel) -> str:
+        return "filter_in_bulk"

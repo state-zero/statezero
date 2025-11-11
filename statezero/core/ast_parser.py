@@ -1009,11 +1009,12 @@ class ASTParser:
             return cached_result
 
         # Cache miss - execute query with permission checks
-        # Pass paginated queryset with offset=None, limit=None to prevent re-pagination
+        # Pass UNSLICED queryset so permission checks can filter it,
+        # but with offset/limit so fetch_list can apply pagination after permission checks
         rows = self.engine.fetch_list(
-            paginated_qs,
-            offset=None,  # Already applied above
-            limit=None,   # Already applied above
+            self.current_queryset,
+            offset=offset,
+            limit=limit_val,
             req=self.request,
             permissions=permissions,
         )
