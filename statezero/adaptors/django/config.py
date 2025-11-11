@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 class DjangoLocalConfig(AppConfig):
     def __init__(self):
         self.DEBUG = settings.DEBUG
+        self.enable_telemetry = getattr(settings, 'STATEZERO_ENABLE_TELEMETRY', False)
 
     def initialize(self):
         from statezero.adaptors.django.event_emitters import \

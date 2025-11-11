@@ -207,12 +207,10 @@ class RequestProcessor:
             )
             result: Dict[str, Any] = parser.parse(final_query_ast)
 
-            # Add telemetry data to result metadata if enabled
+            # Add telemetry data separately (will be moved to headers by adaptor)
             if self.config.enable_telemetry:
                 telemetry_data = telemetry_ctx.get_telemetry_data()
-                if "metadata" not in result:
-                    result["metadata"] = {}
-                result["metadata"]["telemetry"] = telemetry_data
+                result["__telemetry__"] = telemetry_data
 
             return result
         finally:

@@ -107,7 +107,14 @@ class ModelView(APIView):
                 result = processor.process_request(req=request)
         except Exception as original_exception:
             return explicit_exception_handler(original_exception)
-        return Response(result, status=status.HTTP_200_OK)
+
+        # Extract telemetry and put it in response headers
+        import json
+        telemetry_data = result.pop("__telemetry__", None)
+        response = Response(result, status=status.HTTP_200_OK)
+        if telemetry_data:
+            response["X-StateZero-Telemetry"] = json.dumps(telemetry_data)
+        return response
 
 class SchemaView(APIView):
     permission_classes = [ORMBridgeViewAccessGate]
