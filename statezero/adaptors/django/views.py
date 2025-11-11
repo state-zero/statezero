@@ -100,16 +100,32 @@ class ModelView(APIView):
 
     @transaction.atomic
     def post(self, request, model_name):
+        from statezero.core.telemetry import create_telemetry_context, clear_telemetry_context
+        from statezero.adaptors.django.db_telemetry import track_db_queries
+        import json
+
+        # Create telemetry context
+        telemetry_ctx = create_telemetry_context(enabled=config.enable_telemetry)
+
         processor = RequestProcessor(config=config, registry=registry)
         timeout_ms = getattr(settings, 'STATEZERO_QUERY_TIMEOUT_MS', 1000)
         try:
             with config.context_manager(timeout_ms):
-                result = processor.process_request(req=request)
+                with track_db_queries():
+                    result = processor.process_request(req=request)
+
+            # Get telemetry data AFTER track_db_queries context exits
+            # so that DB queries are included
+            if config.enable_telemetry and telemetry_ctx:
+                telemetry_data = telemetry_ctx.get_telemetry_data()
+                result["__telemetry__"] = telemetry_data
+
         except Exception as original_exception:
             return explicit_exception_handler(original_exception)
+        finally:
+            clear_telemetry_context()
 
         # Extract telemetry and put it in response headers
-        import json
         telemetry_data = result.pop("__telemetry__", None)
         response = Response(result, status=status.HTTP_200_OK)
         if telemetry_data:

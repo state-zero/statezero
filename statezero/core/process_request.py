@@ -101,118 +101,113 @@ class RequestProcessor:
             raise ValidationError(str(e))
 
     def process_request(self, req: Any) -> Dict[str, Any]:
-        # Create telemetry context if enabled
-        telemetry_ctx = create_telemetry_context(enabled=self.config.enable_telemetry)
+        # Get telemetry context (created by adaptor before calling this)
+        from statezero.core.telemetry import get_telemetry_context
+        telemetry_ctx = get_telemetry_context()
 
-        try:
-            body: Dict[str, Any] = req.data or {}
-            ast_body: Dict[str, Any] = body.get("ast", {})
-            initial_query_ast: Dict[str, Any] = ast_body.get("initial_query", {})
-            final_query_ast: Dict[str, Any] = ast_body.get("query", {})
+        body: Dict[str, Any] = req.data or {}
+        ast_body: Dict[str, Any] = body.get("ast", {})
+        initial_query_ast: Dict[str, Any] = ast_body.get("initial_query", {})
+        final_query_ast: Dict[str, Any] = ast_body.get("query", {})
 
-            # Record the query AST in telemetry
+        # Record the query AST in telemetry
+        if telemetry_ctx:
+            telemetry_ctx.set_query_ast(final_query_ast)
+
+        model_name: str = req.parser_context.get("kwargs", {}).get("model_name")
+        model = self.orm_provider.get_model_by_name(model_name)
+        model_config: ModelConfig = self.registry.get_config(model)
+
+        base_queryset = self.orm_provider.get_queryset(
+            req=req,
+            model=model,
+            initial_ast=initial_query_ast,
+            registered_permissions=model_config.permissions,
+        )
+
+        for permission_cls in model_config.permissions:
+            # Record permission class being applied
             if telemetry_ctx:
-                telemetry_ctx.set_query_ast(final_query_ast)
+                permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
+                telemetry_ctx.record_permission_class_applied(permission_class_name)
 
-            model_name: str = req.parser_context.get("kwargs", {}).get("model_name")
-            model = self.orm_provider.get_model_by_name(model_name)
-            model_config: ModelConfig = self.registry.get_config(model)
+            # Apply permission filter
+            base_queryset = permission_cls().filter_queryset(req, base_queryset)
 
-            base_queryset = self.orm_provider.get_queryset(
-                req=req,
-                model=model,
-                initial_ast=initial_query_ast,
-                registered_permissions=model_config.permissions,
-            )
+            # Record SQL after applying this permission
+            if telemetry_ctx:
+                try:
+                    from statezero.core.query_cache import _get_sql_from_queryset
+                    sql_data = _get_sql_from_queryset(base_queryset)
+                    if sql_data:
+                        sql, _ = sql_data
+                        telemetry_ctx.record_queryset_after_permission(permission_class_name, sql)
+                except Exception:
+                    pass  # Don't fail if we can't get SQL
 
-            for permission_cls in model_config.permissions:
-                # Record permission class being applied
-                if telemetry_ctx:
-                    permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
-                    telemetry_ctx.record_permission_class_applied(permission_class_name)
+        # ---- PERMISSION CHECKS: Global Level (Write operations remain here) ----
+        requested_actions: Set[ActionType] = ASTParser.get_requested_action_types(
+            final_query_ast
+        )
 
-                # Apply permission filter
-                base_queryset = permission_cls().filter_queryset(req, base_queryset)
-
-                # Record SQL after applying this permission
-                if telemetry_ctx:
-                    try:
-                        from statezero.core.query_cache import _get_sql_from_queryset
-                        sql_data = _get_sql_from_queryset(base_queryset)
-                        if sql_data:
-                            sql, _ = sql_data
-                            telemetry_ctx.record_queryset_after_permission(permission_class_name, sql)
-                    except Exception:
-                        pass  # Don't fail if we can't get SQL
-
-            # ---- PERMISSION CHECKS: Global Level (Write operations remain here) ----
-            requested_actions: Set[ActionType] = ASTParser.get_requested_action_types(
-                final_query_ast
-            )
-
-            allowed_global_actions: Set[ActionType] = set()
-            for permission_cls in model_config.permissions:
-                allowed_global_actions |= permission_cls().allowed_actions(req, model)
-            if "__all__" not in allowed_global_actions:
-                if not requested_actions.issubset(allowed_global_actions):
-                    missing = requested_actions - allowed_global_actions
-                    missing_str = ", ".join(action.value for action in missing)
-                    raise PermissionDenied(
-                        f"Missing global permissions for actions: {missing_str}"
-                    )
-
-            # For READ operations, delegate field permission checks to ASTValidator.
-            serializer_options = ast_body.get("serializerOptions", {})
-
-            # Invoke the ASTValidator to check read field permissions.
-            model_graph = self.orm_provider.build_model_graph(model)
-            validator = ASTValidator(
-                model_graph=model_graph,
-                get_model_name=self.orm_provider.get_model_name,
-                registry=self.registry,
-                request=req,
-                get_model_by_name=self.orm_provider.get_model_by_name,
-            )
-            validator.validate_fields(final_query_ast, model)
-
-            # ---- WRITE OPERATIONS: Filter incoming data to include only writable fields. ----
-            op = final_query_ast.get("type")
-            if op in ["create", "update"]:
-                data = final_query_ast.get("data", {})
-                # For create operations, pass create=True so that create_fields are used.
-                filtered_data = _filter_writable_data(
-                    data, req, model, model_config, self.orm_provider, create=(op == "create")
+        allowed_global_actions: Set[ActionType] = set()
+        for permission_cls in model_config.permissions:
+            allowed_global_actions |= permission_cls().allowed_actions(req, model)
+        if "__all__" not in allowed_global_actions:
+            if not requested_actions.issubset(allowed_global_actions):
+                missing = requested_actions - allowed_global_actions
+                missing_str = ", ".join(action.value for action in missing)
+                raise PermissionDenied(
+                    f"Missing global permissions for actions: {missing_str}"
                 )
-                final_query_ast["data"] = filtered_data
-            elif op in ["get_or_create", "update_or_create"]:
-                if "lookup" in final_query_ast:
-                    final_query_ast["lookup"] = _filter_writable_data(
-                        final_query_ast["lookup"], req, model, model_config, self.orm_provider, create=True
-                    )
-                if "defaults" in final_query_ast:
-                    final_query_ast["defaults"] = _filter_writable_data(
-                        final_query_ast["defaults"], req, model, model_config, self.orm_provider, create=True
-                    )
 
-            # Create and use the AST parser directly, instead of delegating to ORM provider
-            parser = ASTParser(
-                engine=self.orm_provider,
-                serializer=self.data_serializer,
-                model=model,
-                config=self.config,
-                registry=self.registry,
-                base_queryset=base_queryset,  # Pass the queryset here
-                serializer_options=serializer_options or {},
-                request=req,
+        # For READ operations, delegate field permission checks to ASTValidator.
+        serializer_options = ast_body.get("serializerOptions", {})
+
+        # Invoke the ASTValidator to check read field permissions.
+        model_graph = self.orm_provider.build_model_graph(model)
+        validator = ASTValidator(
+            model_graph=model_graph,
+            get_model_name=self.orm_provider.get_model_name,
+            registry=self.registry,
+            request=req,
+            get_model_by_name=self.orm_provider.get_model_by_name,
+        )
+        validator.validate_fields(final_query_ast, model)
+
+        # ---- WRITE OPERATIONS: Filter incoming data to include only writable fields. ----
+        op = final_query_ast.get("type")
+        if op in ["create", "update"]:
+            data = final_query_ast.get("data", {})
+            # For create operations, pass create=True so that create_fields are used.
+            filtered_data = _filter_writable_data(
+                data, req, model, model_config, self.orm_provider, create=(op == "create")
             )
-            result: Dict[str, Any] = parser.parse(final_query_ast)
+            final_query_ast["data"] = filtered_data
+        elif op in ["get_or_create", "update_or_create"]:
+            if "lookup" in final_query_ast:
+                final_query_ast["lookup"] = _filter_writable_data(
+                    final_query_ast["lookup"], req, model, model_config, self.orm_provider, create=True
+                )
+            if "defaults" in final_query_ast:
+                final_query_ast["defaults"] = _filter_writable_data(
+                    final_query_ast["defaults"], req, model, model_config, self.orm_provider, create=True
+                )
 
-            # Add telemetry data separately (will be moved to headers by adaptor)
-            if self.config.enable_telemetry:
-                telemetry_data = telemetry_ctx.get_telemetry_data()
-                result["__telemetry__"] = telemetry_data
+        # Create and use the AST parser directly, instead of delegating to ORM provider
+        parser = ASTParser(
+            engine=self.orm_provider,
+            serializer=self.data_serializer,
+            model=model,
+            config=self.config,
+            registry=self.registry,
+            base_queryset=base_queryset,  # Pass the queryset here
+            serializer_options=serializer_options or {},
+            request=req,
+        )
+        result: Dict[str, Any] = parser.parse(final_query_ast)
 
-            return result
-        finally:
-            # Clear telemetry context after request completes
-            clear_telemetry_context()
+        # Note: Telemetry data is added by the adaptor (views.py)
+        # AFTER DB query tracking context exits, so that all queries are captured
+
+        return result

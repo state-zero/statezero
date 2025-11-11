@@ -497,3 +497,54 @@ class TelemetryIntegrationTestCase(TransactionTestCase):
         # The key point is this is treated as a fresh request
         self.assertIn('cache', telemetry2)
 
+
+    def test_database_queries_are_tracked(self):
+        """
+        CRITICAL TEST: Verify database queries are actually tracked in telemetry.
+        
+        This catches the bug where data is returned but query_count is 0.
+        """
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
+
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "read",
+                }
+            }
+        }
+
+        # Make a request
+        response = self.client.post(
+            url,
+            data=payload,
+            format="json",
+            HTTP_X_CANONICAL_ID="db-tracking-test-001",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        # Verify we got data
+        self.assertIn('data', response.data)
+        returned_ids = response.data['data']['data']
+        self.assertGreater(len(returned_ids), 0, "Should return some data")
+
+        # Parse telemetry
+        self.assertIn('X-StateZero-Telemetry', response)
+        telemetry = json.loads(response['X-StateZero-Telemetry'])
+
+        # CRITICAL: Database queries MUST be tracked
+        query_count = telemetry['database']['query_count']
+        self.assertGreater(query_count, 0,
+                          f"CRITICAL BUG: Returned {len(returned_ids)} records but query_count is 0! "
+                          f"Telemetry is not tracking database queries.")
+
+        # Verify we have query details
+        queries = telemetry['database']['queries']
+        self.assertGreater(len(queries), 0, "Should have query details")
+
+        # Verify query has SQL
+        first_query = queries[0]
+        self.assertIn('sql', first_query)
+        self.assertTrue(first_query['sql'], "SQL should not be empty")
+
