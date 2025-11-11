@@ -6,7 +6,13 @@
       "Bash(python test_hook_fields.py:*)",
       "Bash(move test_hook_fields.py testsadaptorsdjangotest_hook_fields.py)",
       "Bash(python:*)",
-      "WebFetch(domain:www.django-rest-framework.org)"
+      "WebFetch(domain:www.django-rest-framework.org)",
+      "Bash(\"C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero\\statezero\\core\\query_cache.py\")",
+      "Bash(\"C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero\\statezero\\core\\telemetry.py\")",
+      "Bash(\"C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero\\tests\\core\\test_query_cache.py\")",
+      "Bash(\"C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero\\tests\\core\\test_telemetry.py\")",
+      "Bash(\"C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero\\statezero\\core\\ast_parser.py\")",
+      "Bash(\"C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero\\statezero\\core\\process_request.py\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"

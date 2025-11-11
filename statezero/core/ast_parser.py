@@ -12,6 +12,7 @@ from statezero.core.interfaces import (
     AbstractORMProvider,
 )
 from statezero.core.types import ActionType, ORMModel, RequestType
+from statezero.core.telemetry import get_telemetry_context
 
 
 class ResponseType(Enum):
@@ -78,6 +79,32 @@ class ASTParser:
             depth=0,  # Nested writes are not supported
             operation_type="update",
         )
+
+        # Record permission-validated fields in telemetry
+        telemetry_ctx = get_telemetry_context()
+        if telemetry_ctx:
+            model_name = self.engine.get_model_name(self.model)
+            # Record read fields
+            if self.read_fields_map:
+                telemetry_ctx.record_permission_fields(
+                    model_name,
+                    "read",
+                    list(self.read_fields_map.get(model_name, set()))
+                )
+            # Record create fields
+            if self.create_fields_map:
+                telemetry_ctx.record_permission_fields(
+                    model_name,
+                    "create",
+                    list(self.create_fields_map.get(model_name, set()))
+                )
+            # Record update fields
+            if self.update_fields_map:
+                telemetry_ctx.record_permission_fields(
+                    model_name,
+                    "update",
+                    list(self.update_fields_map.get(model_name, set()))
+                )
 
         # Add field maps to serializer options
         self.serializer_options["read_fields_map"] = self.read_fields_map
@@ -385,6 +412,20 @@ class ASTParser:
                     )
                 else:
                     fields = set()  # Default to no fields for unknown operations
+
+                # Record this permission class's field contribution in telemetry
+                telemetry_ctx = get_telemetry_context()
+                if telemetry_ctx:
+                    permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
+                    model_name = self.engine.get_model_name(model)
+                    if fields == "__all__":
+                        telemetry_ctx.record_permission_class_fields(
+                            permission_class_name, model_name, operation_type, list(all_fields)
+                        )
+                    else:
+                        telemetry_ctx.record_permission_class_fields(
+                            permission_class_name, model_name, operation_type, list(fields & all_fields)
+                        )
 
                 # If any permission allows all fields
                 if fields == "__all__":
@@ -834,7 +875,13 @@ class ASTParser:
 
     def _handle_aggregate(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to all aggregate methods."""
+        from statezero.core.query_cache import get_cached_query_result, cache_query_result
+
         op_type = ast.get("type")
+
+        # For aggregate operations, we need to include the operation type and field
+        # in the cache key because different aggregates on the same queryset
+        # produce different results
         if op_type == "aggregate":
             aggs = ast.get("aggregates", {})
             agg_list = []
@@ -842,66 +889,98 @@ class ASTParser:
                 agg_list.append(
                     {"function": func, "field": field, "alias": f"{field}_{func}"}
                 )
-            result = self.engine.aggregate(self.current_queryset, agg_list)
-            return {
-                "data": result,
+
+            # Create operation context from all aggregates
+            operation_context = f"aggregate:{','.join(f'{f}:{fld}' for f, fld in aggs.items())}"
+
+            # Try cache with operation context
+            cached_result = get_cached_query_result(self.current_queryset, operation_context)
+            if cached_result is not None:
+                return cached_result
+
+            result_data = self.engine.aggregate(self.current_queryset, agg_list)
+            result = {
+                "data": result_data,
                 "metadata": {
                     "aggregate": True,
                     "response_type": ResponseType.NUMBER.value,
                 },
             }
+            cache_query_result(self.current_queryset, result, operation_context)
+            return result
         else:
             field = ast.get("field")
             if not field:
                 raise ValueError("Field must be provided for aggregate operations.")
+
+            # Create operation context: "operation_type:field"
+            operation_context = f"{op_type}:{field}"
+
+            # Try cache with operation context
+            cached_result = get_cached_query_result(self.current_queryset, operation_context)
+            if cached_result is not None:
+                return cached_result
+
             if op_type == "count":
                 result_val = self.engine.count(self.current_queryset, field)
-                return {
+                result = {
                     "data": result_val,
                     "metadata": {
                         "count": True,
                         "response_type": ResponseType.NUMBER.value,
                     },
                 }
+                cache_query_result(self.current_queryset, result, operation_context)
+                return result
             elif op_type == "sum":
                 result_val = self.engine.sum(self.current_queryset, field)
-                return {
+                result = {
                     "data": result_val,
                     "metadata": {
                         "sum": True,
                         "response_type": ResponseType.NUMBER.value,
                     },
                 }
+                cache_query_result(self.current_queryset, result, operation_context)
+                return result
             elif op_type == "avg":
                 result_val = self.engine.avg(self.current_queryset, field)
-                return {
+                result = {
                     "data": result_val,
                     "metadata": {
                         "avg": True,
                         "response_type": ResponseType.NUMBER.value,
                     },
                 }
+                cache_query_result(self.current_queryset, result, operation_context)
+                return result
             elif op_type == "min":
                 result_val = self.engine.min(self.current_queryset, field)
-                return {
+                result = {
                     "data": result_val,
                     "metadata": {
                         "min": True,
                         "response_type": ResponseType.NUMBER.value,
                     },
                 }
+                cache_query_result(self.current_queryset, result, operation_context)
+                return result
             elif op_type == "max":
                 result_val = self.engine.max(self.current_queryset, field)
-                return {
+                result = {
                     "data": result_val,
                     "metadata": {
                         "max": True,
                         "response_type": ResponseType.NUMBER.value,
                     },
                 }
+                cache_query_result(self.current_queryset, result, operation_context)
+                return result
 
     def _handle_read(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to fetch_list method."""
+        from statezero.core.query_cache import get_cached_query_result, cache_query_result
+
         offset_raw = self.serializer_options.get("offset", 0)
         limit_raw = self.serializer_options.get("limit", self.config.default_limit)
         offset_val = int(offset_raw) if offset_raw is not None else None
@@ -910,15 +989,36 @@ class ASTParser:
         # Retrieve permissions from configuration
         permissions = self.registry.get_config(self.model).permissions
 
-        # Fetch list with bulk permission checks
+        # Apply LIMIT/OFFSET to queryset BEFORE checking cache
+        # This ensures the cache key includes pagination in the SQL
+        offset = offset_val or 0
+        if limit_val is None:
+            paginated_qs = self.current_queryset[offset:]
+        else:
+            paginated_qs = self.current_queryset[offset : offset + limit_val]
+
+        # Create operation context that includes fields
+        # since serialization happens after SQL execution
+        # Note: depth is implicit in fields_map (which includes nested model fields)
+        fields_str = str(sorted(str(self.read_fields_map))) if self.read_fields_map else "default"
+        operation_context = f"read:fields={fields_str}"
+
+        # Try cache with the paginated queryset and operation context
+        cached_result = get_cached_query_result(paginated_qs, operation_context)
+        if cached_result is not None:
+            return cached_result
+
+        # Cache miss - execute query with permission checks
+        # Pass paginated queryset with offset=None, limit=None to prevent re-pagination
         rows = self.engine.fetch_list(
-            self.current_queryset,  # Pass current queryset
-            offset=offset_val,
-            limit=limit_val,
+            paginated_qs,
+            offset=None,  # Already applied above
+            limit=None,   # Already applied above
             req=self.request,
             permissions=permissions,
         )
 
+        # Serialize
         serialized = self.serializer.serialize(
             rows,
             self.model,
@@ -926,10 +1026,16 @@ class ASTParser:
             depth=self.depth,
             fields_map=self.read_fields_map,
         )
-        return {
+
+        result = {
             "data": serialized,
             "metadata": {"read": True, "response_type": ResponseType.QUERYSET.value},
         }
+
+        # Cache the result with operation context
+        cache_query_result(paginated_qs, result, operation_context)
+
+        return result
 
     # --- Helper Methods ---
 

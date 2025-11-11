@@ -1,4 +1,4 @@
-from statezero.core.context_storage import current_operation_id
+from statezero.core.context_storage import current_operation_id, current_canonical_id
 import logging
 from typing import Any, Type, Union, List
 from fastapi.encoders import jsonable_encoder
@@ -76,6 +76,7 @@ class EventBus:
                 "event": action_type.value,
                 "model": model_name,
                 "operation_id": current_operation_id.get(),
+                "canonical_id": current_canonical_id.get(),
                 "instances": [pk_value],
                 "pk_field_name": pk_field_name,
             }
@@ -148,6 +149,7 @@ class EventBus:
                 "event": action_type.value,
                 "model": model_name,
                 "operation_id": current_operation_id.get(),
+                "canonical_id": current_canonical_id.get(),
                 "instances": pks,
                 "pk_field_name": pk_field_name,
             }
