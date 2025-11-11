@@ -100,7 +100,7 @@ class RequestProcessor:
             logger.exception("Error in process_schema")
             raise ValidationError(str(e))
 
-    def process_request(self, req: Any) -> Dict[str, Any]:
+    def process_request(self, req: Any, dry_run: bool = False) -> Dict[str, Any]:
         # Get telemetry context (created by adaptor before calling this)
         from statezero.core.telemetry import get_telemetry_context
         telemetry_ctx = get_telemetry_context()
@@ -204,6 +204,7 @@ class RequestProcessor:
             base_queryset=base_queryset,  # Pass the queryset here
             serializer_options=serializer_options or {},
             request=req,
+            dry_run=dry_run,  # Pass dry_run flag
         )
         result: Dict[str, Any] = parser.parse(final_query_ast)
 

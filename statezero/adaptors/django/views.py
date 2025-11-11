@@ -112,7 +112,7 @@ class ModelView(APIView):
         try:
             with config.context_manager(timeout_ms):
                 with track_db_queries():
-                    result = processor.process_request(req=request)
+                    result = processor.process_request(req=request, dry_run=False)
 
             # Get telemetry data AFTER track_db_queries context exits
             # so that DB queries are included

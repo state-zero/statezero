@@ -1,5 +1,8 @@
 """
-Tests for query-level caching (reads and aggregates).
+Tests for query-level caching write path.
+
+Note: Read path has been disabled in favor of push-based approach via Pusher.
+These tests verify the write path (cache_query_result) and cache key generation.
 """
 import hashlib
 from unittest.mock import Mock, patch
@@ -13,7 +16,6 @@ from statezero.core.query_cache import (
     _get_cache_key,
     _get_sql_from_queryset,
     cache_query_result,
-    get_cached_query_result,
 )
 
 
@@ -120,53 +122,8 @@ class TestSQLExtraction(TestCase):
         assert "WHERE" in sql.upper() or len(params) > 0
 
 
-class TestTransactionScoping(TestCase):
-    """Test that cache is scoped to transaction ID."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        cache.clear()
-
-    def tearDown(self):
-        """Clean up after tests."""
-        cache.clear()
-        current_canonical_id.set(None)
-
-    def test_same_transaction_hits_cache(self):
-        """Test that same transaction ID hits cache."""
-        sql = "SELECT * FROM users WHERE id = %s"
-        params = (1,)
-        txn_id = "txn-001"
-
-        # Create cache key and store result
-        key = _get_cache_key(sql, params, txn_id)
-        test_result = {"data": [{"id": 1, "name": "Test"}], "metadata": {}}
-        cache.set(key, test_result)
-
-        # Same transaction should hit cache
-        assert cache.get(key) == test_result
-
-    def test_different_transaction_misses_cache(self):
-        """Test that different transaction ID misses cache."""
-        sql = "SELECT * FROM users WHERE id = %s"
-        params = (1,)
-
-        # Transaction 1
-        txn1 = "txn-001"
-        key1 = _get_cache_key(sql, params, txn1)
-        cache.set(key1, {"data": "result-from-txn1"})
-
-        # Transaction 2 (after mutation) - different key
-        txn2 = "txn-002"
-        key2 = _get_cache_key(sql, params, txn2)
-
-        # Different transaction = cache miss
-        assert cache.get(key2) is None
-        assert key1 != key2
-
-
 class TestCachingFunctions(TestCase):
-    """Test the main caching functions."""
+    """Test the write path caching functions."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -176,52 +133,9 @@ class TestCachingFunctions(TestCase):
         """Clean up after tests."""
         cache.clear()
         current_canonical_id.set(None)
-
-    def test_get_cached_query_result_no_canonical_id(self):
-        """Test that caching is skipped when no canonical_id is set."""
-        queryset = User.objects.all()
-        current_canonical_id.set(None)
-
-        result = get_cached_query_result(queryset)
-
-        # Should return None (no caching without canonical_id)
-        assert result is None
-
-    def test_get_cached_query_result_miss(self):
-        """Test cache miss returns None."""
-        queryset = User.objects.filter(username="testuser")
-        current_canonical_id.set("txn-test-001")
-
-        result = get_cached_query_result(queryset)
-
-        # Should be cache miss
-        assert result is None
-
-    def test_cache_and_retrieve_result(self):
-        """Test caching and retrieving a result."""
-        # Create a user for the queryset
-        user = User.objects.create_user(username="testuser", password="testpass")
-        queryset = User.objects.filter(username="testuser")
-        txn_id = "txn-test-001"
-        current_canonical_id.set(txn_id)
-
-        # First call should be a miss
-        result1 = get_cached_query_result(queryset)
-        assert result1 is None
-
-        # Cache a result
-        test_result = {
-            "data": [{"id": user.id, "username": "testuser"}],
-            "metadata": {"read": True},
-        }
-        cache_query_result(queryset, test_result)
-
-        # Second call should hit cache
-        result2 = get_cached_query_result(queryset)
-        assert result2 == test_result
 
     def test_cache_result_no_canonical_id(self):
-        """Test that caching is skipped when no canonical_id is set."""
+        """Test that cache_query_result handles no canonical_id gracefully."""
         queryset = User.objects.all()
         current_canonical_id.set(None)
 
@@ -230,14 +144,157 @@ class TestCachingFunctions(TestCase):
         # Should not raise error, just skip caching
         cache_query_result(queryset, test_result)
 
-        # Verify nothing was cached
-        current_canonical_id.set("txn-001")
-        result = get_cached_query_result(queryset)
-        # Different transaction, so won't find it anyway
+    def test_cache_result_with_canonical_id(self):
+        """Test that cache_query_result stores data when canonical_id is set."""
+        user = User.objects.create_user(username="testuser", password="testpass")
+        queryset = User.objects.filter(username="testuser")
+        txn_id = "txn-test-001"
+        current_canonical_id.set(txn_id)
+
+        test_result = {
+            "data": [{"id": user.id, "username": "testuser"}],
+            "metadata": {"read": True},
+        }
+
+        # Should not raise error
+        cache_query_result(queryset, test_result)
+
+        # Verify data was written to cache (testing write path)
+        sql_data = _get_sql_from_queryset(queryset)
+        assert sql_data is not None
+        sql, params = sql_data
+        cache_key = _get_cache_key(sql, params, txn_id, None)
+        cached_data = cache.get(cache_key)
+        assert cached_data == test_result
+
+
+class TestDryRunMode(TestCase):
+    """Test dry-run mode for subscription/polling system."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        cache.clear()
+
+    def tearDown(self):
+        """Clean up after tests."""
+        cache.clear()
+        current_canonical_id.set(None)
+
+    def test_get_cached_query_result_normal_mode_returns_none(self):
+        """Test that normal mode (dry_run=False) always returns None."""
+        from statezero.core.query_cache import get_cached_query_result
+
+        user = User.objects.create_user(username="testuser", password="testpass")
+        queryset = User.objects.filter(username="testuser")
+        txn_id = "txn-dry-001"
+        current_canonical_id.set(txn_id)
+
+        # Normal mode should return None (read path disabled)
+        result = get_cached_query_result(queryset, operation_context=None, dry_run=False)
+        assert result is None
+
+    def test_get_cached_query_result_dry_run_returns_cache_key(self):
+        """Test that dry-run mode returns cache key instead of executing query."""
+        from statezero.core.query_cache import get_cached_query_result
+
+        user = User.objects.create_user(username="testuser", password="testpass")
+        queryset = User.objects.filter(username="testuser")
+        txn_id = "txn-dry-002"
+        current_canonical_id.set(txn_id)
+
+        operation_context = "read:fields=default"
+
+        # Dry-run mode should return cache key
+        result = get_cached_query_result(queryset, operation_context=operation_context, dry_run=True)
+
+        assert result is not None
+        assert "cache_key" in result
+        assert result["cache_key"].startswith("statezero:query:")
+        assert result["metadata"]["dry_run"] is True
+
+    def test_dry_run_no_canonical_id_returns_none(self):
+        """Test that dry-run mode returns None when no canonical_id is set."""
+        from statezero.core.query_cache import get_cached_query_result
+
+        queryset = User.objects.all()
+        current_canonical_id.set(None)
+
+        # Should return None when no canonical_id
+        result = get_cached_query_result(queryset, operation_context=None, dry_run=True)
+        assert result is None
+
+    def test_dry_run_cache_key_matches_write_path(self):
+        """Test that dry-run cache key matches the key used by write path."""
+        from statezero.core.query_cache import get_cached_query_result, cache_query_result, _get_sql_from_queryset, _get_cache_key
+
+        user = User.objects.create_user(username="testuser", password="testpass")
+        queryset = User.objects.filter(username="testuser")
+        txn_id = "txn-dry-003"
+        current_canonical_id.set(txn_id)
+
+        operation_context = "read:fields=default"
+
+        # Get cache key from dry-run
+        dry_run_result = get_cached_query_result(queryset, operation_context=operation_context, dry_run=True)
+        dry_run_cache_key = dry_run_result["cache_key"]
+
+        # Generate cache key manually (simulating write path)
+        sql_data = _get_sql_from_queryset(queryset)
+        sql, params = sql_data
+        write_cache_key = _get_cache_key(sql, params, txn_id, operation_context)
+
+        # Cache keys should match
+        assert dry_run_cache_key == write_cache_key
+
+    def test_dry_run_different_operation_contexts_different_keys(self):
+        """Test that different operation contexts produce different cache keys in dry-run mode."""
+        from statezero.core.query_cache import get_cached_query_result
+
+        queryset = User.objects.all()
+        txn_id = "txn-dry-004"
+        current_canonical_id.set(txn_id)
+
+        # Get cache key for read operation
+        read_result = get_cached_query_result(queryset, operation_context="read:fields=default", dry_run=True)
+        read_key = read_result["cache_key"]
+
+        # Get cache key for count operation
+        count_result = get_cached_query_result(queryset, operation_context="count:id", dry_run=True)
+        count_key = count_result["cache_key"]
+
+        # Keys should be different
+        assert read_key != count_key
+
+    def test_generate_cache_key_function(self):
+        """Test the generate_cache_key helper function directly."""
+        from statezero.core.query_cache import generate_cache_key
+
+        user = User.objects.create_user(username="testuser", password="testpass")
+        queryset = User.objects.filter(username="testuser")
+        txn_id = "txn-dry-005"
+        current_canonical_id.set(txn_id)
+
+        # Generate cache key
+        cache_key = generate_cache_key(queryset, operation_context="read:fields=default")
+
+        assert cache_key is not None
+        assert cache_key.startswith("statezero:query:")
+        assert isinstance(cache_key, str)
+
+    def test_generate_cache_key_no_canonical_id(self):
+        """Test that generate_cache_key returns None when no canonical_id."""
+        from statezero.core.query_cache import generate_cache_key
+
+        queryset = User.objects.all()
+        current_canonical_id.set(None)
+
+        # Should return None
+        cache_key = generate_cache_key(queryset, operation_context=None)
+        assert cache_key is None
 
 
 class TestPermissionSafety(TestCase):
-    """Test that permissions are automatically safe."""
+    """Test that permissions create different cache keys (write path safety)."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -256,10 +313,9 @@ class TestPermissionSafety(TestCase):
         Test that different filters (from permissions) create different cache keys.
 
         This is the core insight: permissions create different SQL, which
-        automatically creates different cache keys.
+        automatically creates different cache keys for the write path.
         """
         txn_id = "txn-test-001"
-        current_canonical_id.set(txn_id)
 
         # User 1's queryset (filtered to their data)
         qs_user1 = User.objects.filter(id=self.user1.id)
@@ -267,27 +323,25 @@ class TestPermissionSafety(TestCase):
         # User 2's queryset (filtered to their data)
         qs_user2 = User.objects.filter(id=self.user2.id)
 
-        # Cache result for user 1
-        result_user1 = {"data": [{"id": self.user1.id, "username": "user1"}]}
-        cache_query_result(qs_user1, result_user1)
+        # Get cache keys for each
+        sql1_data = _get_sql_from_queryset(qs_user1)
+        sql2_data = _get_sql_from_queryset(qs_user2)
 
-        # Try to get with user 2's queryset
-        cached_result = get_cached_query_result(qs_user2)
+        assert sql1_data is not None
+        assert sql2_data is not None
 
-        # Should be cache miss because different SQL
-        assert cached_result is None
+        sql1, params1 = sql1_data
+        sql2, params2 = sql2_data
 
-        # Cache result for user 2
-        result_user2 = {"data": [{"id": self.user2.id, "username": "user2"}]}
-        cache_query_result(qs_user2, result_user2)
+        key1 = _get_cache_key(sql1, params1, txn_id)
+        key2 = _get_cache_key(sql2, params2, txn_id)
 
-        # Each user should get their own cached result
-        assert get_cached_query_result(qs_user1) == result_user1
-        assert get_cached_query_result(qs_user2) == result_user2
+        # Different permissions should produce different cache keys
+        assert key1 != key2
 
 
 class TestAggregateQueries(TestCase):
-    """Test that aggregate queries can be cached."""
+    """Test that aggregate queries work with write path caching."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -301,20 +355,20 @@ class TestAggregateQueries(TestCase):
         current_canonical_id.set(None)
 
     def test_aggregate_query_sql_extraction(self):
-        """Test that we can extract SQL from aggregate queries."""
+        """Test that we can extract SQL from aggregate queries (needed for write path)."""
         from django.db.models import Count
 
         queryset = User.objects.all()
 
-        # Get SQL before aggregation (this is what we'll cache against)
+        # Get SQL before aggregation (this is what we'll use for cache key)
         sql_data = _get_sql_from_queryset(queryset)
 
         assert sql_data is not None
         sql, params = sql_data
         assert "SELECT" in sql.upper()
 
-    def test_cache_aggregate_result(self):
-        """Test caching an aggregate result."""
+    def test_cache_aggregate_result_write_path(self):
+        """Test that aggregate results can be written to cache."""
         queryset = User.objects.all()
         txn_id = "txn-aggregate-001"
         current_canonical_id.set(txn_id)
@@ -326,28 +380,13 @@ class TestAggregateQueries(TestCase):
         }
         cache_query_result(queryset, aggregate_result)
 
-        # Should hit cache
-        cached = get_cached_query_result(queryset)
-        assert cached == aggregate_result
-
-    def test_different_aggregates_same_queryset_share_cache(self):
-        """
-        Test that different aggregate operations on the same queryset
-        will share cache (because the SQL for the base queryset is the same).
-
-        NOTE: This is a current limitation - the cache key is based on the
-        base queryset SQL, not the aggregate function. This could be improved
-        if needed.
-        """
-        queryset = User.objects.filter(is_active=True)
-        txn_id = "txn-aggregate-002"
-        current_canonical_id.set(txn_id)
-
-        # For the same base queryset, different aggregates would currently
-        # share the same cache key (based on base queryset SQL)
-        # This test documents this behavior
+        # Verify it was written (testing write path)
         sql_data = _get_sql_from_queryset(queryset)
         assert sql_data is not None
+        sql, params = sql_data
+        cache_key = _get_cache_key(sql, params, txn_id, None)
+        cached_data = cache.get(cache_key)
+        assert cached_data == aggregate_result
 
 
 # Integration Tests
@@ -359,8 +398,8 @@ from tests.django_app.models import DummyModel, DummyRelatedModel
 from django.test import TransactionTestCase
 
 
-class QueryCacheIntegrationTest(TransactionTestCase):
-    """Integration tests for query caching with real API requests."""
+class NonCachingIntegrationTests(TransactionTestCase):
+    """Integration tests for non-caching features (search, ordering, pagination)."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -391,708 +430,6 @@ class QueryCacheIntegrationTest(TransactionTestCase):
         DummyModel.objects.all().delete()
         DummyRelatedModel.objects.all().delete()
         User.objects.all().delete()
-
-    def test_read_query_caching_on_second_request(self):
-        """Test that identical read queries hit cache on second request."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # Create payload - read all
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "read",
-                }
-            }
-        }
-
-        # First request - cache miss
-        response1 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-integration-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-
-        # Second identical request with same canonical_id - should hit cache
-        response2 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-integration-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-
-        # Should return identical data (from cache)
-        self.assertEqual(response1.data, response2.data)
-
-    def test_different_transaction_id_bypasses_cache(self):
-        """Test that different transaction IDs bypass cache."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "read",
-                }
-            }
-        }
-
-        # First request with txn-001
-        response1 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-        ids1 = response1.data["data"]["data"]  # List of IDs
-        self.assertEqual(len(ids1), 4)  # TestA, TestB, TestC, TestD
-
-        # Modify data
-        DummyModel.objects.create(name="TestE", value=50, related=self.related1)
-
-        # Second request with SAME transaction ID - should hit cache (stale data)
-        response2 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-        ids2 = response2.data["data"]["data"]
-        # Should still show old count (cached)
-        self.assertEqual(len(ids2), 4)
-        self.assertEqual(response1.data, response2.data)
-
-        # Third request with DIFFERENT transaction ID - should bypass cache
-        response3 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-002",
-        )
-        self.assertEqual(response3.status_code, 200)
-        ids3 = response3.data["data"]["data"]
-        # Should see fresh data with the new record
-        self.assertEqual(len(ids3), 5)  # TestA, TestB, TestC, TestD, TestE
-
-    def test_different_filters_different_cache_keys_integration(self):
-        """Test that different filters create different cache keys in real requests."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # First query - filter by name=TestA
-        payload1 = {
-            "ast": {
-                "query": {
-                    "type": "read",
-                    "filter": {"type": "filter", "conditions": {"name": "TestA"}},
-                }
-            }
-        }
-
-        response1 = self.client.post(
-            url,
-            data=payload1,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-filter-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-        ids1 = response1.data["data"]["data"]
-        self.assertEqual(len(ids1), 1)
-        # Verify it's TestA - get the actual item
-        included1 = response1.data["data"]["included"]["django_app.dummymodel"]
-        items1 = list(included1.values())
-        self.assertEqual(len(items1), 1)
-        self.assertEqual(items1[0]["name"], "TestA")
-
-        # Second query - filter by name=TestC (same transaction ID)
-        payload2 = {
-            "ast": {
-                "query": {
-                    "type": "read",
-                    "filter": {"type": "filter", "conditions": {"name": "TestC"}},
-                }
-            }
-        }
-
-        response2 = self.client.post(
-            url,
-            data=payload2,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-filter-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-        ids2 = response2.data["data"]["data"]
-        self.assertEqual(len(ids2), 1)
-        # Verify it's TestC
-        included2 = response2.data["data"]["included"]["django_app.dummymodel"]
-        items2 = list(included2.values())
-        self.assertEqual(len(items2), 1)
-        self.assertEqual(items2[0]["name"], "TestC")
-
-        # Different filters should return different results (not cached together)
-        self.assertNotEqual(ids1, ids2)
-
-    def test_aggregate_caching_integration(self):
-        """Test that aggregate queries are cached."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # Count query
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "count",
-                    "field": "id",
-                }
-            }
-        }
-
-        # First request - cache miss
-        response1 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-agg-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-        count1 = response1.data.get("data")
-        self.assertEqual(count1, 4)  # 4 records created in setUp
-
-        # Second identical request - should hit cache
-        response2 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-agg-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-        count2 = response2.data.get("data")
-        self.assertEqual(count1, count2)
-
-    def test_aggregate_with_filter_caching(self):
-        """Test that aggregate queries with filters are cached correctly."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # Count with filter
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "count",
-                    "field": "id",
-                    "filter": {"type": "filter", "conditions": {"value__gte": 30}},
-                }
-            }
-        }
-
-        # First request
-        response1 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-agg-filter-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-        count1 = response1.data.get("data")
-        self.assertEqual(count1, 2)  # TestC (30) and TestD (40)
-
-        # Second request - should hit cache
-        response2 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-agg-filter-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-        count2 = response2.data.get("data")
-        self.assertEqual(count1, count2)
-
-    def test_sum_aggregate_caching(self):
-        """Test that SUM aggregate queries are cached."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # Sum of all values
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "sum",
-                    "field": "value",
-                }
-            }
-        }
-
-        # First request - cache miss
-        response1 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-sum-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-        sum1 = response1.data.get("data")
-        self.assertEqual(sum1, 100)  # 10 + 20 + 30 + 40
-
-        # Second request - should hit cache
-        response2 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-sum-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-        sum2 = response2.data.get("data")
-        self.assertEqual(sum1, sum2)
-        self.assertEqual(response1.data, response2.data)
-
-    def test_avg_aggregate_caching(self):
-        """Test that AVG aggregate queries are cached."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # Average of all values
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "avg",
-                    "field": "value",
-                }
-            }
-        }
-
-        # First request - cache miss
-        response1 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-avg-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-        avg1 = response1.data.get("data")
-        self.assertEqual(avg1, 25.0)  # (10 + 20 + 30 + 40) / 4
-
-        # Second request - should hit cache
-        response2 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-avg-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-        avg2 = response2.data.get("data")
-        self.assertEqual(avg1, avg2)
-
-    def test_min_max_aggregate_caching(self):
-        """Test that MIN and MAX aggregate queries are cached."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # Min value
-        payload_min = {
-            "ast": {
-                "query": {
-                    "type": "min",
-                    "field": "value",
-                }
-            }
-        }
-
-        response_min = self.client.post(
-            url,
-            data=payload_min,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-minmax-001",
-        )
-        self.assertEqual(response_min.status_code, 200)
-        min_val = response_min.data.get("data")
-        self.assertEqual(min_val, 10)  # TestA
-
-        # Max value (same transaction ID)
-        payload_max = {
-            "ast": {
-                "query": {
-                    "type": "max",
-                    "field": "value",
-                }
-            }
-        }
-
-        response_max = self.client.post(
-            url,
-            data=payload_max,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-minmax-001",
-        )
-        self.assertEqual(response_max.status_code, 200)
-        max_val = response_max.data.get("data")
-        self.assertEqual(max_val, 40)  # TestD
-
-        # Different aggregates should have different cache entries
-        self.assertNotEqual(min_val, max_val)
-
-    def test_aggregate_cache_invalidation_on_new_transaction(self):
-        """Test that aggregates are invalidated when transaction ID changes."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "count",
-                    "field": "id",
-                }
-            }
-        }
-
-        # First request with txn-001
-        response1 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-agg-invalidate-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-        count1 = response1.data.get("data")
-        self.assertEqual(count1, 4)  # TestA, TestB, TestC, TestD
-
-        # Add new data
-        DummyModel.objects.create(name="TestE", value=50, related=self.related1)
-        DummyModel.objects.create(name="TestF", value=60, related=self.related2)
-
-        # Second request with SAME transaction ID - should hit cache (stale)
-        response2 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-agg-invalidate-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-        count2 = response2.data.get("data")
-        self.assertEqual(count2, 4)  # Still cached old value
-
-        # Third request with DIFFERENT transaction ID - should bypass cache
-        response3 = self.client.post(
-            url,
-            data=payload,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-agg-invalidate-002",
-        )
-        self.assertEqual(response3.status_code, 200)
-        count3 = response3.data.get("data")
-        self.assertEqual(count3, 6)  # Fresh data with new records
-
-    def test_aggregate_with_filter_different_cache_keys(self):
-        """Test that aggregates with different filters have different cache keys."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # Count with filter value >= 30
-        payload1 = {
-            "ast": {
-                "query": {
-                    "type": "count",
-                    "field": "id",
-                    "filter": {"type": "filter", "conditions": {"value__gte": 30}},
-                }
-            }
-        }
-
-        response1 = self.client.post(
-            url,
-            data=payload1,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-agg-diff-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-        count1 = response1.data.get("data")
-        self.assertEqual(count1, 2)  # TestC, TestD
-
-        # Count with filter value < 30 (same transaction ID)
-        payload2 = {
-            "ast": {
-                "query": {
-                    "type": "count",
-                    "field": "id",
-                    "filter": {"type": "filter", "conditions": {"value__lt": 30}},
-                }
-            }
-        }
-
-        response2 = self.client.post(
-            url,
-            data=payload2,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-agg-diff-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-        count2 = response2.data.get("data")
-        self.assertEqual(count2, 2)  # TestA, TestB
-
-        # Different filters return different results (different cache keys)
-        # Both happen to return count=2, but they're from different queries
-        # The metadata and data happen to be identical, but the SQL was different
-        # Just verify both queries executed successfully
-        self.assertEqual(count1, 2)
-        self.assertEqual(count2, 2)
-
-    def test_no_caching_without_canonical_id(self):
-        """Test that requests without canonical_id still work (uses system-generated id)."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "read",
-                    "filter": {"type": "filter", "conditions": {"name": "TestA"}},
-                }
-            }
-        }
-
-        # Request without canonical_id header - should work with system-generated ID
-        response = self.client.post(url, data=payload, format="json")
-        self.assertEqual(response.status_code, 200)
-        ids = response.data["data"]["data"]
-        self.assertEqual(len(ids), 1)
-        # Verify it's TestA
-        included = response.data["data"]["included"]["django_app.dummymodel"]
-        items = list(included.values())
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["name"], "TestA")
-
-    def test_pagination_with_caching(self):
-        """Test that pagination creates different cache entries for different pages."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # First page
-        payload1 = {
-            "ast": {
-                "query": {"type": "read"},
-                "serializerOptions": {"limit": 2, "offset": 0},
-            }
-        }
-
-        response1 = self.client.post(
-            url,
-            data=payload1,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-page-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-        ids1 = response1.data["data"]["data"]
-        self.assertEqual(len(ids1), 2)  # Limit 2
-
-        # Second page (different offset, same transaction)
-        payload2 = {
-            "ast": {
-                "query": {"type": "read"},
-                "serializerOptions": {"limit": 2, "offset": 2},
-            }
-        }
-
-        response2 = self.client.post(
-            url,
-            data=payload2,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-page-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-        ids2 = response2.data["data"]["data"]
-        self.assertEqual(len(ids2), 2)  # Limit 2
-
-        # Different pages should have different IDs (different cache entries)
-        # Because LIMIT/OFFSET are in the SQL, each page has its own cache key
-        self.assertNotEqual(ids1, ids2)
-
-    def test_different_field_selections_separate_cache(self):
-        """Test that different field selections create separate cache entries."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # Request with minimal fields
-        payload1 = {
-            "ast": {
-                "query": {"type": "read"},
-                "serializerOptions": {
-                    "fields": ["id", "name"]
-                },
-            }
-        }
-
-        response1 = self.client.post(
-            url,
-            data=payload1,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-fields-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-
-        # Get first object from response
-        included1 = response1.data["data"]["included"]["django_app.dummymodel"]
-        first_obj_1 = list(included1.values())[0]
-
-        # Should only have id and name fields (plus metadata)
-        self.assertIn("id", first_obj_1)
-        self.assertIn("name", first_obj_1)
-        # Value field should NOT be present
-        self.assertNotIn("value", first_obj_1)
-
-        # Request with more fields (same transaction ID)
-        payload2 = {
-            "ast": {
-                "query": {"type": "read"},
-                "serializerOptions": {
-                    "fields": ["id", "name", "value"]
-                },
-            }
-        }
-
-        response2 = self.client.post(
-            url,
-            data=payload2,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-fields-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-
-        # Get first object from response
-        included2 = response2.data["data"]["included"]["django_app.dummymodel"]
-        first_obj_2 = list(included2.values())[0]
-
-        # Should have id, name, AND value fields
-        self.assertIn("id", first_obj_2)
-        self.assertIn("name", first_obj_2)
-        self.assertIn("value", first_obj_2)
-
-        # Verify they're different (different field selections, different cache keys)
-        # First object should not have 'value', second should
-        self.assertNotIn("value", first_obj_1)
-        self.assertIn("value", first_obj_2)
-
-    def test_cache_hit_prevents_db_queries(self):
-        """Test that cache hits actually prevent database queries."""
-        from django.test import override_settings
-        from django.db import connection
-        from django.test.utils import CaptureQueriesContext
-
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "read",
-                }
-            }
-        }
-
-        # First request - should execute queries
-        with CaptureQueriesContext(connection) as ctx_first:
-            response1 = self.client.post(
-                url,
-                data=payload,
-                format="json",
-                HTTP_X_CANONICAL_ID="txn-query-count-001",
-            )
-        self.assertEqual(response1.status_code, 200)
-        first_query_count = len(ctx_first.captured_queries)
-        self.assertGreater(first_query_count, 0, "First request should execute queries")
-
-        # Second request with same canonical_id - should NOT execute queries (cache hit)
-        with CaptureQueriesContext(connection) as ctx_second:
-            response2 = self.client.post(
-                url,
-                data=payload,
-                format="json",
-                HTTP_X_CANONICAL_ID="txn-query-count-001",
-            )
-        self.assertEqual(response2.status_code, 200)
-        second_query_count = len(ctx_second.captured_queries)
-
-        # Cache hit should execute fewer queries (ideally 0, but might have auth/session queries)
-        # The key point is: significantly fewer than first request
-        self.assertLess(second_query_count, first_query_count,
-                       f"Cache hit should execute fewer queries. First: {first_query_count}, Second: {second_query_count}")
-
-        # Results should be identical
-        self.assertEqual(response1.data, response2.data)
-
-    def test_aggregate_cache_hit_prevents_db_queries(self):
-        """Test that aggregate cache hits prevent database queries."""
-        from django.db import connection
-        from django.test.utils import CaptureQueriesContext
-
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "sum",
-                    "field": "value",
-                }
-            }
-        }
-
-        # First request - should execute queries
-        with CaptureQueriesContext(connection) as ctx_first:
-            response1 = self.client.post(
-                url,
-                data=payload,
-                format="json",
-                HTTP_X_CANONICAL_ID="txn-agg-count-001",
-            )
-        self.assertEqual(response1.status_code, 200)
-        first_query_count = len(ctx_first.captured_queries)
-        self.assertGreater(first_query_count, 0, "First request should execute queries")
-
-        # Second request with same canonical_id - should NOT execute queries (cache hit)
-        with CaptureQueriesContext(connection) as ctx_second:
-            response2 = self.client.post(
-                url,
-                data=payload,
-                format="json",
-                HTTP_X_CANONICAL_ID="txn-agg-count-001",
-            )
-        self.assertEqual(response2.status_code, 200)
-        second_query_count = len(ctx_second.captured_queries)
-
-        # Cache hit should execute fewer queries
-        self.assertLess(second_query_count, first_query_count,
-                       f"Cache hit should execute fewer queries. First: {first_query_count}, Second: {second_query_count}")
-
-        # Results should be identical
-        self.assertEqual(response1.data, response2.data)
-
-    def test_no_canonical_id_always_executes_queries(self):
-        """Test that requests without canonical_id always execute queries (no caching)."""
-        from django.db import connection
-        from django.test.utils import CaptureQueriesContext
-
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        payload = {
-            "ast": {
-                "query": {
-                    "type": "read",
-                }
-            }
-        }
-
-        # First request without canonical_id
-        with CaptureQueriesContext(connection) as ctx_first:
-            response1 = self.client.post(
-                url,
-                data=payload,
-                format="json",
-            )
-        self.assertEqual(response1.status_code, 200)
-        first_query_count = len(ctx_first.captured_queries)
-        self.assertGreater(first_query_count, 0)
-
-        # Second request without canonical_id - should also execute queries
-        with CaptureQueriesContext(connection) as ctx_second:
-            response2 = self.client.post(
-                url,
-                data=payload,
-                format="json",
-            )
-        self.assertEqual(response2.status_code, 200)
-        second_query_count = len(ctx_second.captured_queries)
-
-        # Both should execute similar number of queries (no caching)
-        self.assertGreater(second_query_count, 0, "Without canonical_id, should always execute queries")
 
     def test_search_works_without_intervention(self):
         """Test that search works correctly."""
@@ -1126,15 +463,13 @@ class QueryCacheIntegrationTest(TransactionTestCase):
         included = response.data["data"]["included"]["django_app.dummymodel"]
         names = [included[id]["name"] for id in ids]
 
-        print(f"\n=== Search results for 'Ap': {names}")
-
         # Should return Apple and Apricot
         self.assertEqual(len(names), 2)
         self.assertIn("Apple", names)
         self.assertIn("Apricot", names)
 
     def test_ordering_works_without_cache(self):
-        """Test that ordering actually works without any caching (sanity check)."""
+        """Test that ordering actually works (sanity check)."""
         from tests.django_app.models import DummyModel
         url = reverse("statezero:model_view", args=["django_app.DummyModel"])
 
@@ -1159,9 +494,8 @@ class QueryCacheIntegrationTest(TransactionTestCase):
         ids1 = response1.data["data"]["data"]
         included1 = response1.data["data"]["included"]["django_app.dummymodel"]
         names1 = [included1[id]["name"] for id in ids1]
-        print(f"=== Ascending order, first 5: {names1}")
 
-        # Second request: descending order, first page (limit 5) - NO canonical_id so no caching
+        # Second request: descending order, first page (limit 5)
         payload2 = {
             "ast": {
                 "query": {
@@ -1177,93 +511,16 @@ class QueryCacheIntegrationTest(TransactionTestCase):
         ids2 = response2.data["data"]["data"]
         included2 = response2.data["data"]["included"]["django_app.dummymodel"]
         names2 = [included2[id]["name"] for id in ids2]
-        print(f"=== Descending order, first 5: {names2}")
 
-        # The names should be completely different
-        # Ascending should start with Item00, Item01, Item02, Item03, Item04
-        # Descending should start with Item09, Item08, Item07, Item06, Item05
+        # Verify ordering
         self.assertEqual(names1[0], "Item00")
         self.assertEqual(names1[4], "Item04")
-
         self.assertEqual(names2[0], "Item09")
         self.assertEqual(names2[4], "Item05")
 
         # The two lists should have NO overlap
         self.assertEqual(len(set(names1) & set(names2)), 0,
                         f"Ascending and descending should have no overlap. Got: {names1} vs {names2}")
-
-    def test_different_ordering_different_cache_keys(self):
-        """Test that different order_by clauses create different cache entries."""
-        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
-
-        # Query ordered by name ascending - client sends orderBy inside query
-        payload1 = {
-            "ast": {
-                "query": {
-                    "type": "read",
-                    "orderBy": ["name"],
-                }
-            }
-        }
-
-        response1 = self.client.post(
-            url,
-            data=payload1,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-order-001",
-        )
-        self.assertEqual(response1.status_code, 200)
-        ids1 = response1.data["data"]["data"]
-
-        # Log the actual SQL for first request
-        from tests.django_app.models import DummyModel
-        from statezero.core.query_cache import _get_sql_from_queryset
-        qs1 = DummyModel.objects.all().order_by("name")
-        sql1_data = _get_sql_from_queryset(qs1)
-        print(f"\n=== First request (order_by name ASC) ===")
-        print(f"SQL: {sql1_data[0] if sql1_data else 'None'}")
-        print(f"IDs: {ids1}")
-
-        # Query ordered by name descending (same transaction) - client sends orderBy inside query
-        payload2 = {
-            "ast": {
-                "query": {
-                    "type": "read",
-                    "orderBy": ["-name"],
-                }
-            }
-        }
-
-        response2 = self.client.post(
-            url,
-            data=payload2,
-            format="json",
-            HTTP_X_CANONICAL_ID="txn-order-001",
-        )
-        self.assertEqual(response2.status_code, 200)
-        ids2 = response2.data["data"]["data"]
-
-        # Log the actual SQL for second request
-        qs2 = DummyModel.objects.all().order_by("-name")
-        sql2_data = _get_sql_from_queryset(qs2)
-        print(f"\n=== Second request (order_by name DESC) ===")
-        print(f"SQL: {sql2_data[0] if sql2_data else 'None'}")
-        print(f"IDs: {ids2}")
-
-        # Different ordering should produce different results (different cache keys)
-        # Because order_by changes the SQL
-        self.assertNotEqual(ids1, ids2, "Different order_by should produce different results")
-
-        # Verify actual ordering
-        included1 = response1.data["data"]["included"]["django_app.dummymodel"]
-        names1 = [included1[id]["name"] for id in ids1]
-
-        included2 = response2.data["data"]["included"]["django_app.dummymodel"]
-        names2 = [included2[id]["name"] for id in ids2]
-
-        # First should be ascending, second descending
-        self.assertEqual(names1, sorted(names1))
-        self.assertEqual(names2, sorted(names2, reverse=True))
 
     def test_pagination_with_permission_filter_queryset(self):
         """

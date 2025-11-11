@@ -15,7 +15,9 @@
       "Bash(\"C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero\\statezero\\core\\process_request.py\")",
       "Bash(conda activate:*)",
       "Bash(echo:*)",
-      "Bash(C:/Users/rjher/OneDrive/Desktop/Work/statezero/tests/core/test_telemetry.py)"
+      "Bash(C:/Users/rjher/OneDrive/Desktop/Work/statezero/tests/core/test_telemetry.py)",
+      "Bash(\"C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero\\tests\\core\\test_query_cache_temp.py\")",
+      "Bash(move /Y \"C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero\\tests\\core\\test_query_cache_temp.py\" \"C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero\\tests\\core\\test_query_cache.py\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"

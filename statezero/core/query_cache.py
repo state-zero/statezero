@@ -1,5 +1,5 @@
 """
-Query-level caching for reads and aggregates.
+Query-level caching for writes only (push-based approach).
 
 Caches the FINAL serialized response, keyed by:
 - SQL query string (which includes permission filters)
@@ -9,8 +9,11 @@ Caches the FINAL serialized response, keyed by:
 This provides:
 1. Automatic permission safety - permissions are in the SQL
 2. Zero invalidation logic - new transaction ID = new cache namespace
-3. Caches the complete response - skip execution AND serialization on cache hit
+3. Write path for push-based updates via Pusher
 4. Works for both reads and aggregates
+
+Note: Read path has been disabled - cache lookups always return None.
+Results are pushed to clients via Pusher instead of being read from cache.
 """
 import hashlib
 import logging
@@ -68,24 +71,59 @@ def _get_cache_key(sql: str, params: tuple, txn_id: str, operation_context: Opti
     return f"statezero:query:{hash_digest}"
 
 
-def get_cached_query_result(queryset, operation_context: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def get_cached_query_result(queryset, operation_context: Optional[str] = None, dry_run: bool = False) -> Optional[Dict[str, Any]]:
     """
-    Try to get cached result for a queryset.
+    Get cached result for a queryset, or generate cache key in dry-run mode.
+
+    In normal mode: Always returns None (read path disabled for push-based approach).
+    In dry-run mode: Returns a dict with the cache key for subscription/polling.
 
     Args:
         queryset: Django QuerySet to check cache for
-        operation_context: Optional context string (e.g., "min:value", "max:value")
+        operation_context: Optional context string (e.g., "min:value", "max:value", "read:fields=...")
+                          Used to differentiate aggregate operations on same queryset
+        dry_run: If True, return cache key instead of executing query (for subscription endpoint)
+
+    Returns:
+        Normal mode: Always returns None (read path disabled)
+        Dry-run mode: Dict with cache_key or None if cache key cannot be generated
+    """
+    if dry_run:
+        # In dry-run mode, generate and return the cache key
+        cache_key = generate_cache_key(queryset, operation_context)
+        if cache_key:
+            return {
+                "cache_key": cache_key,
+                "metadata": {"dry_run": True},
+            }
+        return None
+
+    # Normal mode: read path disabled
+    logger.debug("get_cached_query_result called but read path is disabled (push-based approach)")
+    return None
+
+
+def generate_cache_key(queryset, operation_context: Optional[str] = None) -> Optional[str]:
+    """
+    Generate a cache key for a queryset without executing or caching it.
+
+    This is used for the subscription/polling system where we need to know
+    the cache key in advance so clients can subscribe to updates via Pusher.
+
+    Args:
+        queryset: Django QuerySet to generate cache key for
+        operation_context: Optional context string (e.g., "min:value", "max:value", "read:fields=...")
                           Used to differentiate aggregate operations on same queryset
 
     Returns:
-        Cached result dict or None if not cached
+        Cache key string or None if cache key cannot be generated
     """
     # Check for transaction ID
     txn_id = current_canonical_id.get()
 
-    # No transaction context = no caching
+    # No transaction context = no cache key
     if txn_id is None:
-        logger.debug("No canonical_id - skipping cache")
+        logger.debug("No canonical_id - cannot generate cache key")
         return None
 
     # Get SQL
@@ -98,30 +136,10 @@ def get_cached_query_result(queryset, operation_context: Optional[str] = None) -
     # Generate cache key
     cache_key = _get_cache_key(sql, params, txn_id, operation_context)
 
-    # Try cache
-    cached_result = cache.get(cache_key)
-
-    # Record telemetry
-    telemetry_ctx = get_telemetry_context()
-
-    if cached_result is not None:
-        context_info = f" | Context: {operation_context}" if operation_context else ""
-        logger.info(f"Query cache HIT for txn {txn_id[:8]}...{context_info} | SQL: {sql[:100]}...")
-
-        # Record cache hit in telemetry
-        if telemetry_ctx:
-            telemetry_ctx.record_cache_hit(cache_key, operation_context, sql)
-
-        return cached_result
-
     context_info = f" | Context: {operation_context}" if operation_context else ""
-    logger.debug(f"Query cache MISS for txn {txn_id[:8]}...{context_info} | SQL: {sql[:100]}...")
+    logger.info(f"Generated cache key for txn {txn_id[:8]}...{context_info} | SQL: {sql[:100]}...")
 
-    # Record cache miss in telemetry
-    if telemetry_ctx:
-        telemetry_ctx.record_cache_miss(cache_key, operation_context, sql)
-
-    return None
+    return cache_key
 
 
 def cache_query_result(queryset, result: Dict[str, Any], operation_context: Optional[str] = None) -> None:

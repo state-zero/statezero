@@ -40,6 +40,7 @@ class ASTParser:
         base_queryset: Any,  # ADD: Base queryset to manage state
         serializer_options: Optional[Dict[str, Any]] = None,
         request: Optional[RequestType] = None,
+        dry_run: bool = False,  # ADD: Dry run mode for subscription/polling
     ):
         self.engine = engine
         self.serializer = serializer
@@ -49,6 +50,7 @@ class ASTParser:
         self.current_queryset = base_queryset  # ADD: Track current queryset state
         self.serializer_options = serializer_options or {}
         self.request = request
+        self.dry_run = dry_run  # ADD: Store dry_run flag
 
         # Process field selection if present
         requested_fields = self.serializer_options.get("fields", [])
@@ -916,8 +918,8 @@ class ASTParser:
             # Create operation context: "operation_type:field"
             operation_context = f"{op_type}:{field}"
 
-            # Try cache with operation context
-            cached_result = get_cached_query_result(self.current_queryset, operation_context)
+            # Try cache with operation context (in dry-run mode, this returns cache key)
+            cached_result = get_cached_query_result(self.current_queryset, operation_context, dry_run=self.dry_run)
             if cached_result is not None:
                 return cached_result
 
@@ -1003,8 +1005,8 @@ class ASTParser:
         fields_str = str(sorted(str(self.read_fields_map))) if self.read_fields_map else "default"
         operation_context = f"read:fields={fields_str}"
 
-        # Try cache with the paginated queryset and operation context
-        cached_result = get_cached_query_result(paginated_qs, operation_context)
+        # Try cache with the paginated queryset and operation context (in dry-run mode, this returns cache key)
+        cached_result = get_cached_query_result(paginated_qs, operation_context, dry_run=self.dry_run)
         if cached_result is not None:
             return cached_result
 
