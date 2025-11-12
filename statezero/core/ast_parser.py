@@ -1004,11 +1004,19 @@ class ASTParser:
         operation_context = f"read:fields={fields_str}"
 
         # Try cache with the paginated queryset and operation context
+        # This also handles waiting for other requests processing the same query (request coalescing)
         cached_result = get_cached_query_result(paginated_qs, operation_context)
         if cached_result is not None:
             return cached_result
 
-        # Cache miss - execute query with permission checks
+        # Cache miss - try to acquire lock for request coalescing
+        # If we can't acquire lock, another request is processing this query
+        # and get_cached_query_result already waited for it. If we're still here,
+        # either we got the lock or the wait timed out, so execute the query.
+        from statezero.core.query_cache import acquire_query_lock
+        acquire_query_lock(paginated_qs, operation_context)
+
+        # Execute query with permission checks
         # Pass UNSLICED queryset so permission checks can filter it,
         # but with offset/limit so fetch_list can apply pagination after permission checks
         rows = self.engine.fetch_list(

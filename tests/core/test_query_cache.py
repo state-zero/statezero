@@ -1367,3 +1367,132 @@ class QueryCacheIntegrationTest(TransactionTestCase):
             else:
                 # If it wasn't registered before, remove it
                 registry._models_config.pop(NameFilterCustomPKModel, None)
+
+    def test_request_coalescing_thundering_herd(self):
+        """
+        Test request coalescing with 500 concurrent requests (thundering herd scenario).
+
+        When multiple clients receive a websocket event simultaneously, they all
+        request the same query at the same time. Request coalescing should ensure:
+        1. Only the first request executes the query
+        2. Other requests wait and get the cached result
+        3. All requests return the same data
+        4. Database queries are minimized
+        """
+        import threading
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        url = reverse("statezero:model_view", args=["django_app.DummyModel"])
+
+        # Use a shared canonical_id for all requests (simulating websocket event)
+        canonical_id = "txn-thundering-herd-001"
+
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "read",
+                }
+            }
+        }
+
+        # Storage for results and errors
+        results = []
+        errors = []
+        query_counts = []
+
+        def make_request():
+            """Make a single request and record the result."""
+            try:
+                # Each thread needs its own client
+                from rest_framework.test import APIClient
+                thread_client = APIClient()
+                thread_client.force_authenticate(user=self.user)
+
+                # Track queries for this request
+                with CaptureQueriesContext(connection) as ctx:
+                    response = thread_client.post(
+                        url,
+                        data=payload,
+                        format="json",
+                        HTTP_X_CANONICAL_ID=canonical_id,
+                    )
+
+                query_count = len(ctx.captured_queries)
+                query_counts.append(query_count)
+
+                if response.status_code == 200:
+                    results.append(response.data)
+                else:
+                    errors.append(f"Status {response.status_code}: {response.data}")
+            except Exception as e:
+                errors.append(str(e))
+
+        # Create 500 threads to simulate thundering herd
+        threads = []
+        num_requests = 500
+
+        print(f"\n=== Starting {num_requests} concurrent requests ===")
+
+        # Create all threads
+        for i in range(num_requests):
+            thread = threading.Thread(target=make_request)
+            threads.append(thread)
+
+        # Start all threads as close to simultaneously as possible
+        for thread in threads:
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        print(f"=== Completed {len(results)} successful requests, {len(errors)} errors ===")
+
+        # Verify all requests succeeded
+        self.assertEqual(len(errors), 0, f"All requests should succeed. Errors: {errors[:5]}")
+        self.assertEqual(len(results), num_requests, "All requests should return results")
+
+        # Verify all results are identical
+        first_result = results[0]
+        for i, result in enumerate(results[1:], start=1):
+            self.assertEqual(
+                result,
+                first_result,
+                f"Request {i} returned different result than first request"
+            )
+
+        # Count how many requests executed queries vs cache hits
+        # First request should execute queries (cache miss + lock acquisition)
+        # Most other requests should have few/no queries (waiting for result)
+        requests_with_queries = sum(1 for count in query_counts if count > 2)
+        requests_without_queries = sum(1 for count in query_counts if count <= 2)
+
+        print(f"=== Query execution stats ===")
+        print(f"Requests that executed queries: {requests_with_queries}")
+        print(f"Requests that hit cache/waited: {requests_without_queries}")
+        print(f"Average queries per request: {sum(query_counts) / len(query_counts):.2f}")
+        print(f"Max queries in a single request: {max(query_counts)}")
+        print(f"Min queries in a single request: {min(query_counts)}")
+
+        # With request coalescing, we should see:
+        # - A small number of requests execute the query (ideally 1, but threading isn't perfect)
+        # - The vast majority should hit cache or wait for the result
+        # Without coalescing, all 500 would execute queries
+        cache_hit_rate = (requests_without_queries / num_requests) * 100
+        print(f"Cache hit rate: {cache_hit_rate:.1f}%")
+
+        # We should see a high cache hit rate (>80%)
+        # This proves request coalescing is working
+        self.assertGreater(
+            cache_hit_rate,
+            80.0,
+            f"Cache hit rate should be >80% with request coalescing, got {cache_hit_rate:.1f}%"
+        )
+
+        # The number of requests that executed queries should be small (ideally 1, but allow some slack)
+        self.assertLess(
+            requests_with_queries,
+            50,  # Allow up to 10% to execute due to timing
+            f"Too many requests executed queries ({requests_with_queries}). Request coalescing may not be working."
+        )
