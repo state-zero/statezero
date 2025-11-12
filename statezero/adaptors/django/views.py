@@ -16,6 +16,7 @@ from statezero.core.exceptions import NotFound, PermissionDenied
 import math
 from typing import Type
 import mimetypes
+import json
 
 from statezero.adaptors.django.config import config, registry
 from statezero.adaptors.django.exception_handler import \
@@ -26,6 +27,10 @@ from statezero.core.interfaces import AbstractEventEmitter, AbstractActionPermis
 from statezero.core.process_request import RequestProcessor
 from statezero.core.actions import action_registry
 from statezero.core.interfaces import AbstractActionPermission
+from statezero.adaptors.django.models import QuerySubscription
+from statezero.core.telemetry import create_telemetry_context, clear_telemetry_context
+from statezero.adaptors.django.db_telemetry import track_db_queries
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -100,9 +105,6 @@ class ModelView(APIView):
 
     @transaction.atomic
     def post(self, request, model_name):
-        from statezero.core.telemetry import create_telemetry_context, clear_telemetry_context
-        from statezero.adaptors.django.db_telemetry import track_db_queries
-        import json
 
         # Create telemetry context
         telemetry_ctx = create_telemetry_context(enabled=config.enable_telemetry)
@@ -131,6 +133,86 @@ class ModelView(APIView):
         if telemetry_data:
             response["X-StateZero-Telemetry"] = json.dumps(telemetry_data)
         return response
+
+
+class SubscribeView(APIView):
+    """
+    Subscription endpoint for polling/push-based system.
+    Accepts a single AST and returns cache key after registering the subscription.
+    """
+
+    permission_classes = [permission_class]
+
+    @transaction.atomic
+    def post(self, request, model_name):
+        """
+        Process an AST in dry-run mode to generate cache key and register subscription.
+
+        Expected request body:
+        {
+            "ast": { "query": { "type": "read", ... }, "serializerOptions": {...} }
+        }
+
+        Returns:
+        {
+            "cache_key": "statezero:query:abc123..."
+        }
+        """
+        
+
+        # Get the raw request body BEFORE DRF parses it
+        raw_body = request._request.body.decode('utf-8')
+        original_request_data = json.loads(raw_body)
+
+        processor = RequestProcessor(config=config, registry=registry)
+        timeout_ms = getattr(settings, 'STATEZERO_QUERY_TIMEOUT_MS', 1000)
+
+        try:
+            with config.context_manager(timeout_ms):
+                # Process in dry-run mode to get cache key
+                result = processor.process_request(req=request, dry_run=True)
+
+            # Extract the cache key from dry-run result
+            if not result or "cache_key" not in result:
+                return Response(
+                    {"error": "Failed to generate cache key"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+            full_cache_key = result["cache_key"]
+
+            # Extract just the hash portion (remove "statezero:query:" prefix)
+            if full_cache_key.startswith("statezero:query:"):
+                hashed_cache_key = full_cache_key.replace("statezero:query:", "")
+            else:
+                hashed_cache_key = full_cache_key
+
+            # Get or create the subscription
+            # Store the original request data (raw JSON from client) and model name
+            subscription, created = QuerySubscription.objects.get_or_create(
+                hashed_cache_key=hashed_cache_key,
+                defaults={
+                    "model_name": model_name,
+                    "ast": original_request_data,
+                    "last_result": None,
+                }
+            )
+
+            # Add user to subscription or mark as allowing anonymous users
+            if request.user.is_authenticated:
+                subscription.users.add(request.user)
+            else:
+                subscription.anonymous_users_allowed = True
+                subscription.save()
+
+            return Response({
+                "cache_key": full_cache_key,
+                "subscription_id": subscription.id,
+                "created": created
+            }, status=status.HTTP_200_OK)
+
+        except Exception as original_exception:
+            return explicit_exception_handler(original_exception)
 
 class SchemaView(APIView):
     permission_classes = [ORMBridgeViewAccessGate]
