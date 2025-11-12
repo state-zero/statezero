@@ -16,6 +16,7 @@ from statezero.core.query_cache import (
     _get_cache_key,
     _get_sql_from_queryset,
     cache_query_result,
+    generate_cache_key_for_subscription,
 )
 
 
@@ -180,23 +181,8 @@ class TestDryRunMode(TestCase):
         cache.clear()
         current_canonical_id.set(None)
 
-    def test_get_cached_query_result_normal_mode_returns_none(self):
-        """Test that normal mode (dry_run=False) always returns None."""
-        from statezero.core.query_cache import get_cached_query_result
-
-        user = User.objects.create_user(username="testuser", password="testpass")
-        queryset = User.objects.filter(username="testuser")
-        txn_id = "txn-dry-001"
-        current_canonical_id.set(txn_id)
-
-        # Normal mode should return None (read path disabled)
-        result = get_cached_query_result(queryset, operation_context=None, dry_run=False)
-        assert result is None
-
-    def test_get_cached_query_result_dry_run_returns_cache_key(self):
-        """Test that dry-run mode returns cache key instead of executing query."""
-        from statezero.core.query_cache import get_cached_query_result
-
+    def test_generate_cache_key_for_subscription_returns_cache_key(self):
+        """Test that generate_cache_key_for_subscription returns cache key and query type."""
         user = User.objects.create_user(username="testuser", password="testpass")
         queryset = User.objects.filter(username="testuser")
         txn_id = "txn-dry-002"
@@ -204,29 +190,27 @@ class TestDryRunMode(TestCase):
 
         operation_context = "read:fields=default"
 
-        # Dry-run mode should return cache key
-        result = get_cached_query_result(queryset, operation_context=operation_context, dry_run=True)
+        # Should return cache key with query type
+        result = generate_cache_key_for_subscription(queryset, operation_context=operation_context, query_type="read")
 
         assert result is not None
         assert "cache_key" in result
+        assert "query_type" in result
         assert result["cache_key"].startswith("statezero:query:")
+        assert result["query_type"] == "read"
         assert result["metadata"]["dry_run"] is True
 
-    def test_dry_run_no_canonical_id_returns_none(self):
-        """Test that dry-run mode returns None when no canonical_id is set."""
-        from statezero.core.query_cache import get_cached_query_result
-
+    def test_generate_cache_key_no_canonical_id_returns_none(self):
+        """Test that generate_cache_key_for_subscription returns None when no canonical_id is set."""
         queryset = User.objects.all()
         current_canonical_id.set(None)
 
         # Should return None when no canonical_id
-        result = get_cached_query_result(queryset, operation_context=None, dry_run=True)
+        result = generate_cache_key_for_subscription(queryset, operation_context=None, query_type="read")
         assert result is None
 
-    def test_dry_run_cache_key_matches_write_path(self):
-        """Test that dry-run cache key matches the key used by write path."""
-        from statezero.core.query_cache import get_cached_query_result, cache_query_result, _get_sql_from_queryset, _get_cache_key
-
+    def test_generate_cache_key_matches_write_path(self):
+        """Test that generated cache key matches the key used by write path."""
         user = User.objects.create_user(username="testuser", password="testpass")
         queryset = User.objects.filter(username="testuser")
         txn_id = "txn-dry-003"
@@ -234,9 +218,9 @@ class TestDryRunMode(TestCase):
 
         operation_context = "read:fields=default"
 
-        # Get cache key from dry-run
-        dry_run_result = get_cached_query_result(queryset, operation_context=operation_context, dry_run=True)
-        dry_run_cache_key = dry_run_result["cache_key"]
+        # Get cache key from subscription generator
+        subscription_result = generate_cache_key_for_subscription(queryset, operation_context=operation_context, query_type="read")
+        subscription_cache_key = subscription_result["cache_key"]
 
         # Generate cache key manually (simulating write path)
         sql_data = _get_sql_from_queryset(queryset)
@@ -244,26 +228,38 @@ class TestDryRunMode(TestCase):
         write_cache_key = _get_cache_key(sql, params, txn_id, operation_context)
 
         # Cache keys should match
-        assert dry_run_cache_key == write_cache_key
+        assert subscription_cache_key == write_cache_key
 
-    def test_dry_run_different_operation_contexts_different_keys(self):
-        """Test that different operation contexts produce different cache keys in dry-run mode."""
-        from statezero.core.query_cache import get_cached_query_result
-
+    def test_generate_cache_key_different_operation_contexts(self):
+        """Test that different operation contexts produce different cache keys."""
         queryset = User.objects.all()
         txn_id = "txn-dry-004"
         current_canonical_id.set(txn_id)
 
         # Get cache key for read operation
-        read_result = get_cached_query_result(queryset, operation_context="read:fields=default", dry_run=True)
+        read_result = generate_cache_key_for_subscription(queryset, operation_context="read:fields=default", query_type="read")
         read_key = read_result["cache_key"]
 
         # Get cache key for count operation
-        count_result = get_cached_query_result(queryset, operation_context="count:id", dry_run=True)
+        count_result = generate_cache_key_for_subscription(queryset, operation_context="count:id", query_type="aggregate")
         count_key = count_result["cache_key"]
 
         # Keys should be different
         assert read_key != count_key
+
+    def test_generate_cache_key_query_types(self):
+        """Test that query_type is correctly set for read vs aggregate."""
+        queryset = User.objects.all()
+        txn_id = "txn-dry-005"
+        current_canonical_id.set(txn_id)
+
+        # Read query
+        read_result = generate_cache_key_for_subscription(queryset, operation_context="read:fields=default", query_type="read")
+        assert read_result["query_type"] == "read"
+
+        # Aggregate query
+        agg_result = generate_cache_key_for_subscription(queryset, operation_context="count:id", query_type="aggregate")
+        assert agg_result["query_type"] == "aggregate"
 
     def test_generate_cache_key_function(self):
         """Test the generate_cache_key helper function directly."""

@@ -182,6 +182,7 @@ class SubscribeView(APIView):
                 )
 
             full_cache_key = result["cache_key"]
+            query_type = result.get("query_type", "read")
 
             # Extract just the hash portion (remove "statezero:query:" prefix)
             if full_cache_key.startswith("statezero:query:"):
@@ -200,6 +201,7 @@ class SubscribeView(APIView):
                     "model_name": model_name,
                     "ast": original_request_data,
                     "namespace": namespace,
+                    "query_type": query_type,
                     "last_result": None,
                 }
             )

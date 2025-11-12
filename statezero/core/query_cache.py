@@ -71,35 +71,29 @@ def _get_cache_key(sql: str, params: tuple, txn_id: str, operation_context: Opti
     return f"statezero:query:{hash_digest}"
 
 
-def get_cached_query_result(queryset, operation_context: Optional[str] = None, dry_run: bool = False) -> Optional[Dict[str, Any]]:
+def generate_cache_key_for_subscription(queryset, operation_context: Optional[str] = None, query_type: str = "read") -> Optional[Dict[str, Any]]:
     """
-    Get cached result for a queryset, or generate cache key in dry-run mode.
+    Generate cache key and query type for subscription system.
 
-    In normal mode: Always returns None (read path disabled for push-based approach).
-    In dry-run mode: Returns a dict with the cache key for subscription/polling.
+    This replaces the old cache read path - instead of reading cached results,
+    we generate cache keys that clients can subscribe to for push updates.
 
     Args:
-        queryset: Django QuerySet to check cache for
+        queryset: Django QuerySet to generate cache key for
         operation_context: Optional context string (e.g., "min:value", "max:value", "read:fields=...")
                           Used to differentiate aggregate operations on same queryset
-        dry_run: If True, return cache key instead of executing query (for subscription endpoint)
+        query_type: Type of query - "read" or "aggregate"
 
     Returns:
-        Normal mode: Always returns None (read path disabled)
-        Dry-run mode: Dict with cache_key or None if cache key cannot be generated
+        Dict with cache_key and query_type, or None if cache key cannot be generated
     """
-    if dry_run:
-        # In dry-run mode, generate and return the cache key
-        cache_key = generate_cache_key(queryset, operation_context)
-        if cache_key:
-            return {
-                "cache_key": cache_key,
-                "metadata": {"dry_run": True},
-            }
-        return None
-
-    # Normal mode: read path disabled
-    logger.debug("get_cached_query_result called but read path is disabled (push-based approach)")
+    cache_key = generate_cache_key(queryset, operation_context)
+    if cache_key:
+        return {
+            "cache_key": cache_key,
+            "query_type": query_type,
+            "metadata": {"dry_run": True},
+        }
     return None
 
 

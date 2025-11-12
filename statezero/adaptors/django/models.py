@@ -4,6 +4,12 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
+
+class QueryType(models.TextChoices):
+    READ = "read", "Read (Queryset)"
+    AGGREGATE = "aggregate", "Aggregate (Metric)"
+
+
 class QuerySubscription(models.Model):
     """
     Tracks active query subscriptions for the polling/push-based system.
@@ -30,6 +36,15 @@ class QuerySubscription(models.Model):
     namespace = models.JSONField(
         default=dict,
         help_text="Namespace filters for determining when to re-execute this query"
+    )
+
+    # Query type: 'read' for querysets, 'aggregate' for metrics (count, sum, etc.)
+    query_type = models.CharField(
+        max_length=20,
+        choices=QueryType.choices,
+        default=QueryType.READ,
+        db_index=True,
+        help_text="Type of query: 'read' for querysets, 'aggregate' for metrics"
     )
 
     # The last result that was sent to subscribers (for diffing)

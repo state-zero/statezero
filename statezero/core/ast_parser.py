@@ -877,7 +877,7 @@ class ASTParser:
 
     def _handle_aggregate(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to all aggregate methods."""
-        from statezero.core.query_cache import get_cached_query_result, cache_query_result
+        from statezero.core.query_cache import generate_cache_key_for_subscription, cache_query_result
 
         op_type = ast.get("type")
 
@@ -918,10 +918,9 @@ class ASTParser:
             # Create operation context: "operation_type:field"
             operation_context = f"{op_type}:{field}"
 
-            # Try cache with operation context (in dry-run mode, this returns cache key)
-            cached_result = get_cached_query_result(self.current_queryset, operation_context, dry_run=self.dry_run)
-            if cached_result is not None:
-                return cached_result
+            # In dry-run mode, return cache key for subscription
+            if self.dry_run:
+                return generate_cache_key_for_subscription(self.current_queryset, operation_context, query_type="aggregate")
 
             if op_type == "count":
                 result_val = self.engine.count(self.current_queryset, field)
@@ -981,7 +980,7 @@ class ASTParser:
 
     def _handle_read(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to fetch_list method."""
-        from statezero.core.query_cache import get_cached_query_result, cache_query_result
+        from statezero.core.query_cache import generate_cache_key_for_subscription, cache_query_result
 
         offset_raw = self.serializer_options.get("offset", 0)
         limit_raw = self.serializer_options.get("limit", self.config.default_limit)
@@ -1005,10 +1004,9 @@ class ASTParser:
         fields_str = str(sorted(str(self.read_fields_map))) if self.read_fields_map else "default"
         operation_context = f"read:fields={fields_str}"
 
-        # Try cache with the paginated queryset and operation context (in dry-run mode, this returns cache key)
-        cached_result = get_cached_query_result(paginated_qs, operation_context, dry_run=self.dry_run)
-        if cached_result is not None:
-            return cached_result
+        # In dry-run mode, return cache key for subscription
+        if self.dry_run:
+            return generate_cache_key_for_subscription(paginated_qs, operation_context, query_type="read")
 
         # Cache miss - execute query with permission checks
         # Pass UNSLICED queryset so permission checks can filter it,

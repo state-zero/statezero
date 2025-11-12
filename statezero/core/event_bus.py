@@ -5,6 +5,7 @@ from fastapi.encoders import jsonable_encoder
 
 from statezero.core.interfaces import AbstractEventEmitter, AbstractORMProvider
 from statezero.core.types import ActionType, ORMModel, ORMQuerySet
+from statezero.core.subscription_processor import process_model_change
 
 logger = logging.getLogger(__name__)
 
@@ -53,52 +54,11 @@ class EventBus:
             return
 
         try:
-            # Get model class and registry config
-            model_class = instance.__class__
-            model_config = None
-
-            # Use the registry to get model config
-            if self.registry:
-                try:
-                    model_config = self.registry.get_config(model_class)
-                except ValueError:
-                    pass
-
-            default_namespace = self.orm_provider.get_model_name(model_class)
-            namespaces = [default_namespace]
-
-            # Create payload data from instance
-            model_name = self.orm_provider.get_model_name(instance)
-            pk_field_name = instance._meta.pk.name
-            pk_value = instance.pk
-
-            data = {
-                "event": action_type.value,
-                "model": model_name,
-                "operation_id": current_operation_id.get(),
-                "canonical_id": current_canonical_id.get(),
-                "instances": [pk_value],
-                "pk_field_name": pk_field_name,
-            }
-
-            for namespace in namespaces:
-                try:
-                    # Emit data to this namespace
-                    self.broadcast_emitter.emit(
-                        namespace, action_type, jsonable_encoder(data)
-                    )
-                except Exception as e:
-                    logger.exception(
-                        "Error emitting to namespace %s for event %s: %s",
-                        namespace,
-                        action_type,
-                        e,
-                    )
+            process_model_change(instance, action_type.value, self.orm_provider, self.registry)
         except Exception as e:
             logger.exception(
-                "Error in broadcast emitter dispatching event %s for instance %s: %s",
+                "Error processing subscription changes for %s event: %s",
                 action_type,
-                instance,
                 e,
             )
 
@@ -122,53 +82,16 @@ class EventBus:
         if not instances:
             return
 
-        # Get the model class from the first instance
-        first_instance = instances[0]
-        model_class = first_instance.__class__
-
         if not self.broadcast_emitter or not self.orm_provider:
             return
 
         try:
-            # Get model config
-            model_config = None
-            if hasattr(self, "registry"):
+            # Process each instance through subscription processor
+            for instance in instances:
                 try:
-                    model_config = self.registry.get_config(model_class)
-                except (ValueError, AttributeError):
-                    pass
-
-            default_namespace = self.orm_provider.get_model_name(model_class)
-
-            # Create payload data from instances
-            model_name = self.orm_provider.get_model_name(first_instance)
-            pk_field_name = first_instance._meta.pk.name
-            pks = [instance.pk for instance in instances]
-
-            data = {
-                "event": action_type.value,
-                "model": model_name,
-                "operation_id": current_operation_id.get(),
-                "canonical_id": current_canonical_id.get(),
-                "instances": pks,
-                "pk_field_name": pk_field_name,
-            }
-
-            # Create a dictionary to group instances by namespace
-            namespaces = ["global", default_namespace]
-
-            for namespace in namespaces:
-                try:
-                    # Emit data to this namespace
-                    self.broadcast_emitter.emit(
-                        namespace, action_type, jsonable_encoder(data)
-                    )
+                    process_model_change(instance, action_type.value, self.orm_provider, self.registry)
                 except Exception as e:
-                    logger.exception(
-                        "Error emitting bulk event to namespace %s: %s",
-                        namespace,
-                        e,
-                    )
+                    logger.exception("Error processing subscription changes for bulk event: %s", e)
         except Exception as e:
             logger.exception(
                 "Error in broadcast emitter dispatching bulk event %s: %s",
