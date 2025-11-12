@@ -555,6 +555,20 @@ class SubscribeViewTestCase(TransactionTestCase):
         actual_json = json.dumps(subscription.last_result, sort_keys=True)
         self.assertEqual(actual_json, expected_json)
 
+        # Verify pk_index was populated
+        self.assertIsNotNone(subscription.pk_index)
+        self.assertIn("django_app.dummymodel", subscription.pk_index)
+        # Should have 2 PKs
+        pk_list = subscription.pk_index["django_app.dummymodel"]
+        self.assertEqual(len(pk_list), 2)
+
+        # Verify exact type preservation - should match what's in included dict
+        included = model_response.data["data"]["included"]["django_app.dummymodel"]
+        included_keys = list(included.keys())
+
+        # pk_list should have exact same keys (same types)
+        self.assertEqual(set(pk_list), set(included_keys))
+
         # Clean up
         obj1.delete()
         obj2.delete()

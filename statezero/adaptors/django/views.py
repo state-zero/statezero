@@ -193,12 +193,17 @@ class SubscribeView(APIView):
             # Extract namespace from AST for event filtering
             namespace = extract_namespace_from_ast(original_request_data)
 
+            # Normalize model_name to match what the ORM provider returns (lowercase)
+            # The URL might have "django_app.DummyModel" but get_model_name returns "django_app.dummymodel"
+            model = config.orm_provider.get_model_by_name(model_name)
+            normalized_model_name = config.orm_provider.get_model_name(model)
+
             # Get or create the subscription
-            # Store the original request data (raw JSON from client) and model name
+            # Store the original request data (raw JSON from client) and normalized model name
             subscription, created = QuerySubscription.objects.get_or_create(
                 hashed_cache_key=hashed_cache_key,
                 defaults={
-                    "model_name": model_name,
+                    "model_name": normalized_model_name,
                     "ast": original_request_data,
                     "namespace": namespace,
                     "query_type": query_type,
@@ -211,6 +216,7 @@ class SubscribeView(APIView):
                 cached_result = cache.get(full_cache_key)
                 if cached_result is not None:
                     subscription.last_result = cached_result
+                    subscription.update_pk_index_from_result(cached_result)
                     subscription.save()
 
             # Add user to subscription or mark as allowing anonymous users

@@ -895,10 +895,9 @@ class ASTParser:
             # Create operation context from all aggregates
             operation_context = f"aggregate:{','.join(f'{f}:{fld}' for f, fld in aggs.items())}"
 
-            # Try cache with operation context
-            cached_result = get_cached_query_result(self.current_queryset, operation_context)
-            if cached_result is not None:
-                return cached_result
+            # For dry_run mode, return cache key for subscription
+            if self.dry_run:
+                return generate_cache_key_for_subscription(self.current_queryset, operation_context, query_type="aggregate")
 
             result_data = self.engine.aggregate(self.current_queryset, agg_list)
             result = {

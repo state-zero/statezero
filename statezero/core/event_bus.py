@@ -86,12 +86,9 @@ class EventBus:
             return
 
         try:
-            # Process each instance through subscription processor
-            for instance in instances:
-                try:
-                    process_model_change(instance, action_type.value, self.orm_provider, self.registry)
-                except Exception as e:
-                    logger.exception("Error processing subscription changes for bulk event: %s", e)
+            # Process all instances through subscription processor
+            process_model_change(instances, action_type.value, self.orm_provider, self.registry)
+
         except Exception as e:
             logger.exception(
                 "Error in broadcast emitter dispatching bulk event %s: %s",

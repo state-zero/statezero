@@ -30,7 +30,7 @@ def get_direct_value(instance: Any, field_name: str) -> Any:
     return getattr(instance, field_name, None)
 
 
-def should_emit_to_namespace(instance: Any, namespace: Dict[str, Any]) -> bool:
+def instance_matches_namespace_filter(instance: Any, namespace: Dict[str, Any]) -> bool:
     """
     Check if an instance matches a namespace filter.
 
@@ -54,11 +54,11 @@ def should_emit_to_namespace(instance: Any, namespace: Dict[str, Any]) -> bool:
 
     Examples:
         >>> message = Message(room_id=5, status='active')
-        >>> should_emit_to_namespace(message, {'room_id': 5})
+        >>> instance_matches_namespace_filter(message, {'room_id': 5})
         True
-        >>> should_emit_to_namespace(message, {'room_id': 7})
+        >>> instance_matches_namespace_filter(message, {'room_id': 7})
         False
-        >>> should_emit_to_namespace(message, {'status__in': ['active', 'pending']})
+        >>> instance_matches_namespace_filter(message, {'status__in': ['active', 'pending']})
         True
     """
     for key, expected_value in namespace.items():

@@ -47,6 +47,13 @@ class QuerySubscription(models.Model):
         help_text="Type of query: 'read' for querysets, 'aggregate' for metrics"
     )
 
+    # Optimized PK index for fast instance lookups
+    # Structure: {"model_name": [pk1, pk2, pk3], "other.model": [pk4, pk5]}
+    pk_index = models.JSONField(
+        default=dict,
+        help_text="Optimized index of PKs by model for fast lookups"
+    )
+
     # The last result that was sent to subscribers (for diffing)
     last_result = models.JSONField(null=True, blank=True, help_text="Last cached result")
 
@@ -62,6 +69,13 @@ class QuerySubscription(models.Model):
     anonymous_users_allowed = models.BooleanField(
         default=False,
         help_text="Whether anonymous users can subscribe to this query"
+    )
+
+    # Flag to indicate if this subscription needs to be re-executed
+    needs_rerun = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Whether this subscription needs to be re-executed due to data changes"
     )
 
     class Meta:
@@ -83,3 +97,28 @@ class QuerySubscription(models.Model):
     def has_subscribers(self) -> bool:
         """Check if this subscription has any active subscribers."""
         return self.users.exists() or self.anonymous_users_allowed
+
+    def update_pk_index_from_result(self, result: dict) -> None:
+        """
+        Update the pk_index from a query result.
+
+        Extracts all PKs from result.data.included and organizes them by model.
+        Structure: {"model_name": [pk1, pk2, pk3], "other.model": [pk4, pk5]}
+
+        Args:
+            result: Query result dict with structure {"data": {"included": {...}}}
+        """
+        if not result or "data" not in result:
+            self.pk_index = {}
+            return
+
+        data = result.get("data", {})
+        included = data.get("included", {})
+
+        pk_index = {}
+        for model_name, instances in included.items():
+            # instances is a dict like {pk1: {data}, pk2: {data}}
+            # Extract just the PKs as a list
+            pk_index[model_name] = list(instances.keys())
+
+        self.pk_index = pk_index
