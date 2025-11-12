@@ -25,6 +25,13 @@ class QuerySubscription(models.Model):
     # The original AST that generates this query (for re-execution)
     ast = models.JSONField(help_text="The AST that generates this query")
 
+    # Namespace extracted from the query filter (for event filtering)
+    # Contains only simple equality and __in filters from the AST
+    namespace = models.JSONField(
+        default=dict,
+        help_text="Namespace filters for determining when to re-execute this query"
+    )
+
     # The last result that was sent to subscribers (for diffing)
     last_result = models.JSONField(null=True, blank=True, help_text="Last cached result")
 

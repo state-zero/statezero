@@ -388,3 +388,199 @@ class SubscribeViewTestCase(TransactionTestCase):
         # Should fail because no cache key can be generated without canonical_id
         self.assertEqual(response.status_code, 500)
         self.assertIn("error", response.data)
+
+    def test_subscribe_extracts_namespace_simple_equality(self):
+        """Test that namespace is correctly extracted for simple equality filters."""
+        self.client.force_authenticate(user=self.user)
+        url = reverse("statezero:subscribe", args=["django_app.DummyModel"])
+
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "read",
+                    "filter": {
+                        "type": "filter",
+                        "conditions": {"name": "TestA", "value": 10}
+                    }
+                }
+            }
+        }
+
+        response = self.client.post(url, data=payload, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        subscription = QuerySubscription.objects.get(id=response.data["subscription_id"])
+        self.assertEqual(subscription.namespace, {"name": "TestA", "value": 10})
+
+    def test_subscribe_extracts_namespace_in_lookup(self):
+        """Test that namespace correctly extracts __in lookups."""
+        self.client.force_authenticate(user=self.user)
+        url = reverse("statezero:subscribe", args=["django_app.DummyModel"])
+
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "read",
+                    "filter": {
+                        "type": "filter",
+                        "conditions": {"name__in": ["TestA", "TestB"]}
+                    }
+                }
+            }
+        }
+
+        response = self.client.post(url, data=payload, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        subscription = QuerySubscription.objects.get(id=response.data["subscription_id"])
+        self.assertEqual(subscription.namespace, {"name__in": ["TestA", "TestB"]})
+
+    def test_subscribe_excludes_unsupported_lookups(self):
+        """Test that namespace excludes unsupported lookups like __gte."""
+        self.client.force_authenticate(user=self.user)
+        url = reverse("statezero:subscribe", args=["django_app.DummyModel"])
+
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "read",
+                    "filter": {
+                        "type": "filter",
+                        "conditions": {
+                            "name": "TestA",
+                            "value__gte": 10,
+                            "id__lt": 100
+                        }
+                    }
+                }
+            }
+        }
+
+        response = self.client.post(url, data=payload, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        subscription = QuerySubscription.objects.get(id=response.data["subscription_id"])
+        # Should only include simple equality, not __gte or __lt
+        self.assertEqual(subscription.namespace, {"name": "TestA"})
+
+    def test_subscribe_empty_namespace_no_filter(self):
+        """Test that namespace is empty dict when no filter is present."""
+        self.client.force_authenticate(user=self.user)
+        url = reverse("statezero:subscribe", args=["django_app.DummyModel"])
+
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "read",
+                }
+            }
+        }
+
+        response = self.client.post(url, data=payload, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        subscription = QuerySubscription.objects.get(id=response.data["subscription_id"])
+        self.assertEqual(subscription.namespace, {})
+
+    def test_subscribe_mixed_supported_unsupported_filters(self):
+        """Test namespace extraction with mix of supported and unsupported filters."""
+        self.client.force_authenticate(user=self.user)
+        url = reverse("statezero:subscribe", args=["django_app.DummyModel"])
+
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "read",
+                    "filter": {
+                        "type": "filter",
+                        "conditions": {
+                            "related_id": 5,
+                            "name__in": ["TestA", "TestB"],
+                            "value__gte": 10,
+                            "name__contains": "test"
+                        }
+                    }
+                }
+            }
+        }
+
+        response = self.client.post(url, data=payload, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        subscription = QuerySubscription.objects.get(id=response.data["subscription_id"])
+        # Should only include equality and __in
+        self.assertEqual(subscription.namespace, {
+            "related_id": 5,
+            "name__in": ["TestA", "TestB"]
+        })
+
+    def test_subscribe_populates_last_result_from_cache(self):
+        """Test that when creating a subscription, last_result is populated from cache if available."""
+        from tests.django_app.models import DummyModel
+        import json
+
+        # Create some test data
+        obj1 = DummyModel.objects.create(name="CachedA", value=100)
+        obj2 = DummyModel.objects.create(name="CachedB", value=200)
+
+        self.client.force_authenticate(user=self.user)
+
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "read",
+                }
+            }
+        }
+
+        # First, execute the query via ModelView to populate cache
+        model_view_url = reverse("statezero:model_view", args=["django_app.DummyModel"])
+        model_response = self.client.post(model_view_url, data=payload, format="json")
+        self.assertEqual(model_response.status_code, 200)
+        self.assertIn("data", model_response.data)
+
+        # Now subscribe to the same query
+        subscribe_url = reverse("statezero:subscribe", args=["django_app.DummyModel"])
+        subscribe_response = self.client.post(subscribe_url, data=payload, format="json")
+        self.assertEqual(subscribe_response.status_code, 200)
+        self.assertTrue(subscribe_response.data["created"])
+
+        # Verify that last_result was populated from cache
+        subscription = QuerySubscription.objects.get(id=subscribe_response.data["subscription_id"])
+        self.assertIsNotNone(subscription.last_result)
+
+        # Compare by JSON serializing both sides to ensure exact match
+        # This handles any int vs string key differences
+        expected_json = json.dumps(model_response.data, sort_keys=True)
+        actual_json = json.dumps(subscription.last_result, sort_keys=True)
+        self.assertEqual(actual_json, expected_json)
+
+        # Clean up
+        obj1.delete()
+        obj2.delete()
+
+    def test_subscribe_no_last_result_when_cache_empty(self):
+        """Test that last_result is None when creating a subscription with no cached data."""
+        self.client.force_authenticate(user=self.user)
+
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "read",
+                    "filter": {
+                        "type": "filter",
+                        "conditions": {"name": "NonExistentFilter"}
+                    }
+                }
+            }
+        }
+
+        # Subscribe without running the query first (no cache)
+        subscribe_url = reverse("statezero:subscribe", args=["django_app.DummyModel"])
+        subscribe_response = self.client.post(subscribe_url, data=payload, format="json")
+        self.assertEqual(subscribe_response.status_code, 200)
+        self.assertTrue(subscribe_response.data["created"])
+
+        # Verify that last_result is None
+        subscription = QuerySubscription.objects.get(id=subscribe_response.data["subscription_id"])
+        self.assertIsNone(subscription.last_result)

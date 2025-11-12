@@ -30,6 +30,8 @@ from statezero.core.interfaces import AbstractActionPermission
 from statezero.adaptors.django.models import QuerySubscription
 from statezero.core.telemetry import create_telemetry_context, clear_telemetry_context
 from statezero.adaptors.django.db_telemetry import track_db_queries
+from statezero.core.namespace_utils import extract_namespace_from_ast
+from django.core.cache import cache
 
 
 logger = logging.getLogger(__name__)
@@ -187,6 +189,9 @@ class SubscribeView(APIView):
             else:
                 hashed_cache_key = full_cache_key
 
+            # Extract namespace from AST for event filtering
+            namespace = extract_namespace_from_ast(original_request_data)
+
             # Get or create the subscription
             # Store the original request data (raw JSON from client) and model name
             subscription, created = QuerySubscription.objects.get_or_create(
@@ -194,9 +199,17 @@ class SubscribeView(APIView):
                 defaults={
                     "model_name": model_name,
                     "ast": original_request_data,
+                    "namespace": namespace,
                     "last_result": None,
                 }
             )
+
+            # If we just created the subscription, try to populate last_result from cache
+            if created:
+                cached_result = cache.get(full_cache_key)
+                if cached_result is not None:
+                    subscription.last_result = cached_result
+                    subscription.save()
 
             # Add user to subscription or mark as allowing anonymous users
             if request.user.is_authenticated:
