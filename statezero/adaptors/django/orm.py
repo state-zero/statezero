@@ -1040,17 +1040,15 @@ class DjangoORMAdapter(AbstractORMProvider):
             model, permissions, request, validate_type
         )
 
-        # Filter data to only allowed fields
-        filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
-
         # Create minimal fields map for serializer
         model_name = config.orm_provider.get_model_name(model)
         fields_map = {model_name: allowed_fields}
 
-        # Validate using serializer with partial flag - let ValidationError bubble up naturally
+        # Pass data directly to serializer - it will handle filtering user input
+        # and allow hooks to add any fields. Don't pre-filter here!
         serializer.deserialize(
             model=model,
-            data=filtered_data,
+            data=data,
             partial=partial,
             request=request,
             fields_map=fields_map,
