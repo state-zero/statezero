@@ -608,8 +608,19 @@ class DRFDynamicSerializer(AbstractDataSerializer):
         all_fields = config.orm_provider.get_fields(model)
         model_name = config.orm_provider.get_model_name(model)
 
+        # CRITICAL: Include any fields that exist in the data dict
+        # This allows hooks to add fields that aren't in the configured fields
+        # For example, tenant and created_by fields added by pre-hooks
+        all_db_fields = config.orm_provider.get_db_fields(model)
+        data_keys = set(data.keys())
+        # Only include data keys that are actual DB fields
+        additional_fields_from_data = data_keys & all_db_fields
+
+        # Combine configured fields with hook-added fields
+        fields_for_serializer = all_fields | additional_fields_from_data
+
         # Create an unrestricted fields map
-        unrestricted_fields_map = {model_name: all_fields}
+        unrestricted_fields_map = {model_name: fields_for_serializer}
 
         # Use the context manager with the unrestricted fields map
         with fields_map_context(unrestricted_fields_map):
