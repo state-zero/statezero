@@ -84,6 +84,15 @@ class DjangoLocalConfig(AppConfig):
         except Exception:
             self.schema_overrides = {}
 
+        # Try to register django-pydantic-field support
+        try:
+            from django_pydantic_field.v2.fields import PydanticSchemaField
+            from statezero.adaptors.django.extensions.custom_field_serializers.pydantic_field import (
+                PydanticSchemaFieldSerializer)
+            self.custom_serializers[PydanticSchemaField] = PydanticSchemaFieldSerializer
+        except ImportError:
+            pass
+
 
 # Create the singleton instances.
 custom_config_path = getattr(settings, "STATEZERO_CUSTOM_CONFIG", None)
