@@ -25,6 +25,7 @@ from statezero.core.interfaces import (
     AbstractPermission,
 )
 from statezero.core.types import ActionType, RequestType
+from statezero.adaptors.django.serializers import get_custom_serializer
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -420,8 +421,27 @@ class DjangoORMAdapter(AbstractORMProvider):
         # Execute the update with processed expressions
         rows_updated = qs.update(**processed_data)
 
+        # Expand update_fields to include all DB fields for custom serializers (e.g., MoneyField)
+        # This ensures .only() fetches companion fields like price_currency for MoneyField
+        expanded_update_fields = set()
+        for field_name in update_fields:
+            try:
+                field_obj = model._meta.get_field(field_name)
+                if not field_obj.is_relation:
+                    custom_serializer = get_custom_serializer(field_obj.__class__)
+                    if custom_serializer and hasattr(custom_serializer, 'get_prefetch_db_fields'):
+                        db_fields = custom_serializer.get_prefetch_db_fields(field_name)
+                        expanded_update_fields.update(db_fields)
+                    else:
+                        expanded_update_fields.add(field_name)
+                else:
+                    expanded_update_fields.add(field_name)
+            except Exception:
+                # If field lookup fails, include as-is
+                expanded_update_fields.add(field_name)
+
         # After update, fetch the updated instances
-        updated_instances = list(qs.only(*update_fields))
+        updated_instances = list(qs.only(*expanded_update_fields))
 
         # Triggers cache invalidation and broadcast to the frontend
         config.event_bus.emit_bulk_event(ActionType.BULK_UPDATE, updated_instances)

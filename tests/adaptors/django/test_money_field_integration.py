@@ -178,3 +178,33 @@ class MoneyFieldIntegrationTest(APITestCase):
         self.assertEqual(instance_data["char_field"], "Product A")
         self.assertEqual(instance_data["money_field"]["amount"], "150.50")
         self.assertEqual(instance_data["money_field"]["currency"], "USD")
+
+    def test_money_field_bulk_update(self):
+        """
+        Test that updating a MoneyField works correctly.
+        This tests the fix for KeyError 'price_currency' when using .only() with MoneyField.
+        """
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "update",
+                    "filter": {
+                        "type": "filter",
+                        "conditions": {"id": self.instance1.id}
+                    },
+                    "data": {
+                        "money_field": {"amount": "250.00", "currency": "GBP"}
+                    }
+                }
+            }
+        }
+
+        url = reverse("statezero:model_view", args=["django_app.ComprehensiveModel"])
+        response = self.client.post(url, data=payload, format="json")
+
+        self.assertEqual(response.status_code, 200, f"Update failed: {response.data}")
+
+        # Verify the update was successful
+        self.instance1.refresh_from_db()
+        self.assertEqual(str(self.instance1.money_field.amount), "250.00")
+        self.assertEqual(str(self.instance1.money_field.currency), "GBP")
