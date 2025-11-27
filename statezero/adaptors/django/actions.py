@@ -14,6 +14,9 @@ class DjangoActionSchemaGenerator:
         actions_schema = {}
         all_app_configs = list(apps.get_app_configs())
 
+        # Pre-compute app paths once to avoid O(n*m) repeated os.path.abspath calls
+        app_paths = [(app_config, os.path.abspath(app_config.path)) for app_config in all_app_configs]
+
         for action_name, action_config in action_registry.get_actions().items():
             func = action_config.get("function")
             if not func:
@@ -23,14 +26,13 @@ class DjangoActionSchemaGenerator:
 
             func_path = os.path.abspath(func.__code__.co_filename)
             found_app = None
+            found_app_path_len = 0
 
-            for app_config in all_app_configs:
-                app_path = os.path.abspath(app_config.path)
+            for app_config, app_path in app_paths:
                 if func_path.startswith(app_path + os.sep):
-                    if not found_app or len(app_path) > len(
-                        os.path.abspath(found_app.path)
-                    ):
+                    if not found_app or len(app_path) > found_app_path_len:
                         found_app = app_config
+                        found_app_path_len = len(app_path)
 
             if not found_app:
                 raise LookupError(
