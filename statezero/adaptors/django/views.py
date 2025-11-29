@@ -114,23 +114,17 @@ class ModelView(APIView):
                 with track_db_queries():
                     result = processor.process_request(req=request)
 
-            # Get telemetry data AFTER track_db_queries context exits
-            # so that DB queries are included
+            # Log telemetry data if enabled
             if config.enable_telemetry and telemetry_ctx:
                 telemetry_data = telemetry_ctx.get_telemetry_data()
-                result["__telemetry__"] = telemetry_data
+                logger.info(f"[StateZero Telemetry] {json.dumps(telemetry_data)}")
 
         except Exception as original_exception:
             return explicit_exception_handler(original_exception)
         finally:
             clear_telemetry_context()
 
-        # Extract telemetry and put it in response headers
-        telemetry_data = result.pop("__telemetry__", None)
-        response = Response(result, status=status.HTTP_200_OK)
-        if telemetry_data:
-            response["X-StateZero-Telemetry"] = json.dumps(telemetry_data)
-        return response
+        return Response(result, status=status.HTTP_200_OK)
 
 class SchemaView(APIView):
     permission_classes = [ORMBridgeViewAccessGate]
