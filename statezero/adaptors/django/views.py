@@ -117,7 +117,7 @@ class ModelView(APIView):
             # Log telemetry data if enabled
             if config.enable_telemetry and telemetry_ctx:
                 telemetry_data = telemetry_ctx.get_telemetry_data()
-                logger.info(f"[StateZero Telemetry] {json.dumps(telemetry_data)}")
+                logger.warning(f"[StateZero Telemetry] {json.dumps(telemetry_data)}")
 
         except Exception as original_exception:
             return explicit_exception_handler(original_exception)
