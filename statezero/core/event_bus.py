@@ -1,6 +1,6 @@
 from statezero.core.context_storage import current_operation_id, current_canonical_id
 import logging
-from typing import Any, Type, Union, List
+from typing import Any, List, Type, Union
 from fastapi.encoders import jsonable_encoder
 
 from statezero.core.interfaces import AbstractEventEmitter, AbstractORMProvider
@@ -124,7 +124,15 @@ class EventBus:
 
         # Get the model class from the first instance
         first_instance = instances[0]
-        model_class = first_instance.__class__
+        # Use _meta.model to get the actual Django model class
+        # This handles both real instances and pseudo-instances (from notify_bulk_deleted with pks)
+        if hasattr(first_instance, "_meta") and hasattr(first_instance._meta, "model"):
+            model_class = first_instance._meta.model
+        else:
+            model_class = first_instance.__class__
+
+        # Dispatch Django-style signal for receivers
+        self._dispatch_bulk_signal(action_type, model_class, instances)
 
         if not self.broadcast_emitter or not self.orm_provider:
             return
@@ -172,6 +180,53 @@ class EventBus:
         except Exception as e:
             logger.exception(
                 "Error in broadcast emitter dispatching bulk event %s: %s",
+                action_type,
+                e,
+            )
+
+    def _dispatch_bulk_signal(
+        self, action_type: ActionType, model_class: Type, instances: List[Any]
+    ) -> None:
+        """
+        Dispatch Django-style signals for bulk operations.
+
+        Parameters:
+        -----------
+        action_type: ActionType
+            The type of bulk event
+        model_class: Type
+            The model class of the instances
+        instances: List[Any]
+            The instances affected by the bulk operation
+        """
+        try:
+            from statezero.adaptors.django.signals import (
+                post_bulk_create,
+                post_bulk_update,
+                post_bulk_delete,
+            )
+
+            signal_map = {
+                ActionType.BULK_CREATE: post_bulk_create,
+                ActionType.BULK_UPDATE: post_bulk_update,
+                ActionType.BULK_DELETE: post_bulk_delete,
+            }
+
+            signal = signal_map.get(action_type)
+            if signal:
+                # For delete, also include PKs since instances may be pseudo-objects
+                if action_type == ActionType.BULK_DELETE:
+                    pks = [inst.pk for inst in instances]
+                    signal.send(
+                        sender=model_class,
+                        instances=instances,
+                        pks=pks,
+                    )
+                else:
+                    signal.send(sender=model_class, instances=instances)
+        except Exception as e:
+            logger.exception(
+                "Error dispatching bulk signal %s: %s",
                 action_type,
                 e,
             )

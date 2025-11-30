@@ -1,5 +1,40 @@
 """
-Helper functions for manually triggering StateZero signals.
+StateZero signals for Django.
+
+This module provides:
+1. Signal receivers - Django-style signals for bulk operations
+2. Signal triggers - Helper functions for manually triggering events
+
+=============================================================================
+RECEIVING SIGNALS
+=============================================================================
+
+StateZero provides Django-style signals for bulk operations (since Django
+doesn't emit signals for these):
+
+    from django.dispatch import receiver
+    from statezero.adaptors.django.signals import (
+        post_bulk_create, post_bulk_update, post_bulk_delete
+    )
+
+    @receiver(post_bulk_create, sender=MyModel)
+    def handle_bulk_create(sender, instances, **kwargs):
+        print(f"Created {len(instances)} instances")
+
+    @receiver(post_bulk_update, sender=MyModel)
+    def handle_bulk_update(sender, instances, **kwargs):
+        print(f"Updated {len(instances)} instances")
+
+    @receiver(post_bulk_delete, sender=MyModel)
+    def handle_bulk_delete(sender, instances, pks, **kwargs):
+        print(f"Deleted instances with PKs: {pks}")
+
+For single-instance operations, use Django's built-in signals:
+    from django.db.models.signals import post_save, post_delete
+
+=============================================================================
+TRIGGERING SIGNALS
+=============================================================================
 
 Use these when performing bulk operations or custom database updates
 that bypass Django's normal signal system.
@@ -25,7 +60,25 @@ Example usage:
 
 from typing import Any, List, Type, Union
 
+from django.dispatch import Signal
+
 from statezero.core.types import ActionType, ORMModel, ORMQuerySet
+
+
+# =============================================================================
+# Bulk Signals (for receiving)
+# =============================================================================
+# Django doesn't emit signals for bulk operations, so StateZero provides these.
+# Use with Django's @receiver decorator.
+
+post_bulk_create = Signal()  # Provides: sender, instances
+post_bulk_update = Signal()  # Provides: sender, instances
+post_bulk_delete = Signal()  # Provides: sender, instances, pks
+
+
+# =============================================================================
+# Internal Helpers
+# =============================================================================
 
 
 def _get_event_bus():
@@ -342,14 +395,8 @@ def notify_bulk_deleted(
 
         _validate_model_registered(model_class)
 
-        # Create lightweight objects with just PKs for the event
-        class _DeletedInstance:
-            def __init__(self, model_cls, pk_value):
-                self.__class__.__name__ = model_cls.__name__
-                self._meta = model_cls._meta
-                self.pk = pk_value
-
-        pseudo_instances = [_DeletedInstance(model_class, pk) for pk in pks]
+        # Create unsaved model instances with just the PK set
+        pseudo_instances = [model_class(pk=pk) for pk in pks]
         event_bus.emit_bulk_event(ActionType.BULK_DELETE, pseudo_instances)
         return
 

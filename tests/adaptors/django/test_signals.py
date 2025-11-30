@@ -14,6 +14,9 @@ from statezero.adaptors.django.signals import (
     notify_bulk_created,
     notify_bulk_updated,
     notify_bulk_deleted,
+    post_bulk_create,
+    post_bulk_update,
+    post_bulk_delete,
     _validate_instance,
     _validate_instances_list,
     _validate_model_registered,
@@ -224,6 +227,116 @@ class TestBulkSignals(TestCase):
         with self.assertRaises(TypeError) as ctx:
             notify_bulk_created(qs)
         self.assertIn("Expected a list", str(ctx.exception))
+
+
+class TestSignalReceivers(TestCase):
+    """Tests for receiving bulk signals."""
+
+    def setUp(self):
+        try:
+            registry.register(DummyModel, ModelConfig(DummyModel))
+        except ValueError:
+            pass  # Already registered
+
+        self.related = DummyRelatedModel.objects.create(name="rel")
+        self.instances = [
+            DummyModel.objects.create(name=f"test{i}", value=i, related=self.related)
+            for i in range(3)
+        ]
+        # Track received signals
+        self.received_signals = []
+
+    def tearDown(self):
+        # Disconnect any handlers we connected
+        post_bulk_create.disconnect(dispatch_uid="test_bulk_create")
+        post_bulk_update.disconnect(dispatch_uid="test_bulk_update")
+        post_bulk_delete.disconnect(dispatch_uid="test_bulk_delete")
+
+    def test_post_bulk_create_signal_received(self):
+        """post_bulk_create signal should be dispatched on notify_bulk_created."""
+        def handler(sender, instances, **kwargs):
+            self.received_signals.append({
+                "signal": "post_bulk_create",
+                "sender": sender,
+                "instances": instances,
+            })
+
+        post_bulk_create.connect(handler, sender=DummyModel, dispatch_uid="test_bulk_create")
+
+        notify_bulk_created(self.instances)
+
+        self.assertEqual(len(self.received_signals), 1)
+        self.assertEqual(self.received_signals[0]["signal"], "post_bulk_create")
+        self.assertEqual(self.received_signals[0]["sender"], DummyModel)
+        self.assertEqual(self.received_signals[0]["instances"], self.instances)
+
+    def test_post_bulk_update_signal_received(self):
+        """post_bulk_update signal should be dispatched on notify_bulk_updated."""
+        def handler(sender, instances, **kwargs):
+            self.received_signals.append({
+                "signal": "post_bulk_update",
+                "sender": sender,
+                "instances": instances,
+            })
+
+        post_bulk_update.connect(handler, sender=DummyModel, dispatch_uid="test_bulk_update")
+
+        notify_bulk_updated(self.instances)
+
+        self.assertEqual(len(self.received_signals), 1)
+        self.assertEqual(self.received_signals[0]["signal"], "post_bulk_update")
+        self.assertEqual(self.received_signals[0]["sender"], DummyModel)
+        self.assertEqual(self.received_signals[0]["instances"], self.instances)
+
+    def test_post_bulk_delete_signal_received(self):
+        """post_bulk_delete signal should be dispatched on notify_bulk_deleted."""
+        def handler(sender, instances, pks, **kwargs):
+            self.received_signals.append({
+                "signal": "post_bulk_delete",
+                "sender": sender,
+                "instances": instances,
+                "pks": pks,
+            })
+
+        post_bulk_delete.connect(handler, sender=DummyModel, dispatch_uid="test_bulk_delete")
+
+        notify_bulk_deleted(self.instances)
+
+        self.assertEqual(len(self.received_signals), 1)
+        self.assertEqual(self.received_signals[0]["signal"], "post_bulk_delete")
+        self.assertEqual(self.received_signals[0]["sender"], DummyModel)
+        expected_pks = [inst.pk for inst in self.instances]
+        self.assertEqual(self.received_signals[0]["pks"], expected_pks)
+
+    def test_post_bulk_delete_with_pks_signal_received(self):
+        """post_bulk_delete should work when called with model + pks."""
+        def handler(sender, instances, pks, **kwargs):
+            self.received_signals.append({
+                "signal": "post_bulk_delete",
+                "sender": sender,
+                "pks": pks,
+            })
+
+        post_bulk_delete.connect(handler, sender=DummyModel, dispatch_uid="test_bulk_delete")
+
+        pks = [inst.pk for inst in self.instances]
+        notify_bulk_deleted(DummyModel, pks)
+
+        self.assertEqual(len(self.received_signals), 1)
+        self.assertEqual(self.received_signals[0]["pks"], pks)
+
+    def test_signal_only_received_for_matching_sender(self):
+        """Signal should only be received when sender matches."""
+        def handler(sender, instances, **kwargs):
+            self.received_signals.append({"sender": sender})
+
+        # Connect to DummyRelatedModel, not DummyModel
+        post_bulk_create.connect(handler, sender=DummyRelatedModel, dispatch_uid="test_bulk_create")
+
+        # Trigger for DummyModel - handler should NOT be called
+        notify_bulk_created(self.instances)
+
+        self.assertEqual(len(self.received_signals), 0)
 
 
 if __name__ == "__main__":
