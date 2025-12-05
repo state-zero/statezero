@@ -34,7 +34,7 @@ class AppConfig(ABC):
     schema_overrides: Dict[ORMField, dict] = {}  # type:ignore
 
     event_bus: EventBus = None
-    default_limit: Optional[int] = 100
+    default_limit: Optional[int] = None
     orm_provider: AbstractORMProvider = None
     search_provider: AbstractSearchProvider = None
 
