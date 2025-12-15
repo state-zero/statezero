@@ -42,10 +42,15 @@ class ASTValidator:
 
     def _allowed_fields_for_model(self, model: Type) -> Set[str]:
         """
-        Aggregates the visible fields from all permission instances for the given model.
+        Aggregates the visible fields from permission instances that allow READ action.
+        Only includes fields from permissions that grant READ access.
         """
         allowed_fields: Set[str] = set()
         for perm in self._aggregate_permission_instances(model):
+            # Only include fields from permissions that allow READ action
+            if ActionType.READ not in perm.allowed_actions(self.request, model):
+                continue
+
             fields = perm.visible_fields(self.request, model)
             if fields == "__all__":
                 # If any permission allows all fields, return all available fields

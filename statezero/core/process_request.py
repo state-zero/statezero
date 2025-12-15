@@ -30,23 +30,35 @@ def _filter_writable_data(
     When `create` is True, use the permission's `create_fields` method;
     otherwise, use `editable_fields`.
 
+    Only includes fields from permissions that allow the corresponding action
+    (CREATE or UPDATE).
+
     If the allowed fields set contains "__all__", return the original data.
     """
     all_fields = orm_provider.get_fields(model)
     allowed_fields: Set[str] = set()
-    
+
+    # Determine which action we're checking for
+    required_action = ActionType.CREATE if create else ActionType.UPDATE
+
     for permission_cls in model_config.permissions:
+        perm = permission_cls()
+
+        # Only include fields if this permission allows the required action
+        if required_action not in perm.allowed_actions(req, model):
+            continue
+
         if create:
-            permission_fields = permission_cls().create_fields(req, model)
+            permission_fields = perm.create_fields(req, model)
         else:
-            permission_fields = permission_cls().editable_fields(req, model)
+            permission_fields = perm.editable_fields(req, model)
         # handle the __all__ shorthand
         if permission_fields == "__all__":
             permission_fields = all_fields
         else:
             permission_fields &= all_fields
         allowed_fields |= permission_fields
-    
+
     return {k: v for k, v in data.items() if k in allowed_fields}
 
 
@@ -125,25 +137,43 @@ class RequestProcessor:
             registered_permissions=model_config.permissions,
         )
 
+        # Step 1: Apply filter_queryset with OR logic (additive permissions)
+        # Collect all filtered querysets from each permission
+        filtered_querysets = []
         for permission_cls in model_config.permissions:
+            perm = permission_cls()
+
             # Record permission class being applied
             if telemetry_ctx:
                 permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
                 telemetry_ctx.record_permission_class_applied(permission_class_name)
 
-            # Apply permission filter
-            base_queryset = permission_cls().filter_queryset(req, base_queryset)
+            # Apply permission filter to a fresh base queryset
+            filtered_qs = perm.filter_queryset(req, base_queryset)
+            filtered_querysets.append(filtered_qs)
 
             # Record SQL after applying this permission
             if telemetry_ctx:
                 try:
                     from statezero.core.query_cache import _get_sql_from_queryset
-                    sql_data = _get_sql_from_queryset(base_queryset)
+                    sql_data = _get_sql_from_queryset(filtered_qs)
                     if sql_data:
                         sql, _ = sql_data
                         telemetry_ctx.record_queryset_after_permission(permission_class_name, sql)
                 except Exception:
                     pass  # Don't fail if we can't get SQL
+
+        # Combine all filtered querysets with OR
+        if filtered_querysets:
+            combined_queryset = filtered_querysets[0]
+            for qs in filtered_querysets[1:]:
+                combined_queryset = combined_queryset | qs
+            base_queryset = combined_queryset
+
+        # Step 2: Apply exclude_from_queryset with AND logic (restrictive permissions)
+        for permission_cls in model_config.permissions:
+            perm = permission_cls()
+            base_queryset = perm.exclude_from_queryset(req, base_queryset)
 
         # ---- PERMISSION CHECKS: Global Level (Write operations remain here) ----
         requested_actions: Set[ActionType] = ASTParser.get_requested_action_types(

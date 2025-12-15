@@ -394,8 +394,20 @@ class ASTParser:
             # Initialize with no fields allowed
             allowed_fields = set()
 
+            # Map operation type to required action
+            operation_to_action = {
+                "read": ActionType.READ,
+                "create": ActionType.CREATE,
+                "update": ActionType.UPDATE,
+            }
+            required_action = operation_to_action.get(operation_type)
+
             for permission_cls in model_config.permissions:
                 permission: AbstractPermission = permission_cls()
+
+                # Only include fields if this permission allows the required action
+                if required_action and required_action not in permission.allowed_actions(self.request, model):
+                    continue
 
                 # Get the appropriate field set based on operation
                 if operation_type == "read":

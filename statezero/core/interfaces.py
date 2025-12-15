@@ -537,8 +537,25 @@ class AbstractPermission(ABC):
         """
         Given the request, queryset, and set of CRUD actions, return a queryset filtered according
         to permission rules.
+
+        When multiple permissions are registered, their filter_queryset results are combined
+        with OR logic (additive) - a row is visible if it passes ANY permission's filter.
         """
         pass
+
+    def exclude_from_queryset(
+        self, request: RequestType, queryset: ORMQuerySet
+    ) -> Any:  # type:ignore
+        """
+        Given the request and queryset, return a queryset with rows excluded according
+        to permission rules.
+
+        When multiple permissions are registered, their exclude_from_queryset results are combined
+        with AND logic (restrictive) - a row is excluded if it fails ANY permission's exclusion check.
+
+        By default, no rows are excluded. Override this method to implement exclusion logic.
+        """
+        return queryset
 
     @abstractmethod
     def allowed_actions(
