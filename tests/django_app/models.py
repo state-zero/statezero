@@ -105,6 +105,9 @@ class ComprehensiveModel(models.Model):
     money_field = MoneyField(
         max_digits=10, decimal_places=2, default_currency="USD", default=0
     )
+    nullable_money_field = MoneyField(
+        max_digits=10, decimal_places=2, default_currency="USD", null=True, blank=True
+    )
     related = models.ForeignKey(
         "django_app.DeepModelLevel1", on_delete=models.CASCADE, null=True, blank=True
     )

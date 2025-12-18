@@ -208,3 +208,94 @@ class MoneyFieldIntegrationTest(APITestCase):
         self.instance1.refresh_from_db()
         self.assertEqual(str(self.instance1.money_field.amount), "250.00")
         self.assertEqual(str(self.instance1.money_field.currency), "GBP")
+
+    def test_nullable_money_field_with_null_value(self):
+        """
+        Test that nullable MoneyField serializes correctly when value is None.
+        """
+        # Create instance with null money field
+        instance_with_null = ComprehensiveModel.objects.create(
+            char_field="Product C",
+            text_field="Description C",
+            int_field=300,
+            bool_field=True,
+            datetime_field=timezone.now(),
+            decimal_field=Decimal("50.00"),
+            json_field={"category": "misc"},
+            money_field=Decimal("100.00"),  # Required field
+            nullable_money_field=None  # Nullable field set to None
+        )
+
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "read",
+                    "filter": {
+                        "type": "filter",
+                        "conditions": {"id": instance_with_null.id}
+                    },
+                    "fetch": {
+                        "fields": ["id", "char_field", "money_field", "nullable_money_field"]
+                    }
+                }
+            }
+        }
+
+        url = reverse("statezero:model_view", args=["django_app.ComprehensiveModel"])
+        response = self.client.post(url, data=payload, format="json")
+
+        self.assertEqual(response.status_code, 200)
+
+        included_data = response.data["data"]["included"]["django_app.comprehensivemodel"]
+        instance_data = included_data[instance_with_null.id]
+
+        # Regular money field should have a value
+        self.assertIsNotNone(instance_data["money_field"])
+        self.assertIn("amount", instance_data["money_field"])
+
+        # Nullable money field should be None
+        self.assertIsNone(instance_data["nullable_money_field"])
+
+    def test_nullable_money_field_update_to_null(self):
+        """
+        Test that updating a nullable MoneyField to null works correctly.
+        """
+        from djmoney.money import Money
+
+        # Create instance with a money value
+        instance = ComprehensiveModel.objects.create(
+            char_field="Product D",
+            text_field="Description D",
+            int_field=400,
+            bool_field=True,
+            datetime_field=timezone.now(),
+            decimal_field=Decimal("75.00"),
+            json_field={},
+            money_field=Money(100, "USD"),
+            nullable_money_field=Money(200, "EUR")
+        )
+
+        # Update nullable_money_field to null
+        payload = {
+            "ast": {
+                "query": {
+                    "type": "update",
+                    "filter": {
+                        "type": "filter",
+                        "conditions": {"id": instance.id}
+                    },
+                    "data": {
+                        "nullable_money_field": None
+                    }
+                }
+            }
+        }
+
+        url = reverse("statezero:model_view", args=["django_app.ComprehensiveModel"])
+        response = self.client.post(url, data=payload, format="json")
+
+        self.assertEqual(response.status_code, 200, f"Update failed: {response.data}")
+
+        # Verify the update was successful
+        instance.refresh_from_db()
+        self.assertIsNone(instance.nullable_money_field)

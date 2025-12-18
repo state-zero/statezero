@@ -24,6 +24,8 @@ class MoneyFieldSerializer(serializers.Field):
         return [field_name, f"{field_name}_currency"]
 
     def to_representation(self, value):
+        if value is None:
+            return None
         djmoney_field = MoneyField(
             max_digits=self.max_digits, decimal_places=self.decimal_places
         )
@@ -31,6 +33,8 @@ class MoneyFieldSerializer(serializers.Field):
         return {"amount": amount_representation, "currency": value.currency.code}
 
     def to_internal_value(self, data):
+        if data is None:
+            return None
         if isinstance(data, Money):
             return data
         if not isinstance(data, dict):
@@ -69,14 +73,20 @@ class MoneyFieldSchema(AbstractSchemaOverride):
                 "currency": {"type": "string"},
             },
         }
+        # Get title from verbose_name or field name
+        if field.verbose_name:
+            title = field.verbose_name.capitalize()
+        else:
+            title = field.name.replace("_", " ").title()
+
         # Return a schema metadata object that references this definition.
         schema = SchemaFieldMetadata(
             type=FieldType.OBJECT,
-            title="Money",
-            required=True,
+            title=title,
+            required=not (field.null or field.blank),
             nullable=field.null,
             format=FieldFormat.MONEY,
-            description=field.help_text or "Money field",
+            description=str(field.help_text) if field.help_text else None,
             ref=f"#/components/schemas/{key}",
         )
 
