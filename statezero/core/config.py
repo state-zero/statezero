@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Literal
 import networkx as nx
+import warnings
 
 
 from statezero.core.classes import AdditionalField
@@ -194,6 +195,20 @@ class ModelConfig:
         self.fields = fields or "__all__"
         self.display = display
         self.DEBUG = DEBUG or False
+
+        # Warn about additional fields that won't be included when fields is not __all__
+        if self.DEBUG and self.additional_fields and self.fields != "__all__":
+            additional_field_names = {af.name for af in self.additional_fields}
+            fields_set = self.fields if isinstance(self.fields, set) else set(self.fields)
+            missing_fields = additional_field_names - fields_set
+            if missing_fields:
+                warnings.warn(
+                    f"Model '{model.__name__}': additional_fields {missing_fields} are declared but "
+                    f"will be ignored because they are not included in the 'fields' list. "
+                    f"To fix this, either add them to 'fields' or remove them from 'additional_fields'.",
+                    UserWarning,
+                    stacklevel=2
+                )
 
     @property
     def permissions(self):
