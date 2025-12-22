@@ -86,7 +86,9 @@ class RequestProcessor:
             config: ModelConfig = self.registry.get_config(model)
 
             # In production, check that the user has permission to at least one of the CRUD actions.
-            if not self.config.DEBUG:
+            # Skip this check if the request was authenticated via sync token (for CLI schema generation)
+            is_sync_token_access = getattr(req, '_statezero_sync_token_access', False)
+            if not self.config.DEBUG and not is_sync_token_access:
                 allowed_actions: Set[ActionType] = set()
                 for permission_cls in config.permissions:
                     allowed_actions |= permission_cls().allowed_actions(req, model)

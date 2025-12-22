@@ -186,6 +186,10 @@ class ORMBridgeViewAccessGate(BasePermission):
     If no default user is provided or an error occurs, set the user to AnonymousUser
     and return has_permission = True.
     In production, strictly use the configured permission class.
+
+    For schema endpoints (models/, get-schema/, actions-schema/), a sync token
+    can be used to allow access in production without authentication. Set
+    STATEZERO_SYNC_TOKEN in settings and pass the token via X-Sync-Token header.
     """
 
     def __init__(self):
@@ -203,12 +207,46 @@ class ORMBridgeViewAccessGate(BasePermission):
             )
             self.view_access = AllowAny()
 
+    def _is_schema_endpoint(self, path: str) -> bool:
+        """Check if the request path is a schema endpoint."""
+        return (
+            path.endswith('/models/') or
+            path.endswith('/get-schema/') or
+            path.endswith('/actions-schema/')
+        )
+
+    def _check_sync_token(self, request) -> bool:
+        """
+        Check if a valid sync token is provided in the request headers.
+        Returns True if the token is configured and matches, False otherwise.
+        """
+        sync_token = getattr(settings, 'STATEZERO_SYNC_TOKEN', None)
+        if not sync_token:
+            return False
+
+        provided_token = request.headers.get('X-Sync-Token')
+        if provided_token and provided_token == sync_token:
+            logger.debug("Valid sync token provided for schema endpoint")
+            return True
+
+        return False
+
     def has_permission(self, request, view):
         logger.debug("Evaluating has_permission for path: %s", request.path)
 
         # Only apply custom access for schema and model list endpoints.
         if request.path.startswith("/statezero/"):
             logger.debug("Path matches statezero endpoints. DEBUG=%s", settings.DEBUG)
+
+            # Check for sync token on schema endpoints (works in both DEBUG and production)
+            if self._is_schema_endpoint(request.path) and self._check_sync_token(request):
+                logger.debug("Sync token validated, allowing access to schema endpoint")
+                # Set anonymous user for sync token requests
+                request.user = AnonymousUser()
+                # Mark request as sync token authenticated to bypass model permissions in process_schema
+                request._statezero_sync_token_access = True
+                return True
+
             if settings.DEBUG:
                 # In development mode, try to set a default user if one is provided.
                 default_user_func_path = getattr(
