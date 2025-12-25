@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Type, Union
 
 from django.apps import apps
 from django.db import models
+from django.db.models.fields.related import ForeignObjectRel, ManyToOneRel, ManyToManyRel, OneToOneRel
 from djmoney.models.fields import MoneyField
 from django.conf import settings
 
@@ -77,6 +78,61 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
                     "class_name": field.related_model.__name__,
                     "primary_key_field": field.related_model._meta.pk.name,
                 }
+
+        # Process reverse relationships (ForeignObjectRel) that are explicitly declared in fields
+        if model_config.fields != "__all__":
+            for field in model._meta.get_fields():
+                # Only process reverse relations that are explicitly in the fields config
+                if isinstance(field, ForeignObjectRel) and field.name in model_config.fields:
+                    # Skip if not in allowed_fields
+                    if (
+                        allowed_fields is not None
+                        and allowed_fields != "__all__"
+                        and field.name not in allowed_fields
+                    ):
+                        continue
+
+                    all_field_names.add(field.name)
+                    # Note: reverse relations are NOT added to db_field_names since they're not writable
+
+                    related_model = field.related_model
+
+                    # OneToOneRel (reverse of O2O) → like FK (single object)
+                    # ManyToOneRel (reverse of FK) → like M2M (array)
+                    # ManyToManyRel (reverse of M2M) → like M2M (array)
+                    if isinstance(field, OneToOneRel):
+                        # Identical to FK schema, but read-only
+                        related_pk_field = related_model._meta.pk
+                        schema_field = SchemaFieldMetadata(
+                            type=self.get_pk_type(related_pk_field),
+                            title=field.name.replace("_", " ").title(),
+                            required=False,
+                            nullable=True,
+                            format=FieldFormat.FOREIGN_KEY,
+                            read_only=True,
+                        )
+                        relation_type = FieldFormat.FOREIGN_KEY
+                    else:
+                        # ManyToOneRel or ManyToManyRel - identical to M2M schema, but read-only
+                        schema_field = SchemaFieldMetadata(
+                            type=FieldType.ARRAY,
+                            title=field.name.replace("_", " ").title(),
+                            required=False,
+                            nullable=False,
+                            format=FieldFormat.MANY_TO_MANY,
+                            read_only=True,
+                        )
+                        relation_type = FieldFormat.MANY_TO_MANY
+
+                    properties[field.name] = schema_field
+
+                    # Record the relationship
+                    relationships[field.name] = {
+                        "type": relation_type,
+                        "model": config.orm_provider.get_model_name(related_model),
+                        "class_name": related_model.__name__,
+                        "primary_key_field": related_model._meta.pk.name,
+                    }
 
         # Process any additional fields from the registry
         add_fields = model_config.additional_fields or []

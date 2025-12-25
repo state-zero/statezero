@@ -216,7 +216,7 @@ registry.register(
     ),
 )
 
-# Register Order with hooks
+# Register Order with hooks and reverse relationship
 registry.register(
     Order,
     ModelConfig(
@@ -227,7 +227,13 @@ registry.register(
         permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
         # Use pre and post hooks
         pre_hooks=[normalize_email],
-        post_hooks=[generate_order_number]
+        post_hooks=[generate_order_number],
+        # Explicitly declare fields including the reverse relationship "items"
+        fields={
+            "id", "order_number", "customer_name", "customer_email",
+            "total", "status", "created_at", "last_updated",
+            "items"  # Reverse relationship from OrderItem
+        }
     ),
 )
 

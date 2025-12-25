@@ -850,9 +850,38 @@ class DjangoORMAdapter(AbstractORMProvider):
         for field in model._meta.get_fields():
             field_name = field.name
 
-            # Skip reverse relations for validation purposes
-            # These are relationships defined on other models pointing to this model
+            # Handle reverse relations - only include if explicitly configured in fields
             if isinstance(field, ForeignObjectRel):
+                # Check if this reverse relation is explicitly listed in the model's fields config
+                try:
+                    model_config = registry.get_config(model)
+                    configured_fields = model_config.fields
+                    # Skip if fields is "__all__" (we don't auto-include reverse relations)
+                    # or if the field is not explicitly in the configured fields set
+                    if configured_fields == "__all__" or field_name not in configured_fields:
+                        continue
+                except ValueError:
+                    # Model not registered, skip reverse relation
+                    continue
+
+                # For reverse relations, the related model is the model that defines the FK
+                related_model = field.related_model
+                related_model_name = self.get_model_name(related_model)
+
+                field_node = f"{model_name}::{field_name}"
+                field_node_data = FieldNode(
+                    model_name=model_name,
+                    field_name=field_name,
+                    is_relation=True,
+                    related_model=related_model_name,
+                )
+                model_graph.add_node(field_node, data=field_node_data)
+                model_graph.add_edge(model_name, field_node)
+
+                # Recursively build the related model if not already in the graph
+                if not model_graph.has_node(related_model_name):
+                    self.build_model_graph(related_model, model_graph)
+                model_graph.add_edge(field_node, related_model_name)
                 continue
 
             field_node = f"{model_name}::{field_name}"
@@ -878,8 +907,6 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         # Add additional (computed) fields from the model's configuration.
         try:
-            from statezero.adaptors.django.config import registry
-
             config = registry.get_config(model)
             for additional_field in config.additional_fields:
                 add_field_name = additional_field.name

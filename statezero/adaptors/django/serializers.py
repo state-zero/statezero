@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, Set, Type, Union
 from django.db import models
+from django.db.models.fields.related import ForeignObjectRel, ManyToOneRel, ManyToManyRel, OneToOneRel
 from django.conf import settings
 from django.utils.module_loading import import_string
 from rest_framework import serializers
@@ -212,15 +213,45 @@ class DynamicModelSerializer(FExpressionMixin, serializers.ModelSerializer):
     def _setup_relation_fields(cls, serializer_class, model, allowed_fields):
         """Configure relation fields to use PrimaryKeyRelatedField."""
         allowed_fields = allowed_fields or set()
-        
+
+        # Get model config to check for explicitly declared reverse relations
+        try:
+            model_config = registry.get_config(model)
+            configured_fields = model_config.fields
+        except ValueError:
+            configured_fields = "__all__"
+
         for field in model._meta.get_fields():
             # Skip fields that won't be presented
             if field.name not in allowed_fields:
                 continue
-                
+
+            # Handle reverse relations (ForeignObjectRel) - read-only
+            # Only include if explicitly declared in model config's fields
+            if isinstance(field, ForeignObjectRel):
+                # Skip if fields is "__all__" (we don't auto-include reverse relations)
+                # or if the field is not explicitly in the configured fields set
+                if configured_fields == "__all__" or field.name not in configured_fields:
+                    continue
+
+                # OneToOneRel → single object (like FK)
+                # ManyToOneRel/ManyToManyRel → array (like M2M)
+                # Note: read_only=True means no queryset should be provided
+                if isinstance(field, OneToOneRel):
+                    serializer_class._declared_fields[field.name] = serializers.PrimaryKeyRelatedField(
+                        read_only=True,
+                        many=False
+                    )
+                else:
+                    serializer_class._declared_fields[field.name] = serializers.PrimaryKeyRelatedField(
+                        read_only=True,
+                        many=True
+                    )
+                continue
+
             if getattr(field, "auto_created", False) and not field.concrete:
                 continue
-                
+
             if field.is_relation:
                 queryset = field.related_model.objects.all()
                 serializer_class._declared_fields[field.name] = FlexiblePrimaryKeyRelatedField(
@@ -229,7 +260,7 @@ class DynamicModelSerializer(FExpressionMixin, serializers.ModelSerializer):
                     allow_null=field.null,
                     many= field.many_to_many or field.one_to_many
                 )
-                    
+
         return serializer_class
                 
     @classmethod
