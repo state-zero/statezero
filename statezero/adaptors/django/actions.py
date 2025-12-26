@@ -170,6 +170,12 @@ class DjangoActionSchemaGenerator:
 
     @staticmethod
     def _get_field_choices(field):
+        # Skip relational fields - they expose queryset as "choices" but that's not
+        # the same as actual choice fields. We don't want to enumerate all related
+        # model instances as enum values.
+        if isinstance(field, (serializers.PrimaryKeyRelatedField, serializers.ManyRelatedField)):
+            return None
+
         if hasattr(field, "choices") and field.choices:
             choices = field.choices
             
