@@ -16,7 +16,8 @@
       "Bash(conda activate:*)",
       "Bash(echo:*)",
       "Bash(C:/Users/rjher/OneDrive/Desktop/Work/statezero/tests/core/test_telemetry.py)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git show:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"

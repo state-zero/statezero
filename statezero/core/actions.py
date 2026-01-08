@@ -57,6 +57,7 @@ class ActionRegistry:
             func._statezero_action_name = action_name
             func._statezero_serializer = serializer
             func._statezero_response_serializer = response_serializer
+            func._statezero_permissions = permission_list
 
             return func
 
