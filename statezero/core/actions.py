@@ -50,6 +50,14 @@ class ActionRegistry:
                 "docstring": final_docstring,  # Store the determined docstring
                 "display": display,  # Store display metadata
             }
+
+            # Mark the function with attributes for external detection
+            # (e.g., django-ai-first can detect and use as LLM tools)
+            func._statezero_action = True
+            func._statezero_action_name = action_name
+            func._statezero_serializer = serializer
+            func._statezero_response_serializer = response_serializer
+
             return func
 
         if func is None:
