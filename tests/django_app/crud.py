@@ -7,7 +7,8 @@ from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      ModelWithCustomPKRelation,
                                      NameFilterCustomPKModel, Product,
                                      ProductCategory, Order, OrderItem, FileTest,
-                                     RatePlan, DailyRate)
+                                     RatePlan, DailyRate,
+                                     ModelWithRestrictedFields, RestrictedFieldRelatedModel)
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
 from statezero.core.classes import AdditionalField, DisplayMetadata, FieldGroup, FieldDisplayConfig
@@ -278,5 +279,35 @@ registry.register(
         searchable_fields={},
         ordering_fields={"date", "rate_plan"},
         permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+# Register RestrictedFieldRelatedModel
+# internal_code is NOT in fields (hidden from ALL users)
+# admin_only_field is hidden from non-admin via permission
+registry.register(
+    RestrictedFieldRelatedModel,
+    ModelConfig(
+        model=RestrictedFieldRelatedModel,
+        fields={"id", "name", "admin_only_field"},  # internal_code NOT included
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["tests.django_app.permissions.RestrictedFieldPermission"],
+    ),
+)
+
+# Register ModelWithRestrictedFields
+# internal_code is NOT in fields (hidden from ALL users)
+# admin_only_field is hidden from non-admin via permission
+registry.register(
+    ModelWithRestrictedFields,
+    ModelConfig(
+        model=ModelWithRestrictedFields,
+        fields={"id", "name", "admin_only_field", "restricted_related"},  # internal_code NOT included
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["tests.django_app.permissions.RestrictedFieldPermission"],
     ),
 )

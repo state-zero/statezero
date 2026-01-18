@@ -281,3 +281,51 @@ class FilterInBulkPermission(AbstractPermission):
 
     def get_permission_group_identifier(self, request: RequestType, model: ORMModel) -> str:
         return "filter_in_bulk"
+
+
+class RestrictedFieldPermission(AbstractPermission):
+    """
+    Permission class that hides admin_only_field from non-admin users.
+    Used for testing filter field auto-include with permission checks.
+    """
+    def filter_queryset(self, request: RequestType, queryset: Any) -> Any:
+        return queryset
+
+    def allowed_actions(
+        self, request: RequestType, model: Type[ORMModel]
+    ) -> Set[ActionType]:
+        return {
+            ActionType.CREATE,
+            ActionType.READ,
+            ActionType.UPDATE,
+            ActionType.DELETE,
+            ActionType.BULK_CREATE,
+        }
+
+    def allowed_object_actions(
+        self, request, obj, model: Type[ORMModel]
+    ) -> Set[ActionType]:
+        return {
+            ActionType.CREATE,
+            ActionType.READ,
+            ActionType.UPDATE,
+            ActionType.DELETE,
+            ActionType.BULK_CREATE,
+        }
+
+    def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
+        # Admin users can see all fields
+        if hasattr(request, "user") and request.user.is_superuser:
+            return "__all__"
+        # Non-admin users cannot see admin_only_field
+        return {"id", "pk", "name", "restricted_related"}
+
+    def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
+        if hasattr(request, "user") and request.user.is_superuser:
+            return "__all__"
+        return {"name"}
+
+    def create_fields(self, request: RequestType, model: Type) -> Set[str]:
+        if hasattr(request, "user") and request.user.is_superuser:
+            return "__all__"
+        return {"name"}
