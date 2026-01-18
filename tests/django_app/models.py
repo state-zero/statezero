@@ -307,3 +307,100 @@ class DailyRate(models.Model):
                 name="unique_rate_plan_date"
             )
         ]
+
+
+class RestrictedFieldRelatedModel(models.Model):
+    """Related model for testing field-level permissions on nested filter fields."""
+    name = models.CharField(max_length=100)
+    # Field hidden from ALL users (not in ModelConfig.fields)
+    internal_code = models.CharField(max_length=100, default='internal')
+    # Field hidden from non-admin users only (via visible_fields permission)
+    admin_only_field = models.CharField(max_length=100, default='')
+
+    def __str__(self):
+        return f"RestrictedRelated: {self.name}"
+
+    def __img__(self):
+        return f"/img/restricted_related_{self.name}.png"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class ModelWithRestrictedFields(models.Model):
+    """Model for testing field-level read permissions on filter fields."""
+    name = models.CharField(max_length=100)
+    # Field hidden from ALL users (not in ModelConfig.fields)
+    internal_code = models.CharField(max_length=100, default='internal')
+    # Field hidden from non-admin users only (via visible_fields permission)
+    admin_only_field = models.CharField(max_length=100, default='')
+    # Relation to test nested field restrictions
+    restricted_related = models.ForeignKey(
+        RestrictedFieldRelatedModel,
+        on_delete=models.CASCADE,
+        related_name="restricted_models",
+        null=True,
+        blank=True
+    )
+
+    def __str__(self):
+        return f"RestrictedModel: {self.name}"
+
+    def __img__(self):
+        return f"/img/restricted_{self.name}.png"
+
+    class Meta:
+        app_label = "django_app"
+
+
+# Models for testing deep M2M nesting (M2M -> M2M -> FK)
+class M2MDepthTestLevel3(models.Model):
+    """Deepest level - has a field and FK for testing M2M -> M2M -> FK traversal"""
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    # FK to test M2M -> M2M -> FK -> field
+    category = models.ForeignKey(
+        ProductCategory,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="m2m_depth_level3s"
+    )
+
+    def __str__(self):
+        return f"M2MDepthLevel3: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class M2MDepthTestLevel2(models.Model):
+    """Middle level - has M2M to Level3"""
+    name = models.CharField(max_length=100)
+    level3s = models.ManyToManyField(
+        M2MDepthTestLevel3,
+        blank=True,
+        related_name="level2s"
+    )
+
+    def __str__(self):
+        return f"M2MDepthLevel2: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class M2MDepthTestLevel1(models.Model):
+    """Top level - has M2M to Level2, enabling M2M -> M2M -> field queries"""
+    name = models.CharField(max_length=100)
+    level2s = models.ManyToManyField(
+        M2MDepthTestLevel2,
+        blank=True,
+        related_name="level1s"
+    )
+
+    def __str__(self):
+        return f"M2MDepthLevel1: {self.name}"
+
+    class Meta:
+        app_label = "django_app"

@@ -7,7 +7,9 @@ from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      ModelWithCustomPKRelation,
                                      NameFilterCustomPKModel, Product,
                                      ProductCategory, Order, OrderItem, FileTest,
-                                     RatePlan, DailyRate)
+                                     RatePlan, DailyRate,
+                                     ModelWithRestrictedFields, RestrictedFieldRelatedModel,
+                                     M2MDepthTestLevel1, M2MDepthTestLevel2, M2MDepthTestLevel3)
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
 from statezero.core.classes import AdditionalField, DisplayMetadata, FieldGroup, FieldDisplayConfig
@@ -277,6 +279,73 @@ registry.register(
         filterable_fields="__all__",
         searchable_fields={},
         ordering_fields={"date", "rate_plan"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+# Register RestrictedFieldRelatedModel
+# internal_code is NOT in fields (hidden from ALL users)
+# admin_only_field is hidden from non-admin via permission
+registry.register(
+    RestrictedFieldRelatedModel,
+    ModelConfig(
+        model=RestrictedFieldRelatedModel,
+        fields={"id", "name", "admin_only_field"},  # internal_code NOT included
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["tests.django_app.permissions.RestrictedFieldPermission"],
+    ),
+)
+
+# Register ModelWithRestrictedFields
+# internal_code is NOT in fields (hidden from ALL users)
+# admin_only_field is hidden from non-admin via permission
+registry.register(
+    ModelWithRestrictedFields,
+    ModelConfig(
+        model=ModelWithRestrictedFields,
+        fields={"id", "name", "admin_only_field", "restricted_related"},  # internal_code NOT included
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["tests.django_app.permissions.RestrictedFieldPermission"],
+    ),
+)
+
+
+# Models for testing deep M2M nesting (M2M -> M2M -> FK)
+# Enables queries like: Level1.filter(level2s__level3s__name='X') or level2s__level3s__category__name='X'
+
+registry.register(
+    M2MDepthTestLevel3,
+    ModelConfig(
+        model=M2MDepthTestLevel3,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    M2MDepthTestLevel2,
+    ModelConfig(
+        model=M2MDepthTestLevel2,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    M2MDepthTestLevel1,
+    ModelConfig(
+        model=M2MDepthTestLevel1,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
         permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )
