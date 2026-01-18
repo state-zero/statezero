@@ -213,6 +213,15 @@ class DjangoORMAdapter(AbstractORMProvider):
         """Apply a filter node to the queryset and return new queryset."""
         model = queryset.model
         visitor = QueryASTVisitor(model)
+
+        # For top-level AND nodes, apply each child as a separate filter
+        # to get Django's chained filter semantics (ANY/ANY for M2M)
+        if node.get("type") == "and" and "children" in node:
+            for child in node["children"]:
+                q_object = visitor.visit(child)
+                queryset = queryset.filter(q_object)
+            return queryset
+
         q_object = visitor.visit(node)
         return queryset.filter(q_object)
 
@@ -230,12 +239,18 @@ class DjangoORMAdapter(AbstractORMProvider):
         model = queryset.model
         visitor = QueryASTVisitor(model)
 
-        # Handle both direct exclude nodes and exclude nodes with a child filter
+        # Handle exclude nodes with a child
         if "child" in node:
-            # If there's a child node, visit it and exclude the result
-            q_object = visitor.visit(node["child"])
+            child = node["child"]
+            # For top-level AND nodes in exclude, apply each as separate exclude
+            # to get Django's chained exclude semantics (ANY/ANY for M2M)
+            if child.get("type") == "and" and "children" in child:
+                for grandchild in child["children"]:
+                    q_object = visitor.visit(grandchild)
+                    queryset = queryset.exclude(q_object)
+                return queryset
+            q_object = visitor.visit(child)
         else:
-            # Otherwise, treat it as a standard filter node to be negated
             q_object = visitor.visit(node)
 
         return queryset.exclude(q_object)
