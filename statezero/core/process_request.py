@@ -17,6 +17,69 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
+# Lookup operators and date parts that should be stripped when extracting filter field paths
+_FILTER_MODIFIERS = {
+    # Lookup operators
+    "contains", "icontains", "startswith", "istartswith", "endswith", "iendswith",
+    "lt", "gt", "lte", "gte", "in", "eq", "exact", "iexact", "isnull", "range",
+    "regex", "iregex",
+    # Date/time parts
+    "year", "month", "day", "hour", "minute", "second", "week", "week_day",
+    "iso_week_day", "quarter", "iso_year", "date", "time",
+}
+
+
+def _extract_base_field_path(field_path: str) -> str:
+    """
+    Extract the base field path from a filter field, stripping lookup operators and date parts.
+    e.g., "created_at__year__gte" -> "created_at"
+         "name__icontains" -> "name"
+         "user__profile__status" -> "user__profile__status"
+    """
+    parts = field_path.split("__")
+    base_parts = []
+    for part in parts:
+        if part in _FILTER_MODIFIERS:
+            break
+        base_parts.append(part)
+    return "__".join(base_parts) if base_parts else field_path
+
+
+def _extract_filter_fields(ast_node: Dict[str, Any]) -> Set[str]:
+    """
+    Recursively extract all field paths from filter/exclude nodes in an AST.
+    Returns base field paths with lookup operators stripped.
+    """
+    fields = set()
+    if not isinstance(ast_node, dict):
+        return fields
+
+    # Extract from conditions
+    conditions = ast_node.get("conditions", {})
+    for field_path in conditions.keys():
+        base_path = _extract_base_field_path(field_path)
+        if base_path:
+            fields.add(base_path)
+
+    # Extract from Q objects (OR conditions)
+    q_objects = ast_node.get("Q", [])
+    for q_condition in q_objects:
+        for field_path in q_condition.keys():
+            base_path = _extract_base_field_path(field_path)
+            if base_path:
+                fields.add(base_path)
+
+    # Recurse into children
+    if "children" in ast_node:
+        for child in ast_node["children"]:
+            fields |= _extract_filter_fields(child)
+
+    if "child" in ast_node:
+        fields |= _extract_filter_fields(ast_node["child"])
+
+    return fields
+
+
 def _filter_writable_data(
     data: Dict[str, Any],
     req: Any,
@@ -225,6 +288,17 @@ class RequestProcessor:
                 final_query_ast["defaults"] = _filter_writable_data(
                     final_query_ast["defaults"], req, model, model_config, self.orm_provider, create=True
                 )
+
+        # Extract filter/exclude fields and pass them separately for merging after __all__ resolution
+        filter_fields = set()
+        if "filter" in final_query_ast:
+            filter_fields |= _extract_filter_fields(final_query_ast["filter"])
+        if "exclude" in final_query_ast:
+            filter_fields |= _extract_filter_fields(final_query_ast["exclude"])
+
+        if filter_fields:
+            serializer_options = serializer_options or {}
+            serializer_options["_filter_fields"] = filter_fields
 
         # Create and use the AST parser directly, instead of delegating to ORM provider
         parser = ASTParser(

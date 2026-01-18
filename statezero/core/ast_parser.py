@@ -259,6 +259,12 @@ class ASTParser:
             orm_provider=self.engine, depth=depth, operation_type=operation_type
         )
 
+        # Merge filter fields into requested_fields so they go through permission validation
+        # This must happen AFTER _get_depth_based_fields resolves __all__ to actual field names
+        filter_fields = self.serializer_options.get("_filter_fields", set())
+        if filter_fields and requested_fields:
+            requested_fields = set(requested_fields) | filter_fields
+
         if requested_fields:
             fields_map = self._process_nested_field_strings(
                 orm_provider=self.engine,
