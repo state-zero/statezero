@@ -7,7 +7,6 @@ from statezero.core import AppConfig, ModelConfig, Registry
 from statezero.core.ast_parser import ASTParser
 from statezero.core.ast_validator import ASTValidator
 from statezero.core.exceptions import PermissionDenied, ValidationError
-from statezero.core.field_utils import extract_fields_from_filter, merge_fields_with_filter_fields
 from statezero.core.interfaces import (AbstractDataSerializer,
                                        AbstractORMProvider,
                                        AbstractSchemaGenerator)
@@ -196,18 +195,6 @@ class RequestProcessor:
 
         # For READ operations, delegate field permission checks to ASTValidator.
         serializer_options = ast_body.get("serializerOptions", {})
-
-        # Extract fields from filter/exclude and merge with requested fields
-        # This ensures filter fields are validated for permissions and fetched
-        filter_fields = extract_fields_from_filter(final_query_ast.get("filter", {}))
-        exclude_fields = extract_fields_from_filter(final_query_ast.get("exclude", {}))
-        all_filter_fields = filter_fields | exclude_fields
-
-        if all_filter_fields:
-            original_fields = serializer_options.get("fields", [])
-            merged_fields = merge_fields_with_filter_fields(original_fields, all_filter_fields)
-            serializer_options["fields"] = merged_fields
-            ast_body["serializerOptions"] = serializer_options
 
         # Invoke the ASTValidator to check read field permissions.
         model_graph = self.orm_provider.build_model_graph(model)

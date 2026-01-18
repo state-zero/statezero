@@ -5,7 +5,6 @@ import networkx as nx
 
 from statezero.core.config import Registry
 from statezero.core.exceptions import PermissionDenied, ValidationError
-from statezero.core.field_utils import SUPPORTED_OPERATORS
 from statezero.core.interfaces import AbstractPermission
 from statezero.core.types import ActionType, ORMModel, RequestType
 
@@ -88,6 +87,23 @@ class ASTValidator:
         """
         try:
             # Remove any lookup operators (e.g., 'name__icontains' -> 'name')
+            SUPPORTED_OPERATORS = {
+                "contains",
+                "icontains",
+                "startswith",
+                "istartswith",
+                "endswith",
+                "iendswith",
+                "lt",
+                "gt",
+                "lte",
+                "gte",
+                "in",
+                "eq",
+                "exact",
+                "isnull",
+            }
+
             field_parts = field_path.split("__")
             # Find where the lookup operators start
             base_field_parts = []
