@@ -267,6 +267,7 @@ class RequestProcessor:
             registry=self.registry,
             request=req,
             get_model_by_name=self.orm_provider.get_model_by_name,
+            is_nested_path_field=self.orm_provider.is_nested_path_field,
         )
         validator.validate_fields(final_query_ast, model)
 

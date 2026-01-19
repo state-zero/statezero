@@ -1,0 +1,370 @@
+# Support JSONField Filtering in Backend Validation
+
+## Problem
+
+The backend AST validator currently rejects valid Django ORM filter queries on JSONField nested paths. When a user attempts to filter using Django's standard JSONField lookup syntax (e.g., `metadata__user__name`), the validation fails even though Django's ORM natively supports this.
+
+### Current Behavior
+
+```python
+# This is valid Django ORM syntax and works:
+MyModel.objects.filter(metadata__user__name='John')
+
+# But StateZero's validator rejects it with ValidationError:
+# "Field 'metadata__user__name' does not exist on model MyModel"
+```
+
+### Root Cause
+
+In `statezero/core/ast_validator.py`, two methods traverse field paths using Django's `_meta.get_field()`:
+
+1. **`_field_exists_in_django_model()`** - Validates field existence
+2. **`is_field_allowed()`** - Validates field permissions
+
+Both methods attempt to traverse nested paths like `metadata__user__name` by calling `get_field()` for each segment. However, `get_field('user')` fails on a JSONField because JSON keys are not exposed as Django model fields.
+
+```python
+# Current code tries:
+field = current_model._meta.get_field(field_name)  # Works for 'metadata'
+field = json_field._meta.get_field('user')         # FAILS! JSONField doesn't have nested fields
+```
+
+## Impact
+
+- **Frontend filtering** works on local data (JavaScript doesn't distinguish between nested objects and relationships)
+- **Backend filtering** fails validation, creating an inconsistency
+- Users cannot filter on JSONField data from the backend, even though Django supports it
+- This breaks the expectation that Django-style filtering "just works"
+
+## Proposed Solution
+
+Detect JSONFields during field path traversal and stop validation at that point, since:
+1. Django allows arbitrary nested paths in JSONFields
+2. Django doesn't validate JSON structure at query time
+3. Invalid JSON paths fail gracefully (return no results) rather than raise errors
+
+### Implementation
+
+#### 1. Update Query Optimizer - `generate_query_paths()`
+
+**Location**: `statezero/adaptors/django/query_optimizer.py`
+
+The query optimizer also traverses field paths and needs to stop when it encounters JSONFields:
+
+```python
+def generate_query_paths(model, fields):
+    """Generate relationship paths and map fields, validating strictly."""
+    field_map = {'': set()}
+    all_relation_paths = set()
+    root_meta = _get_model_meta(model)
+
+    for field_path in fields:
+        parts = field_path.split(LOOKUP_SEP)
+        field_name = parts[-1]
+        relationship_parts = parts[:-1]
+        current_model = model
+        current_meta = root_meta
+
+        for i, part in enumerate(relationship_parts):
+            try:
+                field_obj = current_meta.get_field(part)
+                
+                # NEW: If we hit a JSONField, stop relationship traversal
+                # JSONFields don't have relationships to optimize, and nested keys
+                # aren't accessible via get_field()
+                from django.db import models
+                if isinstance(field_obj, models.JSONField):
+                    # Add the base JSONField to the field_map, but don't traverse further
+                    # The full path (including nested JSON keys) goes into the field_map
+                    # as a single field to fetch
+                    relation_path_key = LOOKUP_SEP.join(relationship_parts[:i])
+                    # The remaining path after the JSONField is treated as a single field
+                    remaining_path = LOOKUP_SEP.join([part] + parts[i+1:])
+                    field_map.setdefault(relation_path_key, set()).add(remaining_path)
+                    break  # Stop traversing this path
+                
+                current_path_str = LOOKUP_SEP.join(relationship_parts[:i+1])
+                all_relation_paths.add(current_path_str)
+                next_model = getattr(field_obj, 'related_model', None) or \
+                             (getattr(field_obj, 'remote_field', None) and getattr(field_obj.remote_field, 'model', None))
+                if not field_obj.is_relation:
+                     raise ValueError(f"Path '{field_path}' traverses non-relational field '{part}' on {current_model.__name__}.")
+                if not next_model:
+                    raise ValueError(f"Cannot determine related model for '{part}' in path '{field_path}' on {current_model.__name__}.")
+                current_model = next_model
+                current_meta = _get_model_meta(current_model)
+            except FieldDoesNotExist:
+                raise ValueError(f"Invalid path segment: '{part}' not found on {current_model.__name__} processing '{field_path}'.")
+            except Exception as e:
+                 raise ValueError(f"Error processing segment '{part}' on {current_model.__name__} for path '{field_path}': {e}")
+        else:
+            # Only validate the final field if we didn't break out early (due to JSONField)
+            try:
+                current_meta.get_field(field_name)
+            except FieldDoesNotExist:
+                 raise ValueError(f"Invalid final field: '{field_name}' not found on {current_model.__name__} for path '{field_path}'.")
+            except Exception as e:
+                 raise ValueError(f"Error validating final field '{field_name}' on {current_model.__name__} for path '{field_path}': {e}")
+
+            relation_path_key = LOOKUP_SEP.join(relationship_parts)
+            field_map.setdefault(relation_path_key, set()).add(field_name)
+
+    return all_relation_paths, field_map
+```
+
+**Note**: The `generate_paths()` helper function also traverses fields but only logs warnings for missing fields, so it should handle JSONFields gracefully already. However, if it causes issues, apply the same pattern there.
+
+#### 2. Update AST Validator - `_field_exists_in_django_model()`
+
+**Location**: `statezero/core/ast_validator.py`
+
+```python
+def _field_exists_in_django_model(self, model: Type, field_path: str) -> bool:
+    """
+    Check if a field path exists in the actual Django model (not just additional fields).
+    This validates that Django ORM can actually filter/query on this field.
+    """
+    try:
+        # Remove any lookup operators (e.g., 'name__icontains' -> 'name')
+        SUPPORTED_OPERATORS = {
+            "contains", "icontains", "startswith", "istartswith",
+            "endswith", "iendswith", "lt", "gt", "lte", "gte",
+            "in", "eq", "exact", "isnull",
+        }
+
+        field_parts = field_path.split("__")
+        # Find where the lookup operators start
+        base_field_parts = []
+        for part in field_parts:
+            if part in SUPPORTED_OPERATORS:
+                break
+            base_field_parts.append(part)
+
+        # Traverse the Django model fields
+        current_model = model
+        for field_name in base_field_parts:
+            try:
+                field = current_model._meta.get_field(field_name)
+                
+                # NEW: If we hit a JSONField, stop traversal
+                # Django allows arbitrary nested paths in JSONFields, so validation stops here
+                from django.db import models
+                if isinstance(field, models.JSONField):
+                    return True
+                
+                # Continue traversal for relationship fields
+                if field.is_relation and hasattr(field, "related_model"):
+                    current_model = field.related_model
+            except:
+                # Field doesn't exist in Django model
+                return False
+
+        return True
+    except:
+        return False
+```
+
+#### 3. Update AST Parser - `_process_nested_field_strings()`
+
+**Location**: `statezero/core/ast_parser.py`
+
+The AST parser builds field maps when processing serializer field requests. It needs to handle JSONFields:
+
+```python
+def _process_nested_field_strings(
+    self, orm_provider: AbstractORMProvider, field_strings, available_fields_map
+):
+    """
+    Build a fields map from a list of dotted field strings like ['fk__m2m', 'field', 'fk__m2m__field'],
+    respecting the available fields for each model.
+    """
+    fields_map = {}
+    model_graph: nx.DiGraph = orm_provider.build_model_graph(self.model)
+
+    root_model_name = orm_provider.get_model_name(self.model)
+    fields_map[root_model_name] = set()
+
+    for field_string in field_strings:
+        parts = field_string.split("__")
+        current_model = self.model
+        current_model_name = root_model_name
+
+        for i, part in enumerate(parts):
+            if (
+                current_model_name in available_fields_map
+                and part in available_fields_map[current_model_name]
+            ):
+                fields_map.setdefault(current_model_name, set()).add(part)
+
+            if i == len(parts) - 1:
+                # Last part handling (existing logic)
+                # ...
+                break
+
+            if (
+                current_model_name not in available_fields_map
+                or part not in available_fields_map[current_model_name]
+            ):
+                break
+
+            field_nodes = [
+                node
+                for node in model_graph.successors(current_model_name)
+                if model_graph.nodes[node].get("data")
+                and model_graph.nodes[node].get("data").field_name == part
+            ]
+
+            if not field_nodes:
+                break
+
+            field_node = field_nodes[0]
+            field_data = model_graph.nodes[field_node].get("data")
+
+            # NEW: Check if this is a JSONField
+            # If so, add the full remaining path as a field and stop traversing
+            try:
+                from django.db import models
+                field_obj = current_model._meta.get_field(part)
+                if isinstance(field_obj, models.JSONField):
+                    # Add the complete remaining path (including nested JSON keys)
+                    # as a single field for this model
+                    remaining_parts = [part] + parts[i+1:]
+                    json_field_path = "__".join(remaining_parts)
+                    fields_map.setdefault(current_model_name, set()).add(json_field_path)
+                    break  # Stop traversing this path
+            except:
+                pass  # Field doesn't exist or other error, continue with normal logic
+
+            # If this is a relation field, move to the related model
+            if field_data and field_data.is_relation and field_data.related_model:
+                related_model = orm_provider.get_model_by_name(
+                    field_data.related_model
+                )
+                current_model = related_model
+                current_model_name = field_data.related_model
+            else:
+                # Not a relation field, stop traversing
+                break
+
+    return fields_map
+```
+
+#### 4. Update AST Validator - `is_field_allowed()`
+
+**Location**: `statezero/core/ast_validator.py`
+
+```python
+def is_field_allowed(self, model: Type, field_path: str) -> bool:
+    """
+    Validates a nested field path (e.g. "related__name" or "level2__level3__name")
+    by using the model registry to extract the permission settings for each model
+    encountered along the path. Uses "__" to separate nested fields, and "::" as
+    the delimiter within a field node key.
+    """
+    parts = field_path.split("__")
+    current_model = model
+    current_model_name = self.get_model_name(current_model)
+
+    # Check that the user has READ permission on the root model.
+    if not self._has_read_permission(current_model):
+        return False
+
+    # Get allowed fields from permission settings.
+    allowed = self._allowed_fields_for_model(current_model)
+    for part in parts:
+        # Check that the field is allowed on the current model.
+        if part not in allowed and "__all__" not in str(allowed):
+            return False
+
+        # NEW: Check if this is a JSONField before traversing the graph
+        try:
+            from django.db import models
+            field = current_model._meta.get_field(part)
+            if isinstance(field, models.JSONField):
+                # User has permission to the JSONField itself
+                # Allow any nested paths within it
+                return True
+        except:
+            pass
+
+        # Construct the field node key.
+        field_node = f"{current_model_name}::{part}"
+        if self.model_graph.has_node(field_node):
+            node_data = self.model_graph.nodes[field_node].get("data")
+            if not node_data:
+                return False
+            if node_data.is_relation:
+                # If this is a relation, resolve the related model.
+                related_model_name = node_data.related_model
+                if related_model_name:
+                    related_model = self.get_model_by_name(related_model_name)
+                    # Check READ permission on the related model.
+                    if not self._has_read_permission(related_model):
+                        return False
+                    # Move to the related model for the next part.
+                    current_model = related_model
+                    current_model_name = related_model_name
+                    allowed = self._allowed_fields_for_model(current_model)
+                    continue
+                else:
+                    return False
+            else:
+                # Terminal (non-relation) field reached.
+                break
+        else:
+            return False
+
+    return True
+```
+
+## Security Considerations
+
+This approach is secure because:
+
+1. **Base field validation remains** - We still verify the JSONField itself exists and is accessible
+2. **Permission checks remain** - We still verify the user has permission to access the JSONField
+3. **Matches Django's behavior** - Django doesn't validate JSON structure at query time either
+4. **Graceful failure** - Invalid JSON paths return no results rather than exposing data or causing errors
+
+The key insight: Django itself doesn't validate JSON paths at query time, so being stricter than Django doesn't add security value—it just breaks valid use cases.
+
+## Testing
+
+Should include tests for:
+
+1. ✅ Valid JSONField filtering: `MyModel.objects.filter(metadata__user__name='John')`
+2. ✅ JSONField with lookup operators: `MyModel.objects.filter(metadata__count__gte=5)`
+3. ✅ Deep nested JSON paths: `MyModel.objects.filter(data__level1__level2__level3='value')`
+4. ✅ Permission checks still enforced: User without access to `metadata` field is denied
+5. ✅ Non-existent base field still rejected: `MyModel.objects.filter(nonexistent__key='value')`
+6. ✅ Mixed relationship and JSON paths: `MyModel.objects.filter(author__metadata__name='John')`
+
+## Alternative Approaches Considered
+
+### Whitelist Approach
+Explicitly configure allowed JSON paths in ModelConfig:
+```python
+class MyModelConfig(ModelConfig):
+    allowed_json_filters = {
+        'metadata': ['user__name', 'user__email']
+    }
+```
+**Rejected**: High maintenance burden, defeats flexibility of JSON fields
+
+### No Validation
+Remove all validation for nested paths
+**Rejected**: Security risk, doesn't validate permissions properly
+
+## Files to Modify
+
+- `statezero/core/ast_validator.py` - Update both validation methods (sections 2 & 4)
+- `statezero/adaptors/django/query_optimizer.py` - Update `generate_query_paths()` (section 1)
+- `statezero/core/ast_parser.py` - Update `_process_nested_field_strings()` (section 3)
+- `tests/test_ast_validator.py` - Add test cases for JSONField filtering
+- `tests/test_query_optimizer.py` - Add test cases for JSONField optimization
+- `tests/test_ast_parser.py` - Add test cases for JSONField in field maps
+- `docs/filtering.md` - Document JSONField filtering support
+
+## Priority
+
+**Medium-High** - This affects any application using JSONFields with filtering, which is a common Django pattern. The workaround (avoiding JSON filtering) significantly limits functionality.

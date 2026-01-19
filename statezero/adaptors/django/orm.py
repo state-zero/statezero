@@ -834,6 +834,16 @@ class DjangoORMAdapter(AbstractORMProvider):
         """
         return set(field.name for field in model._meta.get_fields())
 
+    def is_nested_path_field(self, model: models.Model, field_name: str) -> bool:
+        """
+        Check if a field allows arbitrary nested path traversal (e.g., JSONField).
+        """
+        try:
+            field = model._meta.get_field(field_name)
+            return isinstance(field, models.JSONField)
+        except Exception:
+            return False
+
     def build_model_graph(
         self, model: Type[models.Model], model_graph: nx.DiGraph = None
     ) -> nx.DiGraph:

@@ -84,6 +84,24 @@ class AbstractORMProvider(ABC):
         pass
 
     @abstractmethod
+    def is_nested_path_field(self, model: ORMModel, field_name: str) -> bool:
+        """
+        Check if a field allows arbitrary nested path traversal (e.g., JSONField).
+
+        Such fields support filtering with paths like field__key__subkey without
+        those nested keys being actual model fields. When traversing field paths
+        for validation, we should stop at these fields and allow any nested path.
+
+        Args:
+            model: The model class containing the field
+            field_name: The name of the field to check
+
+        Returns:
+            True if the field allows arbitrary nested paths, False otherwise
+        """
+        pass
+
+    @abstractmethod
     def filter_node(self, queryset: ORMQuerySet, node: Dict[str, Any]) -> ORMQuerySet:
         """
         Apply filter/and/or/not logic to the queryset and return new queryset.

@@ -17,6 +17,7 @@ class ASTValidator:
         registry: Registry,
         request: Any,
         get_model_by_name: Callable[[str], Type],
+        is_nested_path_field: Callable[[Type, str], bool] = None,
     ):
         """
         :param model_graph: The model graph built by the ORM's graph builder.
@@ -24,12 +25,14 @@ class ASTValidator:
         :param registry: Global registry mapping models to their ModelConfig.
         :param request: The current request (for permission checking).
         :param get_model_by_name: Helper to resolve a model by its unique name.
+        :param is_nested_path_field: A callable that checks if a field allows nested paths (e.g., JSONField).
         """
         self.model_graph = model_graph
         self.get_model_name = get_model_name
         self.registry = registry
         self.request = request
         self.get_model_by_name = get_model_by_name
+        self.is_nested_path_field = is_nested_path_field or (lambda m, f: False)
 
     def _aggregate_permission_instances(self, model: Type) -> List[AbstractPermission]:
         """
@@ -117,6 +120,9 @@ class ASTValidator:
             for field_name in base_field_parts:
                 try:
                     field = current_model._meta.get_field(field_name)
+                    # If we hit a field that allows nested paths (e.g., JSONField), stop traversal
+                    if self.is_nested_path_field(current_model, field_name):
+                        return True
                     if field.is_relation and hasattr(field, "related_model"):
                         current_model = field.related_model
                 except:
@@ -148,6 +154,10 @@ class ASTValidator:
             # Check that the field is allowed on the current model.
             if part not in allowed and "__all__" not in str(allowed):
                 return False
+
+            # If this is a nested path field (e.g., JSONField), allow any nested paths
+            if self.is_nested_path_field(current_model, part):
+                return True
 
             # Construct the field node key.
             field_node = f"{current_model_name}::{part}"
