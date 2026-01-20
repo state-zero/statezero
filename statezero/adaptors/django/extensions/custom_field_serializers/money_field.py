@@ -75,7 +75,7 @@ class MoneyFieldSchema(AbstractSchemaOverride):
         }
         # Get title from verbose_name or field name
         if field.verbose_name:
-            title = field.verbose_name.capitalize()
+            title = str(field.verbose_name).capitalize()
         else:
             title = field.name.replace("_", " ").title()
 

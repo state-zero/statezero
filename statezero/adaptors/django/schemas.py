@@ -190,9 +190,9 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
 
         schema_meta = ModelSchemaMetadata(
             model_name=config.orm_provider.get_model_name(model),
-            title=model._meta.verbose_name.title(),
+            title=str(model._meta.verbose_name).title(),
             plural_title=(
-                model._meta.verbose_name_plural.title()
+                str(model._meta.verbose_name_plural).title()
                 if hasattr(model._meta, "verbose_name_plural")
                 else model.__name__ + "s"
             ),
@@ -285,7 +285,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         required = self.is_field_required(field)
         nullable = field.null
         choices = (
-            {str(choice[0]): choice[1] for choice in field.choices}
+            {str(choice[0]): str(choice[1]) for choice in field.choices}
             if field.choices
             else None
         )
@@ -373,7 +373,7 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
 
     def get_field_title(self, field: models.Field) -> str:
         if field.verbose_name and not hasattr(field, "title"):
-            return field.verbose_name.capitalize()
+            return str(field.verbose_name).capitalize()
         return field.title or field.name.replace("_", " ").title()
 
     @staticmethod
