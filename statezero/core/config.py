@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Litera
 import networkx as nx
 import warnings
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ConfigDict, TypeAdapter, ValidationError
 
 from statezero.core.classes import AdditionalField
 from statezero.core.event_bus import EventBus
@@ -18,7 +18,7 @@ from statezero.core.types import ORMField, ORMQuerySet, ActionType
 # Pydantic validators for permission return types
 _action_set_validator = TypeAdapter(Set[ActionType])
 _fields_validator = TypeAdapter(Union[Set[str], Literal["__all__"]])
-_queryset_validator = TypeAdapter(ORMQuerySet)
+_queryset_validator = TypeAdapter(ORMQuerySet, config=ConfigDict(arbitrary_types_allowed=True))
 
 
 class ValidatedPermission:
