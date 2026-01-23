@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Litera
 import networkx as nx
 import warnings
 
+from pydantic import TypeAdapter, ValidationError
 
 from statezero.core.classes import AdditionalField
 from statezero.core.event_bus import EventBus
@@ -12,7 +13,107 @@ from statezero.core.interfaces import (AbstractCustomQueryset,
                                        AbstractDataSerializer,
                                        AbstractORMProvider, AbstractPermission,
                                        AbstractSchemaGenerator, AbstractSearchProvider, AbstractQueryOptimizer)
-from statezero.core.types import ORMField
+from statezero.core.types import ORMField, ORMQuerySet, ActionType
+
+# Pydantic validators for permission return types
+_action_set_validator = TypeAdapter(Set[ActionType])
+_fields_validator = TypeAdapter(Union[Set[str], Literal["__all__"]])
+_queryset_validator = TypeAdapter(ORMQuerySet)
+
+
+class ValidatedPermission:
+    """
+    Wraps a permission instance and validates return types match the interface contract.
+    This catches common implementation errors like returning None instead of a set or queryset.
+    """
+
+    def __init__(self, permission: AbstractPermission, cls_name: str):
+        self._perm = permission
+        self._cls_name = cls_name
+
+    def _validate(self, validator: TypeAdapter, result: Any, method: str, hint: str):
+        try:
+            validator.validate_python(result)
+        except ValidationError as e:
+            raise TypeError(
+                f"{self._cls_name}.{method}() returned invalid type. {hint}\n"
+                f"Validation error: {e.errors()[0]['msg']}"
+            )
+
+    def filter_queryset(self, request, queryset):
+        result = self._perm.filter_queryset(request, queryset)
+        self._validate(
+            _queryset_validator, result, "filter_queryset",
+            "Must return a QuerySet. Return queryset.none() to deny access."
+        )
+        return result
+
+    def exclude_from_queryset(self, request, queryset):
+        result = self._perm.exclude_from_queryset(request, queryset)
+        self._validate(
+            _queryset_validator, result, "exclude_from_queryset",
+            "Must return a QuerySet."
+        )
+        return result
+
+    def allowed_actions(self, request, model):
+        result = self._perm.allowed_actions(request, model)
+        self._validate(
+            _action_set_validator, result, "allowed_actions",
+            "Must return a Set[ActionType]. Return set() to grant no actions."
+        )
+        return result
+
+    def allowed_object_actions(self, request, obj, model):
+        result = self._perm.allowed_object_actions(request, obj, model)
+        self._validate(
+            _action_set_validator, result, "allowed_object_actions",
+            "Must return a Set[ActionType]. Return set() to grant no actions."
+        )
+        return result
+
+    def visible_fields(self, request, model):
+        result = self._perm.visible_fields(request, model)
+        self._validate(
+            _fields_validator, result, "visible_fields",
+            "Must return a Set[str] or '__all__'."
+        )
+        return result
+
+    def editable_fields(self, request, model):
+        result = self._perm.editable_fields(request, model)
+        self._validate(
+            _fields_validator, result, "editable_fields",
+            "Must return a Set[str] or '__all__'."
+        )
+        return result
+
+    def create_fields(self, request, model):
+        result = self._perm.create_fields(request, model)
+        self._validate(
+            _fields_validator, result, "create_fields",
+            "Must return a Set[str] or '__all__'."
+        )
+        return result
+
+    def bulk_operation_allowed(self, request, items, action_type, model):
+        return self._perm.bulk_operation_allowed(request, items, action_type, model)
+
+
+def _make_validated_permission_class(perm_class: Type[AbstractPermission]) -> Type:
+    """
+    Creates a wrapper class that returns ValidatedPermission instances when instantiated.
+    """
+    class ValidatedPermissionClass:
+        def __new__(cls, *args, **kwargs):
+            instance = perm_class(*args, **kwargs)
+            return ValidatedPermission(instance, perm_class.__name__)
+
+    # Preserve the original class name for debugging
+    ValidatedPermissionClass.__name__ = f"Validated{perm_class.__name__}"
+    ValidatedPermissionClass.__qualname__ = f"Validated{perm_class.__qualname__}"
+
+    return ValidatedPermissionClass
 
 class AppConfig(ABC):
     """
@@ -212,18 +313,19 @@ class ModelConfig:
 
     @property
     def permissions(self):
-        """Resolve permission class strings to actual classes on each access"""
+        """Resolve permission class strings to actual classes and wrap with validation"""
         resolved = []
         for perm in self._permissions:
             if isinstance(perm, str):
                 from django.utils.module_loading import import_string
                 try:
                     perm_class = import_string(perm)
-                    resolved.append(perm_class)
                 except ImportError:
                     raise ImportError(f"Could not import permission class: {perm}")
             else:
-                resolved.append(perm)
+                perm_class = perm
+            # Wrap with validation
+            resolved.append(_make_validated_permission_class(perm_class))
         return resolved
 
 

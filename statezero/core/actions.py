@@ -1,6 +1,53 @@
 import inspect
-from typing import Dict, Any, Callable, List, Union, Optional
+import warnings
+from typing import Dict, Any, Callable, List, Union, Optional, Type
 from .interfaces import AbstractActionPermission
+
+
+class ValidatedActionPermission:
+    """
+    Wraps an action permission instance and validates return types match the interface contract.
+    Logs warnings for invalid return types (since None is falsy, it fails safe).
+    """
+
+    def __init__(self, permission: AbstractActionPermission, cls_name: str):
+        self._perm = permission
+        self._cls_name = cls_name
+
+    def has_permission(self, request, action_name: str) -> bool:
+        result = self._perm.has_permission(request, action_name)
+        if not isinstance(result, bool):
+            warnings.warn(
+                f"{self._cls_name}.has_permission() returned {type(result).__name__}, "
+                "but should return a bool. Permission will be denied if falsy.",
+                UserWarning,
+            )
+        return result
+
+    def has_action_permission(self, request, action_name: str, validated_data: dict) -> bool:
+        result = self._perm.has_action_permission(request, action_name, validated_data)
+        if not isinstance(result, bool):
+            warnings.warn(
+                f"{self._cls_name}.has_action_permission() returned {type(result).__name__}, "
+                "but should return a bool. Permission will be denied if falsy.",
+                UserWarning,
+            )
+        return result
+
+
+def _make_validated_action_permission_class(perm_class: Type[AbstractActionPermission]) -> Type:
+    """
+    Creates a wrapper class that returns ValidatedActionPermission instances when instantiated.
+    """
+    class ValidatedActionPermissionClass:
+        def __new__(cls, *args, **kwargs):
+            instance = perm_class(*args, **kwargs)
+            return ValidatedActionPermission(instance, perm_class.__name__)
+
+    ValidatedActionPermissionClass.__name__ = f"Validated{perm_class.__name__}"
+    ValidatedActionPermissionClass.__qualname__ = f"Validated{perm_class.__qualname__}"
+
+    return ValidatedActionPermissionClass
 
 
 class ActionRegistry:
@@ -36,9 +83,11 @@ class ActionRegistry:
             if permissions is None:
                 permission_list = []
             elif isinstance(permissions, list):
-                permission_list = permissions
+                permission_list = [
+                    _make_validated_action_permission_class(p) for p in permissions
+                ]
             else:
-                permission_list = [permissions]
+                permission_list = [_make_validated_action_permission_class(permissions)]
 
             self._actions[action_name] = {
                 "function": func,
