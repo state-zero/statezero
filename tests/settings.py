@@ -49,6 +49,13 @@ INSTALLED_APPS = [
     "storages",  # Add django-storages
 ]
 
+# Add simple_history if installed
+try:
+    import simple_history
+    INSTALLED_APPS.insert(INSTALLED_APPS.index("tests.django_app"), "simple_history")
+except ImportError:
+    pass
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",

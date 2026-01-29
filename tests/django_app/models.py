@@ -5,6 +5,8 @@ from djmoney.models.fields import MoneyField
 from django.contrib.auth import get_user_model
 from django.db.models import Max
 
+from simple_history.models import HistoricalRecords
+
 User = get_user_model()
 
 class DummyRelatedModel(models.Model):
@@ -401,6 +403,19 @@ class M2MDepthTestLevel1(models.Model):
 
     def __str__(self):
         return f"M2MDepthLevel1: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class HistoryTestModel(models.Model):
+    """Model for testing django-simple-history integration with StateZero."""
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    history = HistoricalRecords()
+
+    def __str__(self):
+        return f"HistoryTestModel: {self.name}"
 
     class Meta:
         app_label = "django_app"
