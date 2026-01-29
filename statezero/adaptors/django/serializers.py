@@ -378,8 +378,21 @@ class DRFDynamicSerializer(AbstractDataSerializer):
                     get_model_name_func=config.orm_provider.get_model_name,
                 )
 
-                if "requested-fields::" in fields_map:
-                    requested_fields = fields_map["requested-fields::"]
+                # Get prefetch hints from model class for __str__ and __image__ properties
+                str_prefetch = getattr(model, '__str_prefetch__', [])
+                image_prefetch = getattr(model, '__image_prefetch__', [])
+                # Handle case where user passes a string instead of a list
+                if isinstance(str_prefetch, str):
+                    str_prefetch = [str_prefetch]
+                if isinstance(image_prefetch, str):
+                    image_prefetch = [image_prefetch]
+                extra_prefetch = list(str_prefetch) + list(image_prefetch)
+
+                requested_fields = list(fields_map.get("requested-fields::", []))
+                if extra_prefetch:
+                    requested_fields = requested_fields + extra_prefetch
+
+                if requested_fields:
                     data = query_optimizer.optimize(
                         queryset=data,
                         fields=requested_fields
