@@ -267,6 +267,8 @@ class ModelConfig:
         Expose just a subset of the model fields
     display: Optional[Any], optional
         Display metadata for frontend customization (DisplayMetadata instance)
+    force_prefetch: Optional[List[str]], optional
+        Field paths that should always be prefetched for this model (e.g., for __str__ or __img__ methods)
     DEBUG: bool, default=False
         Enable debug mode for this model
     """
@@ -283,6 +285,7 @@ class ModelConfig:
         ordering_fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
         fields: Optional[Union[Set[str], Literal["__all__"]]] = None,
         display: Optional[Any] = None,
+        force_prefetch: Optional[List[str]] = None,
         DEBUG: bool = False,
     ):
         self.model = model
@@ -295,6 +298,7 @@ class ModelConfig:
         self.ordering_fields = ordering_fields or set()
         self.fields = fields or "__all__"
         self.display = display
+        self.force_prefetch = force_prefetch or []
         self.DEBUG = DEBUG or False
 
         # Warn about additional fields that won't be included when fields is not __all__

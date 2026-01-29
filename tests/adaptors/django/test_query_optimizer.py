@@ -8,7 +8,7 @@ from django.db.models import Q
 from tests.django_app.models import (
     Product, ProductCategory, Order, OrderItem,
     DeepModelLevel1, DeepModelLevel2, DeepModelLevel3,
-    ComprehensiveModel
+    ComprehensiveModel, DailyRate, RatePlan
 )
 
 # Update imports to include DjangoQueryOptimizer
@@ -547,3 +547,91 @@ class QueryOptimizerTests(TestCase):
         without_only_ids = list(optimized_without_only.values_list('id', flat=True))
         self.assertEqual(with_only_ids, without_only_ids)
         self.assertEqual(count_with_only, count_without_only)
+
+
+class ForcePrefetchTests(TestCase):
+    """Tests for force_prefetch in ModelConfig."""
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for prefetch tests."""
+        from datetime import date
+
+        # Create rate plans with daily rates
+        for i in range(3):
+            rate_plan = RatePlan.objects.create(name=f"Rate Plan {i}")
+            for j in range(5):
+                DailyRate.objects.create(
+                    rate_plan=rate_plan,
+                    date=date(2024, 1, j + 1),
+                    price=100 + i * 10 + j
+                )
+
+    def test_force_prefetch_reduces_queries(self):
+        """Test that force_prefetch in ModelConfig reduces queries when accessing related fields."""
+        from statezero.core.config import ModelConfig, Registry
+
+        # First, test without force_prefetch (N+1 problem)
+        reset_queries()
+        with CaptureQueriesContext(connection) as context:
+            daily_rates = list(DailyRate.objects.all())
+            for dr in daily_rates:
+                _ = str(dr)  # This accesses self.rate_plan.name
+            unoptimized_query_count = len(context.captured_queries)
+
+        # Now test with force_prefetch via the optimizer directly
+        reset_queries()
+        with CaptureQueriesContext(connection) as context:
+            optimizer = DjangoQueryOptimizer(
+                get_model_name_func=lambda m: m.__name__,
+                use_only=True
+            )
+
+            # Simulate what force_prefetch would add
+            optimized_qs = optimizer.optimize(
+                DailyRate.objects.all(),
+                fields=['date', 'price', 'rate_plan__name']  # rate_plan__name triggers select_related
+            )
+            daily_rates = list(optimized_qs)
+            for dr in daily_rates:
+                _ = str(dr)  # This should NOT trigger additional queries
+            optimized_query_count = len(context.captured_queries)
+
+        print(f"\nforce_prefetch Test Results:")
+        print(f"Without optimization: {unoptimized_query_count} queries")
+        print(f"With optimization: {optimized_query_count} queries")
+        print(f"Query reduction: {unoptimized_query_count - optimized_query_count} queries")
+
+        # The optimized version should have far fewer queries
+        self.assertLess(
+            optimized_query_count, unoptimized_query_count,
+            f"Optimized ({optimized_query_count}) should use fewer queries than unoptimized ({unoptimized_query_count})"
+        )
+        self.assertEqual(
+            optimized_query_count, 1,
+            "With force_prefetch fields, should only need 1 query (with select_related)"
+        )
+
+    def test_without_prefetch_causes_n_plus_one(self):
+        """Test that without prefetching, accessing related fields in __str__ causes N+1."""
+        # Verify that DailyRate.__str__ actually accesses rate_plan.name
+        rate_plan = RatePlan.objects.first()
+        daily_rate = DailyRate.objects.filter(rate_plan=rate_plan).first()
+        expected_str = f"{rate_plan.name} - {daily_rate.date}"
+        self.assertEqual(str(daily_rate), expected_str)
+
+        # Now test that without prefetching, we get N+1 queries
+        reset_queries()
+        with CaptureQueriesContext(connection) as context:
+            daily_rates = list(DailyRate.objects.all())
+            count = len(daily_rates)
+            for dr in daily_rates:
+                _ = str(dr)
+            query_count = len(context.captured_queries)
+
+        # Should be 1 (initial) + N (one per rate_plan access) = N+1 queries
+        self.assertGreater(
+            query_count, 1,
+            f"Without prefetching, should have N+1 queries, got {query_count}"
+        )
+        print(f"\nN+1 verification: {count} objects caused {query_count} queries (expected ~{count + 1})")
