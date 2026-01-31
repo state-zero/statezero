@@ -224,12 +224,14 @@ class ActionAutoSerializerTests(SimpleTestCase):
         with self.assertRaises(AutoSerializerInferenceError):
             self._build(action)
 
-    def test_varargs_raises(self):
-        def action(request, *args, **kwargs):
+    def test_varargs_are_ignored(self):
+        def action(request, name: str, *args, **kwargs):
             return None
 
-        with self.assertRaises(AutoSerializerInferenceError):
-            self._build(action)
+        serializer = self._build(action)()
+        self.assertIn("name", serializer.fields)
+        self.assertNotIn("args", serializer.fields)
+        self.assertNotIn("kwargs", serializer.fields)
 
     def test_list_any_raises(self):
         def action(request, items: list[Any]):
