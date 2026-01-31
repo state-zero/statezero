@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework import fields, serializers
 from django.db import models
 from statezero.core.actions import action_registry
+from statezero.adaptors.django.action_serializers import get_or_build_action_serializer
 
 class DjangoActionSchemaGenerator:
     """Django-specific action schema generator that matches StateZero model schema format"""
@@ -43,8 +44,9 @@ class DjangoActionSchemaGenerator:
             app_name = found_app.label
             docstring = action_config.get("docstring")
 
+            serializer_class = get_or_build_action_serializer(action_config)
             input_properties, input_relationships = DjangoActionSchemaGenerator._get_serializer_schema(
-                action_config["serializer"]
+                serializer_class
             )
             response_properties, response_relationships = DjangoActionSchemaGenerator._get_serializer_schema(
                 action_config["response_serializer"]

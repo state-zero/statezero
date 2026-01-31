@@ -4,6 +4,7 @@ from statezero.core.classes import DisplayMetadata, FieldGroup, FieldDisplayConf
 from rest_framework import serializers
 from typing import List
 from django.utils import timezone
+from django.contrib.auth.models import User
 import random
 import hashlib
 
@@ -260,6 +261,68 @@ def get_current_username(*, request=None) -> dict:
         "username": request.user.username,
         "retrieved_at": timezone.now(),
     }
+
+
+@action(
+    permissions=[IsAuthenticated],
+)
+def auto_create_ticket(
+    title: str,
+    priority: int,
+    due_at: timezone.datetime,
+    tags: List[str],
+    metadata: dict,
+    assignee: User,
+    reviewers: List[User],
+    is_blocked: bool = False,
+    *, request=None
+) -> dict:
+    """
+    Create a ticket from type hints only.
+
+    Args:
+        title: Ticket title.
+        priority: Priority from 1 to 5.
+        due_at: When the ticket is due.
+        tags: Tags to attach.
+        metadata: Extra JSON metadata.
+        assignee: Primary assignee user.
+        reviewers: Additional reviewer users.
+        is_blocked: Whether the ticket is blocked.
+    """
+    return {
+        "title": title,
+        "priority": priority,
+        "due_at": due_at,
+        "tags": tags,
+        "metadata": metadata,
+        "assignee_id": assignee.pk,
+        "reviewer_ids": [user.pk for user in reviewers],
+        "is_blocked": is_blocked,
+    }
+
+
+@action(
+    permissions=[IsAuthenticated],
+)
+def auto_update_profile(
+    email: str,
+    birthday: timezone.datetime,
+    *, request=None
+) -> dict:
+    """
+    Update profile fields.
+
+    Parameters
+    ----------
+    email : str
+        New email address.
+    birthday : datetime
+        User birthday.
+    """
+    request.user.email = email
+    request.user.save(update_fields=["email"])
+    return {"email": email, "birthday": birthday}
 
 
 @action(

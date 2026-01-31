@@ -22,6 +22,7 @@ from statezero.adaptors.django.exception_handler import \
     explicit_exception_handler
 from statezero.adaptors.django.permissions import ORMBridgeViewAccessGate
 from statezero.adaptors.django.actions import DjangoActionSchemaGenerator
+from statezero.adaptors.django.action_serializers import get_or_build_action_serializer
 from statezero.core.interfaces import AbstractEventEmitter, AbstractActionPermission
 from statezero.core.process_request import RequestProcessor
 from statezero.core.actions import action_registry
@@ -382,8 +383,9 @@ class ActionView(APIView):
 
             # Validate input data
             validated_data = {}
-            if action_config["serializer"]:
-                serializer = action_config["serializer"](
+            serializer_class = get_or_build_action_serializer(action_config)
+            if serializer_class:
+                serializer = serializer_class(
                     data=request.data, context={"request": request}
                 )
                 # Using raise_exception=True automatically triggers the handler

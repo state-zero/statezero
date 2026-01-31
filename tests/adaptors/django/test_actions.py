@@ -33,6 +33,29 @@ class ActionsBackendTest(APITestCase):
         self.assertIn("get_user_info", actions)
         self.assertIn("process_data", actions)
         self.assertIn("send_notification", actions)
+        self.assertIn("auto_create_ticket", actions)
+        self.assertIn("auto_update_profile", actions)
+
+        auto_schema = actions["auto_create_ticket"]
+        self.assertIn("input_properties", auto_schema)
+        self.assertEqual(
+            auto_schema["input_properties"]["title"]["description"],
+            "Ticket title.",
+        )
+        self.assertEqual(
+            auto_schema["input_properties"]["assignee"]["format"],
+            "foreign-key",
+        )
+        self.assertEqual(
+            auto_schema["input_properties"]["reviewers"]["format"],
+            "many-to-many",
+        )
+
+        update_schema = actions["auto_update_profile"]
+        self.assertEqual(
+            update_schema["input_properties"]["email"]["description"],
+            "New email address.",
+        )
 
     def test_calculate_hash_action(self):
         """Test the calculate_hash action via API"""
@@ -199,6 +222,52 @@ class ActionsBackendTest(APITestCase):
         data = response.data
         self.assertTrue(data["success"])
         self.assertEqual(data["sent_to"], 0)
+
+    def test_auto_create_ticket_action(self):
+        """Test auto-inferred serializer with models, lists, and JSON"""
+        assignee = User.objects.create_user(username="assignee", password="password")
+        reviewer = User.objects.create_user(username="reviewer", password="password")
+
+        url = reverse("statezero:action", args=["auto_create_ticket"])
+        payload = {
+            "title": "Investigate regression",
+            "priority": 3,
+            "due_at": "2026-02-01T10:30:00Z",
+            "tags": ["backend", "urgent"],
+            "metadata": {"source": "api"},
+            "assignee": assignee.pk,
+            "reviewers": [reviewer.pk],
+            "is_blocked": True,
+        }
+        response = self.client.post(url, data=payload, format="json")
+
+        if response.status_code != 200:
+            print(f"auto_create_ticket error: {response.status_code}")
+            print(f"Response data: {response.data}")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.data
+        self.assertEqual(data["assignee_id"], assignee.pk)
+        self.assertEqual(data["reviewer_ids"], [reviewer.pk])
+        self.assertEqual(data["metadata"], {"source": "api"})
+        self.assertEqual(data["tags"], ["backend", "urgent"])
+
+    def test_auto_update_profile_action(self):
+        """Test numpy-style docstring parsing and inferred serializer"""
+        url = reverse("statezero:action", args=["auto_update_profile"])
+        payload = {
+            "email": "new-email@example.com",
+            "birthday": "2026-01-01T00:00:00Z",
+        }
+        response = self.client.post(url, data=payload, format="json")
+
+        if response.status_code != 200:
+            print(f"auto_update_profile error: {response.status_code}")
+            print(f"Response data: {response.data}")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.data
+        self.assertEqual(data["email"], "new-email@example.com")
 
     def test_send_notification_validation_error(self):
         """Test send_notification with validation errors"""
