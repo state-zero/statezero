@@ -57,10 +57,8 @@ def build_action_input_serializer(func, docstring: Optional[str] = None):
         if param.name == "request":
             continue
         if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-            raise AutoSerializerInferenceError(
-                f"Action '{func.__name__}' uses *args/**kwargs which cannot be auto-inferred. "
-                "Provide an explicit serializer."
-            )
+            # Ignore *args/**kwargs when auto-inferring input fields.
+            continue
 
         annotation = type_hints.get(param.name, inspect._empty)
         if annotation is inspect._empty:
