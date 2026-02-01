@@ -90,13 +90,24 @@ def _apply_param_defaults(field: serializers.Field, param: inspect.Parameter, an
 
     if param.default is not inspect._empty:
         field.required = False
+        if optional:
+            field.allow_null = True
         if param.default is None:
             field.allow_null = True
             field.default = None
             _set_field_kwargs(field, required=False, allow_null=True, default=None)
         else:
             field.default = param.default
-            _set_field_kwargs(field, required=False, default=param.default)
+            updates = {"required": False, "default": param.default}
+            if optional:
+                updates["allow_null"] = True
+            if (
+                isinstance(field, serializers.CharField)
+                and param.default == ""
+            ):
+                field.allow_blank = True
+                updates["allow_blank"] = True
+            _set_field_kwargs(field, **updates)
     elif optional:
         field.required = False
         field.allow_null = True

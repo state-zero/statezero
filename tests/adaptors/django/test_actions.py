@@ -1,7 +1,10 @@
 import json
+import unittest
 from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework.test import APITestCase
+
+from statezero.adaptors.django.action_serializers import build_action_input_serializer
 
 
 class ActionsBackendTest(APITestCase):
@@ -318,7 +321,6 @@ class ActionsBackendTest(APITestCase):
             data='{"malformed": json}',  # Invalid JSON
             content_type="application/json",
         )
-
         self.assertEqual(response.status_code, 400)
 
     def test_staff_user_permissions(self):
@@ -360,3 +362,30 @@ class ActionsBackendTest(APITestCase):
         # Should be forbidden due to recipient limit
         self.assertEqual(response.status_code, 403)
         self.assertIn("Permission denied", str(response.data))
+
+
+class AutoSerializerDefaultsTest(unittest.TestCase):
+    def test_blank_default_allows_blank(self):
+        def blank_default(name: str = ""):
+            return {"name": name}
+
+        serializer_class = build_action_input_serializer(blank_default)
+        self.assertIsNotNone(serializer_class)
+        field = serializer_class().fields["name"]
+        self.assertFalse(field.required)
+        self.assertEqual(field.default, "")
+        self.assertTrue(field.allow_blank)
+
+    def test_blank_optional_default_allows_blank_and_null(self):
+        from typing import Optional
+
+        def blank_optional_default(name: Optional[str] = ""):
+            return {"name": name}
+
+        serializer_class = build_action_input_serializer(blank_optional_default)
+        self.assertIsNotNone(serializer_class)
+        field = serializer_class().fields["name"]
+        self.assertFalse(field.required)
+        self.assertEqual(field.default, "")
+        self.assertTrue(field.allow_blank)
+        self.assertTrue(field.allow_null)
