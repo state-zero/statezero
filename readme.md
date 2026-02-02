@@ -205,6 +205,88 @@ npx statezero sync
 
 **🆚 Traditional REST APIs:** Write 90% less boilerplate. Focus on features, not data plumbing.
 
+## Testing (Backend-Mode)
+
+StateZero supports frontend tests that run against a real Django test server (no test-only views).
+You opt-in via a test-only middleware that temporarily relaxes permissions and silences events
+when a request includes special headers.
+
+### Backend Setup (Django Test Settings)
+
+Add the test middleware and enable test mode in your **test settings**:
+
+```python
+# tests/settings.py
+STATEZERO_TEST_MODE = True
+STATEZERO_TEST_SEEDING_SILENT = True  # default behavior, silences events during seeding
+
+MIDDLEWARE = [
+    # ...
+    "statezero.adaptors.django.testing.TestSeedingMiddleware",
+    # ...
+]
+```
+
+Behavior:
+- `X-TEST-SEEDING: 1` → temporarily allows all permissions for the request
+- `X-TEST-RESET: 1` → deletes all registered StateZero models for the request
+
+Start the test server:
+
+```bash
+python manage.py statezero_testserver --addrport 8000
+```
+
+Optional request hook:
+
+```python
+# tests/settings.py
+STATEZERO_TEST_REQUEST_CONTEXT = "myapp.test_utils.statezero_test_context"
+```
+
+Your factory should accept the request and return a context manager. This allows
+libraries like django-ai-first to wrap each test request (e.g., time control).
+
+### Frontend Setup (Vue / JS)
+
+Use the testing helpers and the `remote` manager to call the backend directly without local updates.
+
+```javascript
+import {
+  setupTestStateZero,
+  seedRemote,
+  resetRemote,
+  createActionMocker,
+} from "@statezero/core/testing";
+import { getModelClass } from "../model-registry";
+import { ACTION_REGISTRY } from "../action-registry";
+import { Todo } from "../models/default/django_app/todo";
+import { vueAdapters } from "./statezero-adapters";
+
+const testHeaders = setupTestStateZero({
+  apiUrl: "http://localhost:8000/statezero",
+  getModelClass,
+  adapters: vueAdapters,
+});
+
+// Reset: deletes all registered StateZero models on the backend
+await resetRemote(testHeaders, () => Todo.remote.delete());
+
+// Seed: run standard ORM writes with X-TEST-SEEDING enabled
+await seedRemote(testHeaders, () =>
+  Todo.remote.create({ title: "Seeded todo" })
+);
+
+// Action mocking for frontend tests
+const actionMocker = createActionMocker(ACTION_REGISTRY);
+actionMocker.mock("send_notification", async () => ({ ok: true }));
+```
+
+Notes:
+- `Model.remote` (or `Model.objects.remote()`) uses the normal ORM AST/serializers,
+  but **skips local store updates** and **returns raw backend responses**.
+- These helpers are intended for tests that run against a live Django test server.
+
 ## Get Started
 
 Check out the docs at [Statezero Docs](https://statezero.dev)
