@@ -1,10 +1,11 @@
-from dataclasses import dataclass, field
+from dataclasses import field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Type, Union
+from typing import Any, Dict, List, Literal, Optional, Set, Type, Union, Annotated
 
 import jsonschema
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from pydantic.dataclasses import dataclass
 
 from statezero.core.types import ORMField
 
@@ -243,7 +244,7 @@ class Control:
     extra: Optional[Dict[str, Any]] = None
     label: Optional[str] = None
     full_width: bool = False
-    type: str = field(default="Control", init=False)
+    type: Literal["Control"] = field(default="Control", init=False)
 
 
 @dataclass
@@ -262,7 +263,7 @@ class Display:
     display_component: str = "text"
     label: Optional[str] = None
     extra: Optional[Dict[str, Any]] = None
-    type: str = field(default="Display", init=False)
+    type: Literal["Display"] = field(default="Display", init=False)
 
 
 @dataclass
@@ -275,10 +276,10 @@ class Alert:
         text: Static text to display
         context_path: Or pull text from context
     """
-    severity: str = "info"
+    severity: Literal["info", "warning", "error", "success"] = "info"
     text: Optional[str] = None
     context_path: Optional[str] = None
-    type: str = field(default="Alert", init=False)
+    type: Literal["Alert"] = field(default="Alert", init=False)
 
 
 @dataclass
@@ -291,14 +292,14 @@ class Label:
         variant: Text style - "heading", "subheading", "body", "caption"
     """
     text: str
-    variant: str = "body"
-    type: str = field(default="Label", init=False)
+    variant: Literal["heading", "subheading", "body", "caption"] = "body"
+    type: Literal["Label"] = field(default="Label", init=False)
 
 
 @dataclass
 class Divider:
     """A visual separator/divider element."""
-    type: str = field(default="Divider", init=False)
+    type: Literal["Divider"] = field(default="Divider", init=False)
 
 
 @dataclass
@@ -321,7 +322,7 @@ class Conditional:
     """
     when: str
     layout: "LayoutElement"
-    type: str = field(default="Conditional", init=False)
+    type: Literal["Conditional"] = field(default="Conditional", init=False)
 
 
 @dataclass
@@ -348,7 +349,7 @@ class Tabs:
     """
     tabs: List[Tab] = field(default_factory=list)
     default_tab: int = 0
-    type: str = field(default="Tabs", init=False)
+    type: Literal["Tabs"] = field(default="Tabs", init=False)
 
 
 # Layout element union type for type hints
@@ -367,9 +368,9 @@ class VerticalLayout:
         elements: Child layout elements
         gap: Spacing between elements - "sm", "md", "lg"
     """
-    elements: List[LayoutElement] = field(default_factory=list)
-    gap: str = "md"
-    type: str = field(default="VerticalLayout", init=False)
+    elements: List["LayoutElement"] = field(default_factory=list)
+    gap: Literal["sm", "md", "lg"] = "md"
+    type: Literal["VerticalLayout"] = field(default="VerticalLayout", init=False)
 
 
 @dataclass
@@ -382,10 +383,10 @@ class HorizontalLayout:
         gap: Spacing between elements - "sm", "md", "lg"
         align: Vertical alignment - "start", "center", "end", "stretch"
     """
-    elements: List[LayoutElement] = field(default_factory=list)
-    gap: str = "md"
-    align: str = "start"
-    type: str = field(default="HorizontalLayout", init=False)
+    elements: List["LayoutElement"] = field(default_factory=list)
+    gap: Literal["sm", "md", "lg"] = "md"
+    align: Literal["start", "center", "end", "stretch"] = "start"
+    type: Literal["HorizontalLayout"] = field(default="HorizontalLayout", init=False)
 
 
 @dataclass
@@ -402,10 +403,10 @@ class Group:
     """
     label: str
     description: Optional[str] = None
-    layout: Optional[Union["VerticalLayout", "HorizontalLayout"]] = None
+    layout: Optional["LayoutElement"] = None
     collapsible: bool = False
     collapsed: bool = False
-    type: str = field(default="Group", init=False)
+    type: Literal["Group"] = field(default="Group", init=False)
 
 
 # Convenience type for the root layout
