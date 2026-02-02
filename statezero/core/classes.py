@@ -95,7 +95,7 @@ class AdditionalField:
     """
 
     name: str  # The property/method name to pull from
-    field: Type[ORMField]  # The instantiated serializer field (e.g. CharField(max_length=255)) #type:ignore
+    field: ORMField  # The instantiated serializer field (e.g. CharField(max_length=255)) #type:ignore
     title: Optional[str] # Optional display name override
 
 class SchemaFieldMetadata(BaseModel):
