@@ -231,6 +231,10 @@ Behavior:
 - `X-TEST-SEEDING: 1` → temporarily allows all permissions for the request
 - `X-TEST-RESET: 1` → deletes all registered StateZero models for the request
 
+Auth note:
+- Test mode does **not** bypass authentication. Your test server must still
+  authenticate requests (e.g., create a test token).
+
 Start the test server:
 
 ```bash
@@ -246,6 +250,36 @@ STATEZERO_TEST_REQUEST_CONTEXT = "myapp.test_utils.statezero_test_context"
 
 Your factory should accept the request and return a context manager. This allows
 libraries like django-ai-first to wrap each test request (e.g., time control).
+
+Optional startup hook (for creating test users/tokens):
+
+```python
+# tests/settings.py
+STATEZERO_TEST_STARTUP_HOOK = "myapp.test_utils.statezero_test_startup"
+```
+
+```python
+# myapp/test_utils.py
+from django.contrib.auth import get_user_model
+from rest_framework.authtoken.models import Token
+
+def statezero_test_startup():
+    user_model = get_user_model()
+    user, _ = user_model.objects.get_or_create(
+        username="test_user", defaults={"email": "test@example.com"}
+    )
+    user.set_password("test123")
+    user.is_staff = True
+    user.is_superuser = True
+    user.save()
+
+    token, _ = Token.objects.get_or_create(
+        user=user, defaults={"key": "testtoken123"}
+    )
+    if token.key != "testtoken123":
+        token.key = "testtoken123"
+        token.save()
+```
 
 ### Frontend Setup (Vue / JS)
 
