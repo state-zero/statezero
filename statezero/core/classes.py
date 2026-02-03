@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Type, Union, Annotat
 
 import jsonschema
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.dataclasses import dataclass
 
 from statezero.core.types import ORMField
@@ -83,7 +83,7 @@ class FieldFormat(str, Enum):
     MONEY = "money"
 
 
-@dataclass
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class AdditionalField:
     """
     Represents configuration for an additional computed field in the schema.
@@ -259,7 +259,7 @@ class Display:
         label: Label to show above the display
         extra: Additional custom metadata passed to the component
     """
-    context_path: str
+    context_path: Optional[str] = None
     display_component: str = "text"
     label: Optional[str] = None
     extra: Optional[Dict[str, Any]] = None
