@@ -130,6 +130,12 @@ def get_cached_query_result(queryset, operation_context: Optional[str] = None) -
         # Someone else is processing, wait for their result
         logger.debug(f"Query being processed by another request, waiting... | txn {txn_id[:8]}...")
 
+        # TODO: FIX DESIGN (needs to be done, I didn't have time yet): if the leader
+        # query exceeds the wait timeout, followers will stop waiting and execute the
+        # same query themselves (automatic fan-out). Replace with hard single-flight
+        # (no fan-out) and propagate the leader's error/timeout to all followers
+        # (cache error responses).
+
         # Calculate wait timeout based on Django's query timeout setting
         # Wait for query_timeout + 1 second to allow the first request to complete
         from django.conf import settings
