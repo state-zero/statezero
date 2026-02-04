@@ -2,6 +2,7 @@ from statezero.core.context_storage import current_operation_id, current_canonic
 import logging
 from typing import Any, List, Type, Union
 from fastapi.encoders import jsonable_encoder
+from django.utils import timezone
 
 from statezero.core.interfaces import AbstractEventEmitter, AbstractORMProvider
 from statezero.core.types import ActionType, ORMModel, ORMQuerySet
@@ -72,11 +73,13 @@ class EventBus:
             pk_field_name = instance._meta.pk.name
             pk_value = instance.pk
 
+            now = timezone.now()
             data = {
                 "event": action_type.value,
                 "model": model_name,
                 "operation_id": current_operation_id.get(),
                 "canonical_id": current_canonical_id.get(),
+                "server_ts_ms": int(now.timestamp() * 1000),
                 "instances": [pk_value],
                 "pk_field_name": pk_field_name,
             }
@@ -153,11 +156,13 @@ class EventBus:
             pk_field_name = first_instance._meta.pk.name
             pks = [instance.pk for instance in instances]
 
+            now = timezone.now()
             data = {
                 "event": action_type.value,
                 "model": model_name,
                 "operation_id": current_operation_id.get(),
                 "canonical_id": current_canonical_id.get(),
+                "server_ts_ms": int(now.timestamp() * 1000),
                 "instances": pks,
                 "pk_field_name": pk_field_name,
             }
