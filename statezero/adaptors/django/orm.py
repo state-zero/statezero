@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import networkx as nx
 from django.apps import apps
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Avg, Count, Max, Min, Q, Sum, QuerySet
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
@@ -977,7 +977,8 @@ class DjangoORMAdapter(AbstractORMProvider):
         def post_save_receiver(sender, instance, created, **kwargs):
             action = ActionType.CREATE if created else ActionType.UPDATE
             try:
-                event_bus.emit_event(action, instance)
+                # Emit after commit so clients don't re-fetch stale rows.
+                transaction.on_commit(lambda: event_bus.emit_event(action, instance))
             except Exception as e:
                 logger.exception(
                     "Error emitting event %s for instance %s: %s", action, instance, e
@@ -994,7 +995,10 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         def post_delete_receiver(sender, instance, **kwargs):
             try:
-                event_bus.emit_event(ActionType.DELETE, instance)
+                # Emit after commit so clients don't re-fetch stale rows.
+                transaction.on_commit(
+                    lambda: event_bus.emit_event(ActionType.DELETE, instance)
+                )
             except Exception as e:
                 logger.exception(
                     "Error emitting DELETE event for instance %s: %s", instance, e
