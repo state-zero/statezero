@@ -44,6 +44,18 @@ class EventsAuthView(APIView):
     permission_classes = [permission_class]
     
     def post(self, request, *args, **kwargs):
+        sync_token = getattr(settings, "STATEZERO_SYNC_TOKEN", None)
+        client_token = request.headers.get("X-StateZero-Sync-Token")
+        if client_token is not None:
+            if not sync_token or client_token != sync_token:
+                return Response(
+                    {
+                        "error": "Sync token mismatch for events auth.",
+                        "header": "X-StateZero-Sync-Token",
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
         channel_name = request.data.get("channel_name")
         socket_id = request.data.get("socket_id")
 
@@ -77,6 +89,14 @@ class EventsAuthView(APIView):
 
         # Delegate authentication to the event emitter.
         response = event_emitter.authenticate(request)
+        if client_token is not None:
+            if isinstance(response, dict):
+                response["statezero_sync_token_match"] = True
+            else:
+                response = {
+                    "auth": response,
+                    "statezero_sync_token_match": True,
+                }
         logger.debug(f"Authentication successful for channel: {channel_name}")
         return Response(response, status=status.HTTP_200_OK)
 

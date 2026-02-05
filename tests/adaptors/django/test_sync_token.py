@@ -169,3 +169,46 @@ class SyncTokenPermissionTest(APITestCase):
         finally:
             # Restore original permissions
             config._permissions = original_permissions
+
+
+class EventsAuthSyncTokenTest(APITestCase):
+    @override_settings(DEBUG=True, STATEZERO_SYNC_TOKEN="server-token")
+    def test_events_auth_rejects_mismatched_sync_token(self):
+        from statezero.adaptors.django.config import config as global_config
+
+        url = reverse("statezero:events_auth")
+        with patch.object(global_config, "event_bus") as event_bus:
+            event_bus.broadcast_emitter = MagicMock()
+            event_bus.broadcast_emitter.has_permission.return_value = True
+            event_bus.broadcast_emitter.authenticate.return_value = {"auth": "ok"}
+
+            response = self.client.post(
+                url,
+                data={"channel_name": "private-test", "socket_id": "1.2"},
+                HTTP_X_STATEZERO_SYNC_TOKEN="wrong-token",
+            )
+
+        self.assertEqual(
+            response.status_code,
+            409,
+            f"Expected 409 on sync token mismatch, got {response.status_code}",
+        )
+
+    @override_settings(DEBUG=True, STATEZERO_SYNC_TOKEN="server-token")
+    def test_events_auth_accepts_matching_sync_token(self):
+        from statezero.adaptors.django.config import config as global_config
+
+        url = reverse("statezero:events_auth")
+        with patch.object(global_config, "event_bus") as event_bus:
+            event_bus.broadcast_emitter = MagicMock()
+            event_bus.broadcast_emitter.has_permission.return_value = True
+            event_bus.broadcast_emitter.authenticate.return_value = {"auth": "ok"}
+
+            response = self.client.post(
+                url,
+                data={"channel_name": "private-test", "socket_id": "1.2"},
+                HTTP_X_STATEZERO_SYNC_TOKEN="server-token",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data.get("statezero_sync_token_match"))
