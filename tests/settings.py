@@ -76,6 +76,8 @@ CORS_ALLOWED_ORIGINS = ["http://localhost:5173"]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-operation-id",
+    "x-canonical-id",
+    "x-statezero-sync-token"
 ]
 
 # Then configure StateZero to use one of these caches
