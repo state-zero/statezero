@@ -23,6 +23,7 @@ from statezero.adaptors.django.exception_handler import \
 from statezero.adaptors.django.permissions import ORMBridgeViewAccessGate
 from statezero.adaptors.django.actions import DjangoActionSchemaGenerator
 from statezero.adaptors.django.action_serializers import get_or_build_action_serializer
+from statezero.adaptors.django.serializers import DRFDynamicSerializer
 from statezero.core.interfaces import AbstractEventEmitter, AbstractActionPermission
 from statezero.core.process_request import RequestProcessor
 from statezero.core.actions import action_registry
@@ -113,6 +114,64 @@ class ModelListView(APIView):
             model_name = config.orm_provider.get_model_name(model)
             model_names.append(model_name)
         return Response(model_names, status=status.HTTP_200_OK)
+
+class MeView(APIView):
+    """
+    Returns the current authenticated user as a guaranteed model summary.
+    Uses the existing StateZero serializer with only the PK field requested,
+    which includes `pk` and `repr` by design.
+    """
+
+    permission_classes = []
+
+    def get(self, request, *args, **kwargs):
+        try:
+            user = config.orm_provider.get_user(request)
+            if not user or not getattr(user, "is_authenticated", False):
+                raise PermissionDenied(detail="Authentication required.")
+
+            model = user.__class__
+            model_name = config.orm_provider.get_model_name(model)
+            pk_field = model._meta.pk.name
+            pk_value = getattr(user, pk_field)
+
+            fields_map = {
+                model_name: {pk_field},
+            }
+
+            serializer = DRFDynamicSerializer()
+            serialized = serializer.serialize(
+                data=user,
+                model=model,
+                depth=0,
+                fields_map=fields_map,
+                many=False,
+                request=request,
+            )
+
+            included = serialized.get("included", {})
+            user_bucket = included.get(model_name, {})
+            user_data = user_bucket.get(pk_value)
+
+            # Defensive fallback to keep the endpoint contract stable.
+            if user_data is None:
+                user_data = {
+                    pk_field: pk_value,
+                    "repr": {
+                        "str": str(user),
+                        "img": user.__img__() if hasattr(user, "__img__") else None,
+                    },
+                }
+
+            return Response(
+                {
+                    "model_name": model_name,
+                    "data": user_data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as original_exception:
+            return explicit_exception_handler(original_exception)
 
 
 class ModelView(APIView):

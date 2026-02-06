@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "statezero"
-version = "0.1.0b64"
+version = "0.1.0b66"
 description = "Connect your Python backend to a modern JavaScript SPA frontend with 90% less complexity."
 readme = "README.md"
 license = { file = "LICENSE" }
