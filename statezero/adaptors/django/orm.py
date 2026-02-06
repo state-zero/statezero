@@ -314,11 +314,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         instance = model.objects.get(q_obj)
 
         # Check object-level permissions for update.
-        for perm_cls in permissions:
-            perm = perm_cls()
-            allowed = perm.allowed_object_actions(req, instance, model)
-            if ActionType.UPDATE not in allowed:
-                raise PermissionDenied(f"Update not permitted on {instance}")
+        check_object_permissions(req, instance, ActionType.UPDATE, permissions, model)
 
         # Use the provided serializer's save method for the update
         return serializer.save(
@@ -347,11 +343,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         instance = model.objects.get(q_obj)
 
         # Check object-level permissions.
-        for perm_cls in permissions:
-            perm = perm_cls()
-            allowed = perm.allowed_object_actions(req, instance, model)
-            if ActionType.DELETE not in allowed:
-                raise PermissionDenied(f"Delete not permitted on {instance}")
+        check_object_permissions(req, instance, ActionType.DELETE, permissions, model)
 
         instance.delete()
         return 1
