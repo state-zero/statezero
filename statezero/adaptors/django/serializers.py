@@ -253,6 +253,8 @@ class DynamicModelSerializer(FExpressionMixin, serializers.ModelSerializer):
                 continue
 
             if field.is_relation:
+                if field.related_model is None:
+                    continue
                 queryset = field.related_model.objects.all()
                 serializer_class._declared_fields[field.name] = FlexiblePrimaryKeyRelatedField(
                     queryset=queryset,
