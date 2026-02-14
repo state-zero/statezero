@@ -8,6 +8,19 @@ from statezero.core.exceptions import PermissionDenied, ValidationError
 from statezero.core.interfaces import AbstractPermission
 from statezero.core.types import ActionType, ORMModel, RequestType
 
+# Lookup operators and date/time transforms that are not real model fields
+_FILTER_MODIFIERS = {
+    # Lookup operators
+    "contains", "icontains", "startswith", "istartswith",
+    "endswith", "iendswith", "lt", "gt", "lte", "gte",
+    "in", "eq", "exact", "iexact", "isnull", "range",
+    "regex", "iregex",
+    # Date/time transforms
+    "year", "month", "day", "hour", "minute", "second",
+    "week", "week_day", "iso_week_day", "quarter",
+    "iso_year", "date", "time",
+}
+
 
 class ASTValidator:
     def __init__(
@@ -89,35 +102,20 @@ class ASTValidator:
         This validates that Django ORM can actually filter/query on this field.
         """
         try:
-            # Remove any lookup operators (e.g., 'name__icontains' -> 'name')
-            SUPPORTED_OPERATORS = {
-                "contains",
-                "icontains",
-                "startswith",
-                "istartswith",
-                "endswith",
-                "iendswith",
-                "lt",
-                "gt",
-                "lte",
-                "gte",
-                "in",
-                "eq",
-                "exact",
-                "isnull",
-            }
-
             field_parts = field_path.split("__")
-            # Find where the lookup operators start
+            # Find where the modifiers (operators/transforms) start
             base_field_parts = []
             for part in field_parts:
-                if part in SUPPORTED_OPERATORS:
+                if part in _FILTER_MODIFIERS:
                     break
                 base_field_parts.append(part)
 
             # Traverse the Django model fields
             current_model = model
             for field_name in base_field_parts:
+                # "pk" is a Django virtual alias — always valid
+                if field_name == "pk":
+                    return True
                 try:
                     field = current_model._meta.get_field(field_name)
                     # If we hit a field that allows nested paths (e.g., JSONField), stop traversal
@@ -151,6 +149,14 @@ class ASTValidator:
         # Get allowed fields from permission settings.
         allowed = self._allowed_fields_for_model(current_model)
         for part in parts:
+            # Stop at lookup operators / date transforms — they aren't real fields
+            if part in _FILTER_MODIFIERS:
+                break
+
+            # "pk" and the actual primary key field are always allowed
+            if part == "pk" or part == current_model._meta.pk.name:
+                break
+
             # Check that the field is allowed on the current model.
             if part not in allowed and "__all__" not in str(allowed):
                 return False
@@ -196,6 +202,10 @@ class ASTValidator:
         Raises PermissionDenied if the user doesn't have permission to access the field.
         """
         base_field = field_path.split("__")[0]
+
+        # "pk" and the actual primary key field are always valid for filtering
+        if base_field == "pk" or base_field == model._meta.pk.name:
+            return
 
         # Check if it's an additional field (these can't be filtered)
         if self._is_additional_field(model, base_field):
@@ -251,24 +261,43 @@ class ASTValidator:
         if "child" in ast_node:
             self.validate_filter_conditions(ast_node["child"], model)
 
-    def validate_fields(self, ast: Dict[str, Any], root_model: Type) -> None:
+    def validate_fields(self, ast: Dict[str, Any], root_model: Type, error_on_extra: bool = False) -> None:
         """
         Iterates over the requested fields in the AST's serializerOptions and verifies each
         field is allowed according to the registry-based permission settings.
+        Raises ValidationError if error_on_extra is True and a field doesn't exist.
         Raises PermissionDenied if any field is not permitted.
         """
         serializer_options = ast.get("serializerOptions", {})
         requested_fields = serializer_options.get("fields", [])
         for field in requested_fields:
+            if error_on_extra:
+                if not self._field_exists_in_django_model(root_model, field):
+                    raise ValidationError(
+                        f"Field '{field}' does not exist on model {root_model.__name__}."
+                    )
             if not self.is_field_allowed(root_model, field):
                 raise PermissionDenied(f"Access to field '{field}' is not permitted.")
 
-    def validate_ast(self, ast: Dict[str, Any], root_model: Type) -> None:
+    def validate_ordering_fields(self, ast: Dict[str, Any], model: Type) -> None:
+        """
+        Validates that all ordering fields in the AST exist on the model.
+        Raises ValidationError if any ordering field doesn't exist.
+        """
+        order_by = ast.get("orderBy", [])
+        for field_path in order_by:
+            clean_path = field_path.lstrip("-")
+            if not self._field_exists_in_django_model(model, clean_path):
+                raise ValidationError(
+                    f"Cannot order by '{field_path}': field does not exist on model {model.__name__}."
+                )
+
+    def validate_ast(self, ast: Dict[str, Any], root_model: Type, error_on_extra: bool = False) -> None:
         """
         Complete AST validation including both field permissions and filter validation.
         """
         # Validate field access permissions
-        self.validate_fields(ast, root_model)
+        self.validate_fields(ast, root_model, error_on_extra=error_on_extra)
 
         # Validate filter conditions to ensure no additional fields are used
         filter_node = ast.get("filter")

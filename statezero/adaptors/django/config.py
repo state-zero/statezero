@@ -24,6 +24,7 @@ class DjangoLocalConfig(AppConfig):
         self.DEBUG = settings.DEBUG
         self.enable_telemetry = getattr(settings, 'STATEZERO_ENABLE_TELEMETRY', False)
         self.default_limit = getattr(settings, 'STATEZERO_DEFAULT_LIMIT', None)
+        self.extra_fields = getattr(settings, 'STATEZERO_EXTRA_FIELDS', 'ignore')
 
     def initialize(self):
         from statezero.adaptors.django.event_emitters import \

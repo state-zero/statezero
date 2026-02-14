@@ -4,8 +4,8 @@ from collections import deque
 import networkx as nx
 
 
-from statezero.core.config import AppConfig, Registry
-from statezero.core.exceptions import PermissionDenied
+from statezero.core.config import AppConfig, Registry, EXTRA_FIELDS_ERROR
+from statezero.core.exceptions import PermissionDenied, ValidationError
 from statezero.core.interfaces import (
     AbstractDataSerializer,
     AbstractPermission,
@@ -135,16 +135,22 @@ class ASTParser:
         self.default_handler = self._handle_read
 
     def _process_nested_field_strings(
-        self, orm_provider: AbstractORMProvider, field_strings, available_fields_map
+        self, orm_provider: AbstractORMProvider, field_strings, available_fields_map,
+        operation_type: Literal["read", "create", "update"] = "read",
     ):
         """
         Build a fields map from a list of dotted field strings like ['fk__m2m', 'field', 'fk__m2m__field'],
         respecting the available fields for each model.
 
+        When explicit field paths traverse beyond the depth limit, this resolves
+        permissions for the encountered models on-the-fly so that depth only controls
+        auto-expansion, not hard-blocks explicit requests.
+
         Args:
             orm_provider: The ORM provider to use for model traversal
             field_strings: List of field strings in the format 'relation__field' or 'field'
             available_fields_map: Dict mapping model names to sets of available fields
+            operation_type: Operation type for resolving permissions on newly encountered models
 
         Returns:
             Dict[str, Set[str]]: Dictionary mapping model names to sets of field names
@@ -163,6 +169,14 @@ class ASTParser:
 
             # Process each part of the field string
             for i, part in enumerate(parts):
+                # If this model isn't in the available map yet (beyond depth limit),
+                # resolve its permissions now — explicit field paths override depth.
+                if current_model_name not in available_fields_map:
+                    if self._has_operation_permission(current_model, operation_type):
+                        available_fields_map[current_model_name] = self._get_operation_fields(
+                            current_model, operation_type
+                        )
+
                 # Check if this field is available for this model
                 if (
                     current_model_name in available_fields_map
@@ -193,6 +207,14 @@ class ASTParser:
                         ):
                             related_model_name = field_data.related_model
 
+                            # Resolve permissions for the related model if needed
+                            if related_model_name not in available_fields_map:
+                                related_model = orm_provider.get_model_by_name(related_model_name)
+                                if self._has_operation_permission(related_model, operation_type):
+                                    available_fields_map[related_model_name] = self._get_operation_fields(
+                                        related_model, operation_type
+                                    )
+
                             # Include all available fields for this related model
                             if related_model_name in available_fields_map:
                                 fields_map.setdefault(related_model_name, set()).update(
@@ -206,6 +228,10 @@ class ASTParser:
                     current_model_name not in available_fields_map
                     or part not in available_fields_map[current_model_name]
                 ):
+                    if self.config.effective_extra_fields == EXTRA_FIELDS_ERROR:
+                        raise ValidationError(
+                            f"Field '{part}' is not permitted on model '{current_model_name}'."
+                        )
                     # The relation field is not available, stop traversing
                     break
 
@@ -218,6 +244,10 @@ class ASTParser:
                 ]
 
                 if not field_nodes:
+                    if self.config.effective_extra_fields == EXTRA_FIELDS_ERROR:
+                        raise ValidationError(
+                            f"Field '{part}' does not exist on model '{current_model_name}'."
+                        )
                     # Field not found, skip to next field string
                     break
 
@@ -270,6 +300,7 @@ class ASTParser:
                 orm_provider=self.engine,
                 field_strings=requested_fields,
                 available_fields_map=fields_map,
+                operation_type=operation_type,
             )
 
         return fields_map

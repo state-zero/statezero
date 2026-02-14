@@ -31,6 +31,7 @@ DEBUG = True
 
 STATEZERO_E2E_TESTING = False
 STATEZERO_ENABLE_TELEMETRY = True
+STATEZERO_EXTRA_FIELDS = 'error'
 STATEZERO_SYNC_TOKEN = "test-secret-token"
 
 TEST_DB_PATH = ""
@@ -77,7 +78,8 @@ CORS_ALLOWED_ORIGINS = ["http://localhost:5173"]
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-operation-id",
     "x-canonical-id",
-    "x-statezero-sync-token"
+    "x-statezero-sync-token",
+    "x-statezero-extra-fields",
 ]
 
 # Then configure StateZero to use one of these caches

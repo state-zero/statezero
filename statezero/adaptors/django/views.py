@@ -20,6 +20,7 @@ import mimetypes
 from statezero.adaptors.django.config import config, registry
 from statezero.adaptors.django.exception_handler import \
     explicit_exception_handler
+from statezero.core.config import set_extra_fields_policy
 from statezero.adaptors.django.permissions import ORMBridgeViewAccessGate
 from statezero.adaptors.django.actions import DjangoActionSchemaGenerator
 from statezero.adaptors.django.action_serializers import get_or_build_action_serializer
@@ -183,6 +184,13 @@ class ModelView(APIView):
         from statezero.core.telemetry import create_telemetry_context, clear_telemetry_context
         from statezero.adaptors.django.db_telemetry import track_db_queries
         import json
+
+        # Set per-request extra_fields policy from header (overrides global config)
+        extra_fields_header = request.headers.get("X-Statezero-Extra-Fields")
+        if extra_fields_header is not None:
+            set_extra_fields_policy(extra_fields_header.lower())
+        else:
+            set_extra_fields_policy(config.extra_fields)
 
         # Create telemetry context
         telemetry_ctx = create_telemetry_context(enabled=config.enable_telemetry)

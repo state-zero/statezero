@@ -23,7 +23,10 @@
       "Bash(find:*)",
       "Bash(npm run build:*)",
       "Bash(ls:*)",
-      "Bash(DJANGO_SETTINGS_MODULE=tests.settings python -m django test:*)"
+      "Bash(DJANGO_SETTINGS_MODULE=tests.settings python -m django test:*)",
+      "Bash(kill:*)",
+      "WebFetch(domain:www.w3schools.com)",
+      "Bash(DJANGO_SETTINGS_MODULE=tests.settings python -m django makemigrations:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"

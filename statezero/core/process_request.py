@@ -6,6 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from statezero.core import AppConfig, ModelConfig, Registry
 from statezero.core.ast_parser import ASTParser
 from statezero.core.ast_validator import ASTValidator
+from statezero.core.config import EXTRA_FIELDS_ERROR
 from statezero.core.exceptions import PermissionDenied, ValidationError
 from statezero.core.interfaces import (AbstractDataSerializer,
                                        AbstractORMProvider,
@@ -87,6 +88,7 @@ def _filter_writable_data(
     model_config: ModelConfig,
     orm_provider: AbstractORMProvider,
     create: bool = False,
+    extra_fields: str = "ignore",
 ) -> Dict[str, Any]:
     """
     Filter out keys for which the user does not have write permission.
@@ -99,6 +101,15 @@ def _filter_writable_data(
     If the allowed fields set contains "__all__", return the original data.
     """
     all_fields = orm_provider.get_fields(model)
+
+    if extra_fields == EXTRA_FIELDS_ERROR:
+        unknown_fields = set(data.keys()) - all_fields
+        if unknown_fields:
+            raise ValidationError(
+                f"Unknown field(s): {', '.join(sorted(unknown_fields))}. "
+                f"Valid fields are: {', '.join(sorted(all_fields))}"
+            )
+
     allowed_fields: Set[str] = set()
 
     # Determine which action we're checking for
@@ -269,7 +280,12 @@ class RequestProcessor:
             get_model_by_name=self.orm_provider.get_model_by_name,
             is_nested_path_field=self.orm_provider.is_nested_path_field,
         )
-        validator.validate_fields(final_query_ast, model)
+        extra_fields = self.config.effective_extra_fields
+        error_on_extra = extra_fields == EXTRA_FIELDS_ERROR
+        validator.validate_ast(final_query_ast, model, error_on_extra=error_on_extra)
+
+        if error_on_extra and "orderBy" in final_query_ast:
+            validator.validate_ordering_fields(final_query_ast, model)
 
         # ---- WRITE OPERATIONS: Filter incoming data to include only writable fields. ----
         op = final_query_ast.get("type")
@@ -277,17 +293,19 @@ class RequestProcessor:
             data = final_query_ast.get("data", {})
             # For create operations, pass create=True so that create_fields are used.
             filtered_data = _filter_writable_data(
-                data, req, model, model_config, self.orm_provider, create=(op == "create")
+                data, req, model, model_config, self.orm_provider,
+                create=(op == "create"), extra_fields=extra_fields,
             )
             final_query_ast["data"] = filtered_data
         elif op in ["get_or_create", "update_or_create"]:
             if "lookup" in final_query_ast:
-                final_query_ast["lookup"] = _filter_writable_data(
-                    final_query_ast["lookup"], req, model, model_config, self.orm_provider, create=True
-                )
+                # Lookup fields are filter kwargs (support __ traversal) — validate like filters
+                for field_path in final_query_ast["lookup"].keys():
+                    validator.validate_filterable_field(model, field_path)
             if "defaults" in final_query_ast:
                 final_query_ast["defaults"] = _filter_writable_data(
-                    final_query_ast["defaults"], req, model, model_config, self.orm_provider, create=True
+                    final_query_ast["defaults"], req, model, model_config, self.orm_provider,
+                    create=True, extra_fields=extra_fields,
                 )
 
         # Extract filter/exclude fields and pass them separately for merging after __all__ resolution

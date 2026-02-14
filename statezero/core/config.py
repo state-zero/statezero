@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextvars import ContextVar
 from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Literal
 import networkx as nx
 import warnings
@@ -14,6 +15,23 @@ from statezero.core.interfaces import (AbstractCustomQueryset,
                                        AbstractORMProvider, AbstractPermission,
                                        AbstractSchemaGenerator, AbstractSearchProvider, AbstractQueryOptimizer)
 from statezero.core.types import ORMField, ORMQuerySet, ActionType
+
+# Valid values for extra_fields behavior
+EXTRA_FIELDS_IGNORE = "ignore"
+EXTRA_FIELDS_ERROR = "error"
+
+# Context variable for per-request extra_fields override (set at view layer)
+_extra_fields_var: ContextVar[Optional[str]] = ContextVar('extra_fields', default=None)
+
+
+def get_extra_fields_policy() -> Optional[str]:
+    """Get the per-request extra_fields override. Returns None if not set."""
+    return _extra_fields_var.get()
+
+
+def set_extra_fields_policy(value: str) -> None:
+    """Set extra_fields policy for the current request context."""
+    _extra_fields_var.set(value)
 
 # Pydantic validators for permission return types
 _action_set_validator = TypeAdapter(Set[ActionType])
@@ -147,8 +165,20 @@ class AppConfig(ABC):
     # Telemetry for debugging
     enable_telemetry: bool = False
 
+    # Extra fields policy: "ignore" (default) silently drops unknown fields,
+    # "error" raises ValidationError
+    extra_fields: str = EXTRA_FIELDS_IGNORE
+
     def __init__(self) -> None:
         self._orm_provider: Optional[AbstractORMProvider] = None
+
+    @property
+    def effective_extra_fields(self) -> str:
+        """Resolve extra_fields: per-request header override > global config."""
+        override = get_extra_fields_policy()
+        if override is not None:
+            return override
+        return self.extra_fields
 
     def configure(self, **kwargs) -> None:
         for key, value in kwargs.items():

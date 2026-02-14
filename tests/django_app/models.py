@@ -24,7 +24,7 @@ class DummyRelatedModel(models.Model):
 
 class DummyModel(models.Model):
     name = models.CharField(max_length=50)
-    value = models.IntegerField(default=0)
+    value = models.IntegerField(default=0, null=True, blank=True)
     related = models.ForeignKey(
         DummyRelatedModel,
         null=True,
