@@ -33,7 +33,8 @@ class _FakeRequest:
 class _PermissionedInstance:
     """
     Lightweight proxy around a Django model instance that intercepts attribute
-    access for additional (computed) fields the user may not read.
+    access for additional (computed) fields the user may not read, and enforces
+    action permissions on ``.save()`` and ``.delete()``.
 
     When a ``PermissionedQuerySet`` has determined that the current user lacks
     visibility on certain additional fields, instances yielded by iteration are
@@ -41,11 +42,12 @@ class _PermissionedInstance:
     ``PermissionDenied`` instead of silently returning the value.
     """
 
-    __slots__ = ("_pi_wrapped", "_pi_hidden")
+    __slots__ = ("_pi_wrapped", "_pi_hidden", "_pi_pqs")
 
-    def __init__(self, instance, hidden_fields: frozenset):
+    def __init__(self, instance, hidden_fields: frozenset, pqs=None):
         object.__setattr__(self, "_pi_wrapped", instance)
         object.__setattr__(self, "_pi_hidden", hidden_fields)
+        object.__setattr__(self, "_pi_pqs", pqs)
 
     def __getattr__(self, name):
         if name in object.__getattribute__(self, "_pi_hidden"):
@@ -57,6 +59,10 @@ class _PermissionedInstance:
 
     def __setattr__(self, name, value):
         setattr(object.__getattribute__(self, "_pi_wrapped"), name, value)
+
+    @property
+    def __class__(self):
+        return object.__getattribute__(self, "_pi_wrapped").__class__
 
     def __repr__(self):
         return repr(object.__getattribute__(self, "_pi_wrapped"))
@@ -72,6 +78,22 @@ class _PermissionedInstance:
 
     def __hash__(self):
         return hash(object.__getattribute__(self, "_pi_wrapped"))
+
+    def save(self, *args, **kwargs):
+        pqs = object.__getattribute__(self, "_pi_pqs")
+        wrapped = object.__getattribute__(self, "_pi_wrapped")
+        if pqs is not None:
+            pqs._check_action(ActionType.UPDATE)
+            pqs._check_object_permission(wrapped, ActionType.UPDATE)
+        return wrapped.save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        pqs = object.__getattribute__(self, "_pi_pqs")
+        wrapped = object.__getattribute__(self, "_pi_wrapped")
+        if pqs is not None:
+            pqs._check_action(ActionType.DELETE)
+            pqs._check_object_permission(wrapped, ActionType.DELETE)
+        return wrapped.delete(*args, **kwargs)
 
     @property
     def _wrapped(self):
@@ -325,9 +347,10 @@ class PermissionedQuerySet(QuerySet):
         hidden = self._sz_all_fields - self._sz_visible_fields
         if self._sz_additional_field_names:
             hidden |= self._sz_additional_field_names - self._sz_visible_fields
-        if not hidden:
-            return instance
-        return _PermissionedInstance(instance, hidden)
+        # PK must always be accessible (serializers need it)
+        hidden.discard(self.model._meta.pk.name)
+        # Always wrap to enforce action permissions on save/delete
+        return _PermissionedInstance(instance, hidden, self)
 
     # ------------------------------------------------------------------
     # Write-operation overrides

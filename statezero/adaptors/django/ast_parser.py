@@ -705,6 +705,7 @@ class ASTParser:
 
     def _handle_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new model instance."""
+        self.current_queryset._check_action(ActionType.CREATE)
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
             model=self.model,
@@ -713,14 +714,7 @@ class ASTParser:
             request=self.request,
             fields_map=self.create_fields_map,
         )
-        record = self.serializer.save(
-            model=self.model,
-            data=validated_data,
-            instance=None,
-            partial=False,
-            request=self.request,
-            fields_map=self.create_fields_map,
-        )
+        record = self.current_queryset.create(**validated_data)
         return {
             "data": self._serialize(record),
             "metadata": {"created": True, "response_type": ResponseType.INSTANCE.value},
@@ -728,18 +722,10 @@ class ASTParser:
 
     def _handle_bulk_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """Create multiple model instances using Django's bulk_create."""
+        self.current_queryset._check_action(ActionType.BULK_CREATE)
         from statezero.adaptors.django.config import config as django_config
 
         data_list = ast.get("data", [])
-
-        # Check model-level CREATE permission
-        from statezero.adaptors.django.permission_utils import has_operation_permission
-        try:
-            model_config = self.registry.get_config(self.model)
-            if not has_operation_permission(model_config, self.request, "create"):
-                raise PermissionDenied("Create not allowed")
-        except (ValueError, KeyError):
-            raise PermissionDenied("Create not allowed")
 
         # Validate all data items using many=True
         validated_data_list = self.serializer.deserialize(
@@ -751,9 +737,9 @@ class ASTParser:
             many=True,
         )
 
-        # Bulk create all records
+        # Bulk create all records via the permissioned queryset
         instances = [self.model(**data) for data in validated_data_list]
-        records = self.model.objects.bulk_create(instances)
+        records = self.current_queryset.bulk_create(instances)
         django_config.event_bus.emit_bulk_event(ActionType.BULK_CREATE, records)
 
         return {
@@ -763,6 +749,7 @@ class ASTParser:
 
     def _handle_update(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to update method."""
+        self.current_queryset._check_action(ActionType.UPDATE)
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
             model=self.model,
@@ -773,15 +760,11 @@ class ASTParser:
         )
         ast["data"] = validated_data
 
-        # Get the readable fields for this model using our existing method
-        readable_fields = self._permitted_fields(self.model, "read")
-
         # Update records and get the count and affected instance IDs
         updated_count, updated_instances = self.engine.update(
             self.current_queryset,
             ast,
             self.request,
-            readable_fields=readable_fields,
         )
 
         return {
@@ -795,6 +778,7 @@ class ASTParser:
 
     def _handle_delete(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to delete method."""
+        self.current_queryset._check_action(ActionType.DELETE)
         deleted_count, rows_deleted = self.engine.delete(
             self.current_queryset, ast, self.request
         )
@@ -810,7 +794,6 @@ class ASTParser:
 
     def _handle_update_instance(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """Update a single model instance."""
-        from statezero.adaptors.django.permission_utils import check_object_permissions
         from statezero.adaptors.django.orm import QueryASTVisitor
 
         raw_data = ast.get("data", {})
@@ -828,9 +811,7 @@ class ASTParser:
 
         visitor = QueryASTVisitor(self.model)
         q_obj = visitor.visit(filter_ast)
-        instance = self.model.objects.get(q_obj)
-
-        check_object_permissions(self.request, instance, ActionType.UPDATE, self.model)
+        instance = self.current_queryset.filter(q_obj).get()
 
         updated_instance = self.serializer.save(
             model=self.model,
@@ -848,7 +829,6 @@ class ASTParser:
 
     def _handle_delete_instance(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """Delete a single model instance."""
-        from statezero.adaptors.django.permission_utils import check_object_permissions
         from statezero.adaptors.django.orm import QueryASTVisitor
 
         filter_ast = ast.get("filter")
@@ -857,9 +837,7 @@ class ASTParser:
 
         visitor = QueryASTVisitor(self.model)
         q_obj = visitor.visit(filter_ast)
-        instance = self.model.objects.get(q_obj)
-
-        check_object_permissions(self.request, instance, ActionType.DELETE, self.model)
+        instance = self.current_queryset.filter(q_obj).get()
 
         instance.delete()
 
@@ -869,8 +847,7 @@ class ASTParser:
         }
 
     def _handle_get(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """Retrieve a single model instance with permission checks."""
-        from statezero.adaptors.django.permission_utils import check_object_permissions
+        """Retrieve a single model instance."""
         from statezero.adaptors.django.orm import QueryASTVisitor
 
         filter_ast = ast.get("filter")
@@ -895,8 +872,6 @@ class ASTParser:
                     f"Multiple {self.model.__name__} instances match the given query."
                 )
 
-        check_object_permissions(self.request, record, ActionType.READ, self.model)
-
         return {
             "data": self._serialize(record),
             "metadata": {"get": True, "response_type": ResponseType.INSTANCE.value},
@@ -918,8 +893,6 @@ class ASTParser:
 
     def _lookup_or_mutate(self, ast: Dict[str, Any], existing_action: ActionType, save_on_existing: bool) -> Dict[str, Any]:
         """Shared logic for get_or_create and update_or_create."""
-        from statezero.adaptors.django.permission_utils import check_object_permissions
-
         validated_lookup, validated_defaults = self._validate_and_split_lookup_defaults(
             ast, partial=True
         )
@@ -939,7 +912,6 @@ class ASTParser:
         try:
             instance = self.current_queryset.get(**lookup)
             created = False
-            check_object_permissions(self.request, instance, existing_action, self.model)
         except self.model.DoesNotExist:
             instance = None
             created = True
@@ -1100,11 +1072,6 @@ class ASTParser:
         from statezero.adaptors.django.query_cache import acquire_query_lock
         acquire_query_lock(paginated_qs, operation_context)
 
-        # Execute query with permission checks, then apply pagination
-        from statezero.adaptors.django.permission_utils import check_bulk_permissions
-        if self.request is not None:
-            check_bulk_permissions(self.request, self.current_queryset, ActionType.READ, self.model)
-
         if limit_val is None:
             rows = self.current_queryset[offset:]
         else:
@@ -1189,8 +1156,10 @@ class ASTParser:
             "create": ActionType.CREATE,
             "bulk_create": ActionType.BULK_CREATE,
             "update": ActionType.UPDATE,
+            "update_instance": ActionType.UPDATE,
             "update_or_create": ActionType.UPDATE,
             "delete": ActionType.DELETE,
+            "delete_instance": ActionType.DELETE,
             "get": ActionType.READ,
             "get_or_create": ActionType.READ,
             "first": ActionType.READ,

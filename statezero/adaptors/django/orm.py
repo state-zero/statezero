@@ -164,11 +164,9 @@ class DjangoORMAdapter(AbstractORMProvider):
         queryset: QuerySet,
         node: Dict[str, Any],
         req: RequestType,
-        readable_fields: Set[str] = None,
     ) -> Tuple[int, List[Dict[str, Union[int, str]]]]:
         """
         Update operations with support for F expressions.
-        Includes permission checks for fields referenced in F expressions.
         """
         model = queryset.model
         data: Dict[str, Any] = node.get("data", {})
@@ -180,10 +178,6 @@ class DjangoORMAdapter(AbstractORMProvider):
             visitor = QueryASTVisitor(model)
             q_obj = visitor.visit(filter_ast)
             qs = qs.filter(q_obj)
-
-        # Check bulk update permissions
-        from statezero.adaptors.django.permission_utils import check_bulk_permissions
-        check_bulk_permissions(req, qs, ActionType.UPDATE, model)
 
         # Get the fields to update (keys from data plus primary key)
         update_fields = list(data.keys())
@@ -205,21 +199,8 @@ class DjangoORMAdapter(AbstractORMProvider):
                 except FieldDoesNotExist:
                     pass
 
-                # It's an F expression - check permissions and process it
+                # Process the F expression (PQS validates field permissions on qs.update())
                 try:
-                    # Extract field names referenced in the F expression
-                    referenced_fields = FExpressionHandler.extract_referenced_fields(
-                        value
-                    )
-
-                    # Check that user has READ permissions for all referenced fields
-                    for field in referenced_fields:
-                        if field not in readable_fields:
-                            raise PermissionDenied(
-                                f"No permission to read field '{field}' referenced in F expression"
-                            )
-
-                    # Process the F expression now that permissions are verified
                     processed_data[key] = FExpressionHandler.process_expression(value)
                 except ValueError as e:
                     logger.error(f"Error processing F expression for field {key}: {e}")
@@ -305,9 +286,6 @@ class DjangoORMAdapter(AbstractORMProvider):
             q_obj = visitor.visit(filter_ast)
             qs = qs.filter(q_obj)
 
-        from statezero.adaptors.django.permission_utils import check_bulk_permissions
-        check_bulk_permissions(req, qs, ActionType.DELETE, model)
-
         # TODO: this should be a values list, but we need to check the bulk event emitter code
         pk_field_name = model._meta.pk.name
         instances = list(qs.only(pk_field_name))
@@ -346,7 +324,8 @@ class DjangoORMAdapter(AbstractORMProvider):
         initial_ast: Dict[str, Any],
     ) -> Any:
         """Assemble and return the base QuerySet for the given model."""
-        return model.objects.all()
+        from statezero.adaptors.django.permissioned_queryset import for_user
+        return for_user(model, req)
 
     def get_fields(self, model: models.Model) -> Set[str]:
         """
