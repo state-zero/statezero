@@ -11,7 +11,6 @@ from statezero.core.interfaces import (
     AbstractPermission,
     AbstractORMProvider,
 )
-from statezero.core.permission_resolver import PermissionResolver
 from statezero.core.types import ActionType, ORMModel, RequestType
 from statezero.core.telemetry import get_telemetry_context
 
@@ -41,7 +40,6 @@ class ASTParser:
         base_queryset: Any,  # ADD: Base queryset to manage state
         serializer_options: Optional[Dict[str, Any]] = None,
         request: Optional[RequestType] = None,
-        permission_resolver: Optional[PermissionResolver] = None,
     ):
         self.engine = engine
         self.serializer = serializer
@@ -51,9 +49,6 @@ class ASTParser:
         self.current_queryset = base_queryset  # ADD: Track current queryset state
         self.serializer_options = serializer_options or {}
         self.request = request
-        self.permission_resolver = permission_resolver or PermissionResolver(
-            request=request, registry=registry, orm_provider=engine,
-        )
 
         # Process field selection if present
         requested_fields = self.serializer_options.get("fields", [])
@@ -321,7 +316,29 @@ class ASTParser:
         Returns:
             Boolean indicating if permission is granted for the operation
         """
-        return self.permission_resolver.has_permission(model, operation_type)
+        try:
+            model_config = self.registry.get_config(model)
+            allowed_actions = set()
+
+            # Collect all allowed actions from all permissions
+            for permission_cls in model_config.permissions:
+                permission: AbstractPermission = permission_cls()
+                allowed_actions.update(permission.allowed_actions(self.request, model))
+
+            # Map operation types to ActionType enum values
+            operation_to_action = {
+                "read": ActionType.READ,
+                "create": ActionType.CREATE,
+                "update": ActionType.UPDATE,
+                "delete": ActionType.DELETE,
+            }
+
+            # Check if the required action is in the set of allowed actions
+            required_action = operation_to_action.get(operation_type, ActionType.READ)
+            return required_action in allowed_actions
+        except (ValueError, KeyError):
+            # Model not registered or permissions not set up
+            return False  # Default to denying access for security
 
     def _get_depth_based_fields(
         self, orm_provider: AbstractORMProvider, depth=0, operation_type="read"
@@ -407,39 +424,49 @@ class ASTParser:
         Returns:
             Set of field names allowed for the operation
         """
-        allowed_fields = self.permission_resolver.get_fields(model, operation_type)
+        try:
+            model_config = self.registry.get_config(model)
+            all_fields = self.engine.get_fields(model)
 
-        # Record per-permission-class field contributions in telemetry
-        telemetry_ctx = get_telemetry_context()
-        if telemetry_ctx:
-            try:
-                model_config = self.registry.get_config(model)
-                all_fields = self.engine.get_fields(model)
-                model_name = self.engine.get_model_name(model)
+            # Initialize with no fields allowed
+            allowed_fields = set()
 
-                operation_to_action = {
-                    "read": ActionType.READ,
-                    "create": ActionType.CREATE,
-                    "update": ActionType.UPDATE,
-                }
-                required_action = operation_to_action.get(operation_type)
+            # Map operation type to required action
+            operation_to_action = {
+                "read": ActionType.READ,
+                "create": ActionType.CREATE,
+                "update": ActionType.UPDATE,
+            }
+            required_action = operation_to_action.get(operation_type)
 
-                for permission_cls in model_config.permissions:
-                    permission: AbstractPermission = permission_cls()
+            for permission_cls in model_config.permissions:
+                permission: AbstractPermission = permission_cls()
 
-                    if required_action and required_action not in permission.allowed_actions(self.request, model):
-                        continue
+                # Only include fields if this permission allows the required action
+                if required_action and required_action not in permission.allowed_actions(self.request, model):
+                    continue
 
-                    if operation_type == "read":
-                        fields = permission.visible_fields(self.request, model)
-                    elif operation_type == "create":
-                        fields = permission.create_fields(self.request, model)
-                    elif operation_type == "update":
-                        fields = permission.editable_fields(self.request, model)
-                    else:
-                        fields = set()
+                # Get the appropriate field set based on operation
+                if operation_type == "read":
+                    fields: Union[Set[str], Literal["__all__"]] = (
+                        permission.visible_fields(self.request, model)
+                    )
+                elif operation_type == "create":
+                    fields: Union[Set[str], Literal["__all__"]] = (
+                        permission.create_fields(self.request, model)
+                    )
+                elif operation_type == "update":
+                    fields: Union[Set[str], Literal["__all__"]] = (
+                        permission.editable_fields(self.request, model)
+                    )
+                else:
+                    fields = set()  # Default to no fields for unknown operations
 
+                # Record this permission class's field contribution in telemetry
+                telemetry_ctx = get_telemetry_context()
+                if telemetry_ctx:
                     permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
+                    model_name = self.engine.get_model_name(model)
                     if fields == "__all__":
                         telemetry_ctx.record_permission_class_fields(
                             permission_class_name, model_name, operation_type, list(all_fields)
@@ -448,10 +475,21 @@ class ASTParser:
                         telemetry_ctx.record_permission_class_fields(
                             permission_class_name, model_name, operation_type, list(fields & all_fields)
                         )
-            except (ValueError, KeyError):
-                pass
 
-        return allowed_fields
+                # If any permission allows all fields
+                if fields == "__all__":
+                    return all_fields
+
+                # Add allowed fields from this permission
+                else:  # Ensure we're not operating on the string "__all__"
+                    fields &= all_fields  # Ensure fields actually exist
+                    allowed_fields |= fields
+
+            return allowed_fields
+
+        except (ValueError, KeyError):
+            # Model not registered or permissions not set up
+            return set()  # Default to allowing no fields for security
 
     def parse(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """
