@@ -26,7 +26,8 @@
       "Bash(DJANGO_SETTINGS_MODULE=tests.settings python -m django test:*)",
       "Bash(kill:*)",
       "WebFetch(domain:www.w3schools.com)",
-      "Bash(DJANGO_SETTINGS_MODULE=tests.settings python -m django makemigrations:*)"
+      "Bash(DJANGO_SETTINGS_MODULE=tests.settings python -m django makemigrations:*)",
+      "Bash(/Users/robertherring/code/statezero/venv/bin/python -m pytest:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"

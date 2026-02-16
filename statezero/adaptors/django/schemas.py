@@ -325,6 +325,8 @@ class DjangoSchemaGenerator(AbstractSchemaGenerator):
         elif isinstance(field, models.ManyToManyField):
             field_type = FieldType.ARRAY
             field_format = FieldFormat.MANY_TO_MANY
+            required = False
+            nullable = False
         elif isinstance(field, models.DecimalField):
             field_type = FieldType.NUMBER
             field_format = FieldFormat.DECIMAL
