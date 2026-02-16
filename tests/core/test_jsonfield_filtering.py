@@ -18,9 +18,9 @@ Test cases cover:
 
 from django.test import TestCase
 
-from statezero.adaptors.django.config import registry
+from statezero.adaptors.django.config import config, registry
 from statezero.adaptors.django.orm import DjangoORMAdapter
-from statezero.core.ast_validator import ASTValidator
+from statezero.adaptors.django.ast_parser import ASTParser
 from statezero.core.config import ModelConfig
 from statezero.core.exceptions import PermissionDenied, ValidationError
 from statezero.core.interfaces import AbstractPermission
@@ -79,14 +79,31 @@ class JSONFieldDeniedPermission(AbstractPermission):
         return self.editable_fields(request, model)
 
 
+def _make_parser(model, permission_class):
+    """Helper to set up an ASTParser with given permissions for validation tests."""
+    adapter = DjangoORMAdapter()
+    model_graph = adapter.build_model_graph(model)
+    return ASTParser(
+        engine=adapter,
+        serializer=config.serializer,
+        model=model,
+        config=config,
+        registry=registry,
+        base_queryset=model.objects.none(),
+        serializer_options={},
+        request={},
+        model_graph=model_graph,
+    )
+
+
 class TestJSONFieldFiltering(TestCase):
-    """Tests for JSONField nested path filtering in AST validator."""
+    """Tests for JSONField nested path filtering in AST parser validation."""
 
     def setUp(self):
         self.adapter = DjangoORMAdapter()
 
-    def _setup_validator(self, permission_class):
-        """Helper to set up the validator with given permissions."""
+    def _setup_parser(self, permission_class):
+        """Helper to set up the parser with given permissions."""
         registry._models_config.clear()
         registry.register(
             ComprehensiveModel,
@@ -96,16 +113,7 @@ class TestJSONFieldFiltering(TestCase):
             DeepModelLevel1,
             ModelConfig(DeepModelLevel1, permissions=[permission_class])
         )
-
-        model_graph = self.adapter.build_model_graph(ComprehensiveModel)
-        return ASTValidator(
-            model_graph=model_graph,
-            get_model_name=self.adapter.get_model_name,
-            registry=registry,
-            request={},
-            get_model_by_name=self.adapter.get_model_by_name,
-            is_nested_path_field=self.adapter.is_nested_path_field,
-        )
+        return _make_parser(ComprehensiveModel, permission_class)
 
     # =========================================================================
     # Test 1: Valid JSONField filtering should be allowed
@@ -117,12 +125,8 @@ class TestJSONFieldFiltering(TestCase):
         Django supports: MyModel.objects.filter(json_field__user__name='John')
         StateZero should allow this in validation.
         """
-        validator = self._setup_validator(JSONFieldPermission)
-
-        # This should NOT raise - json_field__user__name is a valid Django filter
-        # Currently this WILL raise ValidationError because the validator
-        # doesn't recognize JSON nested paths
-        validator.validate_filterable_field(ComprehensiveModel, "json_field__user__name")
+        parser = self._setup_parser(JSONFieldPermission)
+        parser.validate_filterable_field(ComprehensiveModel, "json_field__user__name")
 
     # =========================================================================
     # Test 2: JSONField with lookup operators should work
@@ -133,10 +137,8 @@ class TestJSONFieldFiltering(TestCase):
 
         Django supports: MyModel.objects.filter(json_field__count__gte=5)
         """
-        validator = self._setup_validator(JSONFieldPermission)
-
-        # Should allow numeric comparisons on JSON values
-        validator.validate_filterable_field(ComprehensiveModel, "json_field__count__gte")
+        parser = self._setup_parser(JSONFieldPermission)
+        parser.validate_filterable_field(ComprehensiveModel, "json_field__count__gte")
 
     def test_jsonfield_with_contains_operator(self):
         """
@@ -144,9 +146,8 @@ class TestJSONFieldFiltering(TestCase):
 
         Django supports: MyModel.objects.filter(json_field__name__icontains='test')
         """
-        validator = self._setup_validator(JSONFieldPermission)
-
-        validator.validate_filterable_field(ComprehensiveModel, "json_field__name__icontains")
+        parser = self._setup_parser(JSONFieldPermission)
+        parser.validate_filterable_field(ComprehensiveModel, "json_field__name__icontains")
 
     # =========================================================================
     # Test 3: Deep nested JSON paths should work
@@ -157,9 +158,8 @@ class TestJSONFieldFiltering(TestCase):
 
         Django supports: MyModel.objects.filter(json_field__level1__level2__level3='value')
         """
-        validator = self._setup_validator(JSONFieldPermission)
-
-        validator.validate_filterable_field(
+        parser = self._setup_parser(JSONFieldPermission)
+        parser.validate_filterable_field(
             ComprehensiveModel,
             "json_field__level1__level2__level3"
         )
@@ -174,11 +174,9 @@ class TestJSONFieldFiltering(TestCase):
         If a user doesn't have access to the json_field itself, they shouldn't
         be able to filter on any nested paths within it.
         """
-        validator = self._setup_validator(JSONFieldDeniedPermission)
-
-        # User doesn't have access to json_field, so filtering should be denied
+        parser = self._setup_parser(JSONFieldDeniedPermission)
         with self.assertRaises(PermissionDenied):
-            validator.validate_filterable_field(ComprehensiveModel, "json_field__user__name")
+            parser.validate_filterable_field(ComprehensiveModel, "json_field__user__name")
 
     # =========================================================================
     # Test 5: Non-existent base fields should still be rejected
@@ -186,15 +184,10 @@ class TestJSONFieldFiltering(TestCase):
     def test_nonexistent_base_field_rejected(self):
         """
         Test that non-existent base fields are still rejected.
-
-        The validator should still reject filters on fields that don't exist
-        at all on the model.
         """
-        validator = self._setup_validator(JSONFieldPermission)
-
-        # 'nonexistent_field' doesn't exist on ComprehensiveModel
+        parser = self._setup_parser(JSONFieldPermission)
         with self.assertRaises(ValidationError):
-            validator.validate_filterable_field(ComprehensiveModel, "nonexistent_field__key")
+            parser.validate_filterable_field(ComprehensiveModel, "nonexistent_field__key")
 
     # =========================================================================
     # Test 6: Regular (non-JSON) field validation still works
@@ -202,29 +195,18 @@ class TestJSONFieldFiltering(TestCase):
     def test_regular_field_validation_unchanged(self):
         """
         Test that regular field validation still works correctly.
-
-        Non-JSONField paths should continue to work as before.
         """
-        validator = self._setup_validator(JSONFieldPermission)
-
-        # This should work - char_field is a regular CharField
-        validator.validate_filterable_field(ComprehensiveModel, "char_field")
-
-        # This should work with operators
-        validator.validate_filterable_field(ComprehensiveModel, "char_field__icontains")
+        parser = self._setup_parser(JSONFieldPermission)
+        parser.validate_filterable_field(ComprehensiveModel, "char_field")
+        parser.validate_filterable_field(ComprehensiveModel, "char_field__icontains")
 
     def test_regular_nested_field_still_validated(self):
         """
         Test that nested paths through relations are still validated.
-
-        Non-JSONField nested paths should continue to be validated strictly.
         """
-        validator = self._setup_validator(JSONFieldPermission)
-
-        # related__nonexistent should fail because 'nonexistent' isn't a valid
-        # field on DeepModelLevel1
+        parser = self._setup_parser(JSONFieldPermission)
         with self.assertRaises((ValidationError, PermissionDenied)):
-            validator.validate_filterable_field(ComprehensiveModel, "related__nonexistent")
+            parser.validate_filterable_field(ComprehensiveModel, "related__nonexistent")
 
 
 class TestJSONFieldInFilterConditions(TestCase):
@@ -233,8 +215,8 @@ class TestJSONFieldInFilterConditions(TestCase):
     def setUp(self):
         self.adapter = DjangoORMAdapter()
 
-    def _setup_validator(self, permission_class):
-        """Helper to set up the validator with given permissions."""
+    def _setup_parser(self, permission_class):
+        """Helper to set up the parser with given permissions."""
         registry._models_config.clear()
         registry.register(
             ComprehensiveModel,
@@ -244,40 +226,26 @@ class TestJSONFieldInFilterConditions(TestCase):
             DeepModelLevel1,
             ModelConfig(DeepModelLevel1, permissions=[permission_class])
         )
-
-        model_graph = self.adapter.build_model_graph(ComprehensiveModel)
-        return ASTValidator(
-            model_graph=model_graph,
-            get_model_name=self.adapter.get_model_name,
-            registry=registry,
-            request={},
-            get_model_by_name=self.adapter.get_model_by_name,
-            is_nested_path_field=self.adapter.is_nested_path_field,
-        )
+        return _make_parser(ComprehensiveModel, permission_class)
 
     def test_ast_filter_with_jsonfield_path(self):
         """
         Test that AST filter validation works with JSONField paths.
         """
-        validator = self._setup_validator(JSONFieldPermission)
-
-        # Simulate an AST node with a filter on JSONField nested path
+        parser = self._setup_parser(JSONFieldPermission)
         ast_node = {
             "type": "filter",
             "conditions": {
                 "json_field__user__name": "John"
             }
         }
-
-        # This should not raise
-        validator.validate_filter_conditions(ast_node, ComprehensiveModel)
+        parser.validate_filter_conditions(ast_node, ComprehensiveModel)
 
     def test_ast_filter_with_multiple_jsonfield_paths(self):
         """
         Test that AST filter validation works with multiple JSONField paths.
         """
-        validator = self._setup_validator(JSONFieldPermission)
-
+        parser = self._setup_parser(JSONFieldPermission)
         ast_node = {
             "type": "filter",
             "conditions": {
@@ -286,15 +254,13 @@ class TestJSONFieldInFilterConditions(TestCase):
                 "char_field__icontains": "test"
             }
         }
-
-        validator.validate_filter_conditions(ast_node, ComprehensiveModel)
+        parser.validate_filter_conditions(ast_node, ComprehensiveModel)
 
     def test_full_ast_validation_with_jsonfield(self):
         """
         Test complete AST validation with JSONField in both fields and filters.
         """
-        validator = self._setup_validator(JSONFieldPermission)
-
+        parser = self._setup_parser(JSONFieldPermission)
         ast = {
             "serializerOptions": {
                 "fields": ["id", "char_field", "json_field"]
@@ -306,6 +272,4 @@ class TestJSONFieldInFilterConditions(TestCase):
                 }
             }
         }
-
-        # This should not raise
-        validator.validate_ast(ast, ComprehensiveModel)
+        parser.validate_ast(ast, ComprehensiveModel)

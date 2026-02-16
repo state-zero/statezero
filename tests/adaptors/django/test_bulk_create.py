@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 from statezero.adaptors.django.config import config, registry
 from statezero.adaptors.django.serializers import DRFDynamicSerializer
-from statezero.core.ast_parser import ASTParser
+from statezero.adaptors.django.ast_parser import ASTParser
 from tests.django_app.models import DummyModel, DummyRelatedModel, Order
 
 

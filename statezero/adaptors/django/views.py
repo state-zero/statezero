@@ -26,7 +26,7 @@ from statezero.adaptors.django.actions import DjangoActionSchemaGenerator
 from statezero.adaptors.django.action_serializers import get_or_build_action_serializer
 from statezero.adaptors.django.serializers import DRFDynamicSerializer
 from statezero.core.interfaces import AbstractEventEmitter, AbstractActionPermission
-from statezero.core.process_request import RequestProcessor
+from statezero.adaptors.django.process_request import RequestProcessor
 from statezero.core.actions import action_registry
 from statezero.core.interfaces import AbstractActionPermission
 
@@ -581,7 +581,6 @@ class ValidateView(APIView):
                 validate_type=validate_type,
                 partial=partial,
                 request=request,
-                permissions=model_config.permissions,
                 serializer=processor.data_serializer,
             )
 
@@ -626,15 +625,10 @@ class FieldPermissionsView(APIView):
             # Compute field permissions using the same logic as ASTParser._get_operation_fields
             all_fields = processor.orm_provider.get_fields(model)
 
-            visible_fields = self._compute_operation_fields(
-                model, model_config, all_fields, request, "read"
-            )
-            creatable_fields = self._compute_operation_fields(
-                model, model_config, all_fields, request, "create"
-            )
-            editable_fields = self._compute_operation_fields(
-                model, model_config, all_fields, request, "update"
-            )
+            from statezero.adaptors.django.permission_utils import resolve_permission_fields
+            visible_fields = resolve_permission_fields(model_config, request, "read", all_fields)
+            creatable_fields = resolve_permission_fields(model_config, request, "create", all_fields)
+            editable_fields = resolve_permission_fields(model_config, request, "update", all_fields)
 
             return Response(
                 {
@@ -649,46 +643,3 @@ class FieldPermissionsView(APIView):
             # Let StateZero's exception handler deal with errors
             return explicit_exception_handler(original_exception)
 
-    def _compute_operation_fields(self, model, model_config, all_fields, request, operation_type):
-        """
-        Compute allowed fields for a specific operation type.
-        Replicates the logic from ASTParser._get_operation_fields.
-        """
-        from typing import Union, Set, Literal
-
-        allowed_fields = set()
-
-        for permission_cls in model_config.permissions:
-            permission = permission_cls()
-
-            # Get the appropriate field set based on operation
-            if operation_type == "read":
-                fields = permission.visible_fields(request, model)
-            elif operation_type == "create":
-                fields = permission.create_fields(request, model)
-            elif operation_type == "update":
-                fields = permission.editable_fields(request, model)
-            else:
-                fields = set()
-
-            # If any permission allows all fields
-            if fields == "__all__":
-                # For read operations, default "__all__" to frontend_fields
-                if operation_type == "read":
-                    # If frontend_fields is also "__all__", then return all fields
-                    if model_config.fields == "__all__":
-                        return all_fields
-                    # Otherwise, use frontend_fields as the default for "__all__"
-                    else:
-                        fields = model_config.fields
-                        fields &= all_fields  # Ensure fields actually exist
-                        allowed_fields |= fields
-                else:
-                    # For create/update operations, "__all__" means truly all fields
-                    return all_fields
-            else:
-                # Add allowed fields from this permission
-                fields &= all_fields  # Ensure fields actually exist
-                allowed_fields |= fields
-
-        return allowed_fields

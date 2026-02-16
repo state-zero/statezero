@@ -8,7 +8,7 @@ from statezero.adaptors.django.config import registry
 from statezero.adaptors.django.orm import DjangoORMAdapter, QueryASTVisitor
 from statezero.adaptors.django.serializers import DRFDynamicSerializer
 from statezero.core.config import ModelConfig
-from statezero.core.event_bus import EventBus
+from statezero.adaptors.django.event_bus import EventBus
 from statezero.core.interfaces import AbstractEventEmitter
 from statezero.core.types import ActionType
 from tests.django_app.models import DummyModel, DummyRelatedModel

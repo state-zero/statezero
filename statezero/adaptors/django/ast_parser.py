@@ -4,15 +4,34 @@ from collections import deque
 import networkx as nx
 
 
+from django.db.models import Avg, Count, Max, Min, Sum
+
 from statezero.core.config import AppConfig, Registry, EXTRA_FIELDS_ERROR
-from statezero.core.exceptions import PermissionDenied, ValidationError
+from statezero.core.exceptions import (
+    MultipleObjectsReturned,
+    NotFound,
+    PermissionDenied,
+    ValidationError,
+)
 from statezero.core.interfaces import (
     AbstractDataSerializer,
-    AbstractPermission,
     AbstractORMProvider,
 )
 from statezero.core.types import ActionType, ORMModel, RequestType
 from statezero.core.telemetry import get_telemetry_context
+
+# Lookup operators and date/time transforms that are not real model fields
+_FILTER_MODIFIERS = {
+    # Lookup operators
+    "contains", "icontains", "startswith", "istartswith",
+    "endswith", "iendswith", "lt", "gt", "lte", "gte",
+    "in", "eq", "exact", "iexact", "isnull", "range",
+    "regex", "iregex",
+    # Date/time transforms
+    "year", "month", "day", "hour", "minute", "second",
+    "week", "week_day", "iso_week_day", "quarter",
+    "iso_year", "date", "time",
+}
 
 
 class ResponseType(Enum):
@@ -40,6 +59,7 @@ class ASTParser:
         base_queryset: Any,  # ADD: Base queryset to manage state
         serializer_options: Optional[Dict[str, Any]] = None,
         request: Optional[RequestType] = None,
+        model_graph: Optional[nx.DiGraph] = None,
     ):
         self.engine = engine
         self.serializer = serializer
@@ -47,6 +67,8 @@ class ASTParser:
         self.config = config
         self.registry = registry
         self.current_queryset = base_queryset  # ADD: Track current queryset state
+        self._model_graph = model_graph or engine.build_model_graph(model)
+        self._model_name = engine.get_model_name(model)
         self.serializer_options = serializer_options or {}
         self.request = request
 
@@ -134,8 +156,23 @@ class ASTParser:
         }
         self.default_handler = self._handle_read
 
+    def _serialize(self, data, many=False, depth=None):
+        """Serialize data using standard read settings."""
+        return self.serializer.serialize(
+            data, self.model, many=many,
+            depth=depth if depth is not None else self.depth,
+            fields_map=self.read_fields_map,
+        )
+
+    def _get_field_node(self, model_name: str, field_name: str):
+        """O(1) field node lookup using the graph's naming convention."""
+        node_id = f"{model_name}::{field_name}"
+        if self._model_graph.has_node(node_id):
+            return self._model_graph.nodes[node_id].get("data")
+        return None
+
     def _process_nested_field_strings(
-        self, orm_provider: AbstractORMProvider, field_strings, available_fields_map,
+        self, field_strings, available_fields_map,
         operation_type: Literal["read", "create", "update"] = "read",
     ):
         """
@@ -147,7 +184,6 @@ class ASTParser:
         auto-expansion, not hard-blocks explicit requests.
 
         Args:
-            orm_provider: The ORM provider to use for model traversal
             field_strings: List of field strings in the format 'relation__field' or 'field'
             available_fields_map: Dict mapping model names to sets of available fields
             operation_type: Operation type for resolving permissions on newly encountered models
@@ -156,10 +192,10 @@ class ASTParser:
             Dict[str, Set[str]]: Dictionary mapping model names to sets of field names
         """
         fields_map = {}
-        model_graph: nx.DiGraph = orm_provider.build_model_graph(self.model)
+        model_graph = self._model_graph
 
         # Start with the root model
-        root_model_name = orm_provider.get_model_name(self.model)
+        root_model_name = self._model_name
         fields_map[root_model_name] = set()
 
         for field_string in field_strings:
@@ -187,39 +223,29 @@ class ASTParser:
 
                 # If this is the last part, we might need to include all fields if it's a relation
                 if i == len(parts) - 1:
-                    # Find the field node in the graph to check if it's a relation
-                    field_nodes = [
-                        node
-                        for node in model_graph.successors(current_model_name)
-                        if model_graph.nodes[node].get("data")
-                        and model_graph.nodes[node].get("data").field_name == part
-                    ]
+                    field_data = self._get_field_node(current_model_name, part)
 
-                    if field_nodes:
-                        field_node = field_nodes[0]
-                        field_data = model_graph.nodes[field_node].get("data")
+                    # If this is a relation field, include all available fields of the related model
+                    if (
+                        field_data
+                        and field_data.is_relation
+                        and field_data.related_model
+                    ):
+                        related_model_name = field_data.related_model
 
-                        # If this is a relation field, include all available fields of the related model
-                        if (
-                            field_data
-                            and field_data.is_relation
-                            and field_data.related_model
-                        ):
-                            related_model_name = field_data.related_model
-
-                            # Resolve permissions for the related model if needed
-                            if related_model_name not in available_fields_map:
-                                related_model = orm_provider.get_model_by_name(related_model_name)
-                                if self._has_operation_permission(related_model, operation_type):
-                                    available_fields_map[related_model_name] = self._get_operation_fields(
-                                        related_model, operation_type
-                                    )
-
-                            # Include all available fields for this related model
-                            if related_model_name in available_fields_map:
-                                fields_map.setdefault(related_model_name, set()).update(
-                                    available_fields_map[related_model_name]
+                        # Resolve permissions for the related model if needed
+                        if related_model_name not in available_fields_map:
+                            related_model = self.engine.get_model_by_name(related_model_name)
+                            if self._has_operation_permission(related_model, operation_type):
+                                available_fields_map[related_model_name] = self._get_operation_fields(
+                                    related_model, operation_type
                                 )
+
+                        # Include all available fields for this related model
+                        if related_model_name in available_fields_map:
+                            fields_map.setdefault(related_model_name, set()).update(
+                                available_fields_map[related_model_name]
+                            )
                     break
 
                 # Otherwise, we need to traverse to the related model if allowed
@@ -236,14 +262,9 @@ class ASTParser:
                     break
 
                 # Find the field node in the graph
-                field_nodes = [
-                    node
-                    for node in model_graph.successors(current_model_name)
-                    if model_graph.nodes[node].get("data")
-                    and model_graph.nodes[node].get("data").field_name == part
-                ]
+                field_data = self._get_field_node(current_model_name, part)
 
-                if not field_nodes:
+                if not field_data:
                     if self.config.effective_extra_fields == EXTRA_FIELDS_ERROR:
                         raise ValidationError(
                             f"Field '{part}' does not exist on model '{current_model_name}'."
@@ -251,12 +272,9 @@ class ASTParser:
                     # Field not found, skip to next field string
                     break
 
-                field_node = field_nodes[0]
-                field_data = model_graph.nodes[field_node].get("data")
-
                 # If this is a relation field, move to the related model
-                if field_data and field_data.is_relation and field_data.related_model:
-                    related_model = orm_provider.get_model_by_name(
+                if field_data.is_relation and field_data.related_model:
+                    related_model = self.engine.get_model_by_name(
                         field_data.related_model
                     )
                     current_model = related_model
@@ -286,7 +304,7 @@ class ASTParser:
         """
         # Build a fields map specific to this operation type
         fields_map = self._get_depth_based_fields(
-            orm_provider=self.engine, depth=depth, operation_type=operation_type
+            depth=depth, operation_type=operation_type
         )
 
         # Merge filter fields into requested_fields so they go through permission validation
@@ -297,7 +315,6 @@ class ASTParser:
 
         if requested_fields:
             fields_map = self._process_nested_field_strings(
-                orm_provider=self.engine,
                 field_strings=requested_fields,
                 available_fields_map=fields_map,
                 operation_type=operation_type,
@@ -306,42 +323,16 @@ class ASTParser:
         return fields_map
 
     def _has_operation_permission(self, model, operation_type):
-        """
-        Check if the current request has permission for the specified operation on the model.
-
-        Args:
-            model: Model to check permissions for
-            operation_type: The type of operation ('read', 'create', 'update', 'delete')
-
-        Returns:
-            Boolean indicating if permission is granted for the operation
-        """
+        """Check if the current request has permission for the specified operation on the model."""
+        from statezero.adaptors.django.permission_utils import has_operation_permission
         try:
             model_config = self.registry.get_config(model)
-            allowed_actions = set()
-
-            # Collect all allowed actions from all permissions
-            for permission_cls in model_config.permissions:
-                permission: AbstractPermission = permission_cls()
-                allowed_actions.update(permission.allowed_actions(self.request, model))
-
-            # Map operation types to ActionType enum values
-            operation_to_action = {
-                "read": ActionType.READ,
-                "create": ActionType.CREATE,
-                "update": ActionType.UPDATE,
-                "delete": ActionType.DELETE,
-            }
-
-            # Check if the required action is in the set of allowed actions
-            required_action = operation_to_action.get(operation_type, ActionType.READ)
-            return required_action in allowed_actions
+            return has_operation_permission(model_config, self.request, operation_type)
         except (ValueError, KeyError):
-            # Model not registered or permissions not set up
-            return False  # Default to denying access for security
+            return False
 
     def _get_depth_based_fields(
-        self, orm_provider: AbstractORMProvider, depth=0, operation_type="read"
+        self, depth=0, operation_type="read"
     ):
         """
         Build a fields map by traversing the model graph up to the specified depth.
@@ -356,14 +347,14 @@ class ASTParser:
         """
         fields_map = {}
         visited = set()
-        model_graph: nx.DiGraph = orm_provider.build_model_graph(self.model)
+        model_graph = self._model_graph
 
         # Start BFS from the root model
         queue = deque([(self.model, 0)])
 
         while queue:
             current_model, current_depth = queue.popleft()
-            model_name = orm_provider.get_model_name(current_model)
+            model_name = self.engine.get_model_name(current_model)
 
             # Skip if we've already visited this model at this depth or lower
             if (model_name, current_depth) in visited:
@@ -404,7 +395,7 @@ class ASTParser:
                     # Only traverse relations we have permission to access
                     if field_name in allowed_fields:
                         # Get the related model and add it to the queue
-                        related_model = orm_provider.get_model_by_name(
+                        related_model = self.engine.get_model_by_name(
                             field_data.related_model
                         )
                         queue.append((related_model, current_depth + 1))
@@ -414,86 +405,206 @@ class ASTParser:
     def _get_operation_fields(
         self, model: ORMModel, operation_type: Literal["read", "create", "update"]
     ):
-        """
-        Get the appropriate field set for a specific operation.
-
-        Args:
-            model: Model to get fields for
-            operation_type: The operation type ('read', 'create', 'update')
-
-        Returns:
-            Set of field names allowed for the operation
-        """
+        """Get the appropriate field set for a specific operation."""
+        from statezero.adaptors.django.permission_utils import resolve_permission_fields
         try:
             model_config = self.registry.get_config(model)
             all_fields = self.engine.get_fields(model)
+            result = resolve_permission_fields(model_config, self.request, operation_type, all_fields)
 
-            # Initialize with no fields allowed
-            allowed_fields = set()
-
-            # Map operation type to required action
-            operation_to_action = {
-                "read": ActionType.READ,
-                "create": ActionType.CREATE,
-                "update": ActionType.UPDATE,
-            }
-            required_action = operation_to_action.get(operation_type)
-
-            for permission_cls in model_config.permissions:
-                permission: AbstractPermission = permission_cls()
-
-                # Only include fields if this permission allows the required action
-                if required_action and required_action not in permission.allowed_actions(self.request, model):
-                    continue
-
-                # Get the appropriate field set based on operation
-                if operation_type == "read":
-                    fields: Union[Set[str], Literal["__all__"]] = (
-                        permission.visible_fields(self.request, model)
-                    )
-                elif operation_type == "create":
-                    fields: Union[Set[str], Literal["__all__"]] = (
-                        permission.create_fields(self.request, model)
-                    )
-                elif operation_type == "update":
-                    fields: Union[Set[str], Literal["__all__"]] = (
-                        permission.editable_fields(self.request, model)
-                    )
-                else:
-                    fields = set()  # Default to no fields for unknown operations
-
-                # Record this permission class's field contribution in telemetry
-                telemetry_ctx = get_telemetry_context()
-                if telemetry_ctx:
+            # Record telemetry for each permission class's contribution
+            telemetry_ctx = get_telemetry_context()
+            if telemetry_ctx:
+                model_name = self.engine.get_model_name(model)
+                for permission_cls in model_config.permissions:
                     permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
-                    model_name = self.engine.get_model_name(model)
-                    if fields == "__all__":
-                        telemetry_ctx.record_permission_class_fields(
-                            permission_class_name, model_name, operation_type, list(all_fields)
-                        )
-                    else:
-                        telemetry_ctx.record_permission_class_fields(
-                            permission_class_name, model_name, operation_type, list(fields & all_fields)
-                        )
+                    telemetry_ctx.record_permission_class_fields(
+                        permission_class_name, model_name, operation_type, list(result)
+                    )
 
-                # If any permission allows all fields
-                if fields == "__all__":
-                    return all_fields
-
-                # Add allowed fields from this permission
-                else:  # Ensure we're not operating on the string "__all__"
-                    fields &= all_fields  # Ensure fields actually exist
-                    allowed_fields |= fields
-
-            return allowed_fields
-
+            return result
         except (ValueError, KeyError):
-            # Model not registered or permissions not set up
-            return set()  # Default to allowing no fields for security
+            return set()
+
+    # --- Validation Methods (merged from ASTValidator) ---
+
+    def _is_additional_field(self, model: Type, field_name: str) -> bool:
+        """Check if a field is an additional (computed) field."""
+        try:
+            model_config = self.registry.get_config(model)
+            additional_field_names = {f.name for f in model_config.additional_fields}
+            return field_name in additional_field_names
+        except (ValueError, AttributeError):
+            return False
+
+    def _field_exists_in_django_model(self, model: Type, field_path: str) -> bool:
+        """Check if a field path exists in the actual Django model."""
+        try:
+            field_parts = field_path.split("__")
+            base_field_parts = []
+            for part in field_parts:
+                if part in _FILTER_MODIFIERS:
+                    break
+                base_field_parts.append(part)
+
+            current_model = model
+            for field_name in base_field_parts:
+                if field_name == "pk":
+                    return True
+                try:
+                    field = current_model._meta.get_field(field_name)
+                    if self.engine.is_nested_path_field(current_model, field_name):
+                        return True
+                    if field.is_relation and hasattr(field, "related_model"):
+                        current_model = field.related_model
+                except Exception:
+                    return False
+            return True
+        except Exception:
+            return False
+
+    def is_field_allowed(self, model: Type, field_path: str) -> bool:
+        """
+        Validates a nested field path by checking permission settings for each model
+        encountered along the path.
+        """
+        parts = field_path.split("__")
+        current_model = model
+        current_model_name = self.engine.get_model_name(current_model)
+
+        if not self._has_operation_permission(current_model, "read"):
+            return False
+
+        allowed = self._get_operation_fields(current_model, "read")
+        for part in parts:
+            if part in _FILTER_MODIFIERS:
+                break
+
+            if part == "pk" or part == current_model._meta.pk.name:
+                break
+
+            if part not in allowed and "__all__" not in str(allowed):
+                return False
+
+            if self.engine.is_nested_path_field(current_model, part):
+                return True
+
+            field_node = f"{current_model_name}::{part}"
+            if self._model_graph.has_node(field_node):
+                node_data = self._model_graph.nodes[field_node].get("data")
+                if not node_data:
+                    return False
+                if node_data.is_relation:
+                    related_model_name = node_data.related_model
+                    if related_model_name:
+                        related_model = self.engine.get_model_by_name(related_model_name)
+                        if not self._has_operation_permission(related_model, "read"):
+                            return False
+                        current_model = related_model
+                        current_model_name = related_model_name
+                        allowed = self._get_operation_fields(current_model, "read")
+                        continue
+                    else:
+                        return False
+                else:
+                    break
+            else:
+                return False
+
+        return True
+
+    def validate_filterable_field(self, model: Type, field_path: str) -> None:
+        """
+        Validates that a field path can be used for filtering.
+        Checks both field existence and user permissions.
+        """
+        base_field = field_path.split("__")[0]
+
+        if base_field == "pk" or base_field == model._meta.pk.name:
+            return
+
+        if self._is_additional_field(model, base_field):
+            raise ValidationError(
+                f"Cannot filter on computed field '{base_field}'. "
+                f"Computed fields are read-only and cannot be used in filters. "
+                f"Consider using Django's computed fields, database annotations, or filter on the underlying fields instead."
+            )
+
+        if not self._field_exists_in_django_model(model, field_path):
+            raise ValidationError(
+                f"Field '{field_path}' does not exist on model {model.__name__}. "
+                f"Please check the field name and ensure it's a valid Django model field."
+            )
+
+        if not self.is_field_allowed(model, field_path):
+            raise PermissionDenied(
+                f"Permission denied: You do not have access to filter on field '{field_path}'"
+            )
+
+    def validate_filter_conditions(self, ast_node: Dict[str, Any], model: Type) -> None:
+        """Recursively validates filter conditions in an AST node."""
+        if not isinstance(ast_node, dict):
+            return
+
+        node_type = ast_node.get("type")
+
+        if node_type == "filter":
+            conditions = ast_node.get("conditions", {})
+            for field_path in conditions.keys():
+                self.validate_filterable_field(model, field_path)
+        elif node_type == "exclude":
+            if "child" in ast_node:
+                self.validate_filter_conditions(ast_node["child"], model)
+            else:
+                conditions = ast_node.get("conditions", {})
+                for field_path in conditions.keys():
+                    self.validate_filterable_field(model, field_path)
+
+        if "children" in ast_node:
+            for child in ast_node["children"]:
+                self.validate_filter_conditions(child, model)
+
+        if "child" in ast_node:
+            self.validate_filter_conditions(ast_node["child"], model)
+
+    def validate_fields(self, ast: Dict[str, Any], root_model: Type, error_on_extra: bool = False) -> None:
+        """Validates requested fields against permission settings."""
+        serializer_options = ast.get("serializerOptions", {})
+        requested_fields = serializer_options.get("fields", [])
+        for field in requested_fields:
+            if error_on_extra:
+                if not self._field_exists_in_django_model(root_model, field):
+                    raise ValidationError(
+                        f"Field '{field}' does not exist on model {root_model.__name__}."
+                    )
+            if not self.is_field_allowed(root_model, field):
+                raise PermissionDenied(f"Access to field '{field}' is not permitted.")
+
+    def validate_ordering_fields(self, ast: Dict[str, Any], model: Type) -> None:
+        """Validates that all ordering fields exist on the model."""
+        order_by = ast.get("orderBy", [])
+        for field_path in order_by:
+            clean_path = field_path.lstrip("-")
+            if not self._field_exists_in_django_model(model, clean_path):
+                raise ValidationError(
+                    f"Cannot order by '{field_path}': field does not exist on model {model.__name__}."
+                )
+
+    def validate_ast(self, ast: Dict[str, Any], root_model: Type, error_on_extra: bool = False) -> None:
+        """Complete AST validation including field permissions, filter, and exclude validation."""
+        self.validate_fields(ast, root_model, error_on_extra=error_on_extra)
+
+        filter_node = ast.get("filter")
+        if filter_node:
+            self.validate_filter_conditions(filter_node, root_model)
+
+        exclude_node = ast.get("exclude")
+        if exclude_node:
+            self.validate_filter_conditions(exclude_node, root_model)
 
     def parse(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Applies common query modifiers (related fetching, filtering,
+        Validates the AST, applies common query modifiers (related fetching, filtering,
         ordering, field selection) then delegates the operation to a handler.
         """
         self._apply_related(ast)
@@ -510,13 +621,9 @@ class ASTParser:
     def _apply_related(self, ast: Dict[str, Any]) -> None:
         """ Apply select_related and prefetch_related, updating current queryset."""
         if "selectRelated" in ast and isinstance(ast["selectRelated"], list):
-            self.current_queryset = self.engine.select_related(
-                self.current_queryset, ast["selectRelated"]
-            )
+            self.current_queryset = self.current_queryset.select_related(*ast["selectRelated"])
         if "prefetchRelated" in ast and isinstance(ast["prefetchRelated"], list):
-            self.current_queryset = self.engine.prefetch_related(
-                self.current_queryset, ast["prefetchRelated"]
-            )
+            self.current_queryset = self.current_queryset.prefetch_related(*ast["prefetchRelated"])
 
     def _apply_filter(self, ast: Dict[str, Any]) -> None:
         """ Apply filter from AST to the queryset, updating current queryset."""
@@ -535,16 +642,12 @@ class ASTParser:
     def _apply_ordering(self, ast: Dict[str, Any]) -> None:
         """ Apply ordering, updating current queryset."""
         if "orderBy" in ast:
-            self.current_queryset = self.engine.order_by(
-                self.current_queryset, ast["orderBy"]
-            )
+            self.current_queryset = self.current_queryset.order_by(*ast["orderBy"])
 
     def _apply_field_selection(self, ast: Dict[str, Any]) -> None:
         """ Apply field selection, updating current queryset."""
         if "fields" in ast and isinstance(ast["fields"], list):
-            self.current_queryset = self.engine.select_fields(
-                self.current_queryset, ast["fields"]
-            )
+            self.current_queryset = self.current_queryset.values(*ast["fields"])
 
     def _apply_search(self, ast: Dict[str, Any]) -> None:
         """
@@ -589,7 +692,7 @@ class ASTParser:
     # --- Operation Handlers with Hard-Coded Response Types ---
 
     def _handle_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Pass model explicitly to create method."""
+        """Create a new model instance."""
         data = ast.get("data", {})
         validated_data = self.serializer.deserialize(
             model=self.model,
@@ -598,27 +701,23 @@ class ASTParser:
             request=self.request,
             fields_map=self.create_fields_map,
         )
-        record = self.engine.create(
-            self.model,
-            validated_data,
-            self.serializer,
-            self.request,
-            self.create_fields_map,
-        )
-        serialized = self.serializer.serialize(
-            record,
-            self.model,
-            many=False,
-            depth=self.depth,
-            fields_map=self.read_fields_map,
+        record = self.serializer.save(
+            model=self.model,
+            data=validated_data,
+            instance=None,
+            partial=False,
+            request=self.request,
+            fields_map=self.create_fields_map,
         )
         return {
-            "data": serialized,
+            "data": self._serialize(record),
             "metadata": {"created": True, "response_type": ResponseType.INSTANCE.value},
         }
 
     def _handle_bulk_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Handle bulk create operation."""
+        """Create multiple model instances using Django's bulk_create."""
+        from statezero.adaptors.django.config import config as django_config
+
         data_list = ast.get("data", [])
 
         # Check model-level CREATE permission
@@ -636,24 +735,12 @@ class ASTParser:
         )
 
         # Bulk create all records
-        records = self.engine.bulk_create(
-            self.model,
-            validated_data_list,
-            self.serializer,
-            self.request,
-            self.create_fields_map,
-        )
+        instances = [self.model(**data) for data in validated_data_list]
+        records = self.model.objects.bulk_create(instances)
+        django_config.event_bus.emit_bulk_event(ActionType.BULK_CREATE, records)
 
-        # Serialize the created records
-        serialized = self.serializer.serialize(
-            records,
-            self.model,
-            many=True,
-            depth=self.depth,
-            fields_map=self.read_fields_map,
-        )
         return {
-            "data": serialized,
+            "data": self._serialize(records, many=True),
             "metadata": {"created": True, "response_type": ResponseType.QUERYSET.value},
         }
 
@@ -669,31 +756,19 @@ class ASTParser:
         )
         ast["data"] = validated_data
 
-        # Retrieve permissions from the registry
-        permissions = self.registry.get_config(self.model).permissions
-
         # Get the readable fields for this model using our existing method
         readable_fields = self._get_operation_fields(self.model, "read")
 
         # Update records and get the count and affected instance IDs
         updated_count, updated_instances = self.engine.update(
-            self.current_queryset,  # Pass current queryset
+            self.current_queryset,
             ast,
             self.request,
-            permissions,
-            readable_fields=readable_fields,  # Pass readable fields to the update method
-        )
-
-        data = self.serializer.serialize(
-            updated_instances,
-            self.model,
-            many=True,
-            depth=0,  # Always use depth=0 for updates
-            fields_map=self.read_fields_map,
+            readable_fields=readable_fields,
         )
 
         return {
-            "data": data,
+            "data": self._serialize(updated_instances, many=True, depth=0),
             "metadata": {
                 "updated": True,
                 "updated_count": updated_count,
@@ -703,9 +778,8 @@ class ASTParser:
 
     def _handle_delete(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to delete method."""
-        permissions = self.registry.get_config(self.model).permissions
         deleted_count, rows_deleted = self.engine.delete(
-            self.current_queryset, ast, self.request, permissions
+            self.current_queryset, ast, self.request
         )
         return {
             "data": None,
@@ -718,10 +792,11 @@ class ASTParser:
         }
 
     def _handle_update_instance(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Pass model explicitly to update_instance method."""
-        # Extract and deserialize the data.
+        """Update a single model instance."""
+        from statezero.adaptors.django.permission_utils import check_object_permissions
+        from statezero.adaptors.django.orm import QueryASTVisitor
+
         raw_data = ast.get("data", {})
-        # Allow partial updates.
         validated_data = self.serializer.deserialize(
             model=self.model,
             data=raw_data,
@@ -729,112 +804,131 @@ class ASTParser:
             request=self.request,
             fields_map=self.update_fields_map,
         )
-        # Replace raw data with validated data in the AST.
-        ast["data"] = validated_data
 
-        # Retrieve permissions from the self.registry.
-        permissions = self.registry.get_config(self.model).permissions
+        filter_ast = ast.get("filter")
+        if not filter_ast:
+            raise ValueError("Filter is required for update_instance operation")
 
-        # Delegate to the engine's instance-based update method.
-        updated_instance = self.engine.update_instance(
-            self.model,
-            ast,
-            self.request,
-            permissions,
-            self.serializer,
+        visitor = QueryASTVisitor(self.model)
+        q_obj = visitor.visit(filter_ast)
+        instance = self.model.objects.get(q_obj)
+
+        check_object_permissions(self.request, instance, ActionType.UPDATE, self.model)
+
+        updated_instance = self.serializer.save(
+            model=self.model,
+            data=validated_data,
+            instance=instance,
+            partial=True,
+            request=self.request,
             fields_map=self.update_fields_map,
         )
 
-        # Serialize the updated instance for the response.
-        serialized = self.serializer.serialize(
-            updated_instance,
-            self.model,
-            many=False,
-            depth=self.depth,
-            fields_map=self.read_fields_map,
-        )
         return {
-            "data": serialized,
+            "data": self._serialize(updated_instance),
             "metadata": {"updated": True, "response_type": ResponseType.INSTANCE.value},
         }
 
     def _handle_delete_instance(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handles deletion of a single instance.
-        Typically, no additional data deserialization is needed beyond the filter,
-        so we simply verify that a filter is provided and then delegate to the engine.
-        """
+        """Delete a single model instance."""
+        from statezero.adaptors.django.permission_utils import check_object_permissions
+        from statezero.adaptors.django.orm import QueryASTVisitor
+
         filter_ast = ast.get("filter")
         if not filter_ast:
             raise ValueError("Filter is required for delete_instance operation")
 
-        # If needed, you could deserialize the filter here.
-        # For example, if your serializer has a method to process filter conditions,
-        # you could call it. Otherwise, assume the filter is valid.
+        visitor = QueryASTVisitor(self.model)
+        q_obj = visitor.visit(filter_ast)
+        instance = self.model.objects.get(q_obj)
 
-        # Retrieve permissions from the self.registry.
-        permissions = self.registry.get_config(self.model).permissions
+        check_object_permissions(self.request, instance, ActionType.DELETE, self.model)
 
-        # Delegate to the engine's instance-based delete method.
-        deleted_count = self.engine.delete_instance(
-            self.model, ast, self.request, permissions
-        )
+        instance.delete()
 
         return {
-            "data": deleted_count,
+            "data": 1,
             "metadata": {"deleted": True, "response_type": ResponseType.BOOLEAN.value},
         }
 
     def _handle_get(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Pass current queryset to get method."""
-        # Retrieve permissions from the registry
-        permissions = self.registry.get_config(self.model).permissions
-        record = self.engine.get(self.current_queryset, ast, self.request, permissions)
-        serialized = self.serializer.serialize(
-            record,
-            self.model,
-            many=False,
-            depth=self.depth,
-            fields_map=self.read_fields_map,
-        )
+        """Retrieve a single model instance with permission checks."""
+        from statezero.adaptors.django.permission_utils import check_object_permissions
+        from statezero.adaptors.django.orm import QueryASTVisitor
+
+        filter_ast = ast.get("filter")
+        if filter_ast:
+            visitor = QueryASTVisitor(self.model)
+            q_obj = visitor.visit(filter_ast)
+            try:
+                record = self.current_queryset.filter(q_obj).get()
+            except self.model.DoesNotExist:
+                raise NotFound(f"No {self.model.__name__} matches the given query.")
+            except self.model.MultipleObjectsReturned:
+                raise MultipleObjectsReturned(
+                    f"Multiple {self.model.__name__} instances match the given query."
+                )
+        else:
+            try:
+                record = self.current_queryset.get()
+            except self.model.DoesNotExist:
+                raise NotFound(f"No {self.model.__name__} matches the given query.")
+            except self.model.MultipleObjectsReturned:
+                raise MultipleObjectsReturned(
+                    f"Multiple {self.model.__name__} instances match the given query."
+                )
+
+        check_object_permissions(self.request, record, ActionType.READ, self.model)
+
         return {
-            "data": serialized,
+            "data": self._serialize(record),
             "metadata": {"get": True, "response_type": ResponseType.INSTANCE.value},
         }
 
     def _handle_get_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Pass current queryset to get_or_create method."""
-        # Validate and split lookup/defaults (without extra wrapping)
+        """Get an existing object, or create it if it doesn't exist."""
+        from statezero.adaptors.django.permission_utils import check_object_permissions
+
         validated_lookup, validated_defaults = self._validate_and_split_lookup_defaults(
             ast, partial=True
         )
-
-        # Optionally update the AST if needed:
         ast["lookup"] = validated_lookup
         ast["defaults"] = validated_defaults
 
-        # Retrieve permissions from configuration
-        permissions = self.registry.get_config(self.model).permissions
+        lookup = ast.get("lookup", {})
+        defaults = ast.get("defaults", {})
 
-        # Call the ORM layer and pass the serializer and request/permissions
-        record, created = self.engine.get_or_create(
-            self.current_queryset,  # Pass current queryset
-            {"lookup": ast.get("lookup", {}), "defaults": ast.get("defaults", {})},
-            serializer=self.serializer,
-            req=self.request,
-            permissions=permissions,
-            create_fields_map=self.create_fields_map,
-        )
+        # Normalize foreign keys: replace model instances with their PKs
+        merged_data = {
+            k: (v.pk if hasattr(v, "_meta") else v)
+            for k, v in {**lookup, **defaults}.items()
+        }
 
-        serialized = self.serializer.serialize(
-            record,
-            self.model,
-            many=False,
-            depth=self.depth,
-            fields_map=self.read_fields_map,
-        )
+        # Check if instance exists
+        try:
+            record = self.current_queryset.get(**lookup)
+            created = False
+            check_object_permissions(self.request, record, ActionType.READ, self.model)
+        except self.model.DoesNotExist:
+            record = None
+            created = True
+        except self.model.MultipleObjectsReturned:
+            raise MultipleObjectsReturned(
+                f"Multiple {self.model.__name__} instances match the given lookup parameters"
+            )
+
+        if created:
+            record = self.serializer.save(
+                model=self.model,
+                data=merged_data,
+                instance=None,
+                partial=False,
+                request=self.request,
+                fields_map=self.create_fields_map,
+            )
+
         return {
-            "data": serialized,
+            "data": self._serialize(record),
             "metadata": {
                 "created": created,
                 "response_type": ResponseType.INSTANCE.value,
@@ -842,39 +936,49 @@ class ASTParser:
         }
 
     def _handle_update_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Pass current queryset to update_or_create method."""
-        # Validate and split lookup/defaults.
+        """Update an existing object, or create it if it doesn't exist."""
+        from statezero.adaptors.django.permission_utils import check_object_permissions
+
         validated_lookup, validated_defaults = self._validate_and_split_lookup_defaults(
             ast, partial=True
         )
-
-        # Optionally update the AST if needed:
         ast["lookup"] = validated_lookup
         ast["defaults"] = validated_defaults
 
-        # Retrieve permissions from configuration.
-        permissions = self.registry.get_config(self.model).permissions
+        lookup = ast.get("lookup", {})
+        defaults = ast.get("defaults", {})
 
-        # Call the ORM update_or_create method, passing the serializer, request, and permissions.
-        record, created = self.engine.update_or_create(
-            self.current_queryset,  # Pass current queryset
-            {"lookup": ast.get("lookup", {}), "defaults": ast.get("defaults", {})},
-            req=self.request,
-            serializer=self.serializer,
-            permissions=permissions,
-            update_fields_map=self.update_fields_map,
-            create_fields_map=self.create_fields_map,
+        # Normalize foreign keys: replace model instances with their PKs
+        merged_data = {
+            k: (v.pk if hasattr(v, "_meta") else v)
+            for k, v in {**lookup, **defaults}.items()
+        }
+
+        # Determine if instance exists
+        try:
+            instance = self.current_queryset.get(**lookup)
+            created = False
+            check_object_permissions(self.request, instance, ActionType.UPDATE, self.model)
+        except self.model.DoesNotExist:
+            instance = None
+            created = True
+        except self.model.MultipleObjectsReturned:
+            raise MultipleObjectsReturned(
+                f"Multiple {self.model.__name__} instances match the given lookup parameters"
+            )
+
+        fields_map_to_use = self.create_fields_map if created else self.update_fields_map
+
+        record = self.serializer.save(
+            model=self.model,
+            data=merged_data,
+            instance=instance,
+            request=self.request,
+            fields_map=fields_map_to_use,
         )
 
-        serialized = self.serializer.serialize(
-            record,
-            self.model,
-            many=False,
-            depth=self.depth,
-            fields_map=self.read_fields_map,
-        )
         return {
-            "data": serialized,
+            "data": self._serialize(record),
             "metadata": {
                 "created": created,
                 "response_type": ResponseType.INSTANCE.value,
@@ -882,38 +986,24 @@ class ASTParser:
         }
 
     def _handle_first(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Pass current queryset to first method."""
-        record = self.engine.first(self.current_queryset)
-        serialized = self.serializer.serialize(
-            record,
-            self.model,
-            many=False,
-            depth=self.depth,
-            fields_map=self.read_fields_map,
-        )
+        """ Return the first record from the queryset."""
+        record = self.current_queryset.first()
         return {
-            "data": serialized,
+            "data": self._serialize(record),
             "metadata": {"first": True, "response_type": ResponseType.INSTANCE.value},
         }
 
     def _handle_last(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Pass current queryset to last method."""
-        record = self.engine.last(self.current_queryset)
-        serialized = self.serializer.serialize(
-            record,
-            self.model,
-            many=False,
-            depth=self.depth,
-            fields_map=self.read_fields_map,
-        )
+        """ Return the last record from the queryset."""
+        record = self.current_queryset.last()
         return {
-            "data": serialized,
+            "data": self._serialize(record),
             "metadata": {"last": True, "response_type": ResponseType.INSTANCE.value},
         }
 
     def _handle_exists(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Pass current queryset to exists method."""
-        exists_flag = self.engine.exists(self.current_queryset)
+        """ Check if the queryset has any results."""
+        exists_flag = self.current_queryset.exists()
         return {
             "data": exists_flag,
             "metadata": {
@@ -924,7 +1014,7 @@ class ASTParser:
 
     def _handle_aggregate(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to all aggregate methods."""
-        from statezero.core.query_cache import get_cached_query_result, cache_query_result
+        from statezero.adaptors.django.query_cache import get_cached_query_result, cache_query_result
 
         op_type = ast.get("type")
 
@@ -947,7 +1037,7 @@ class ASTParser:
             if cached_result is not None:
                 return cached_result
 
-            result_data = self.engine.aggregate(self.current_queryset, agg_list)
+            result_data = self._do_aggregate(self.current_queryset, agg_list)
             result = {
                 "data": result_data,
                 "metadata": {
@@ -970,73 +1060,43 @@ class ASTParser:
             if cached_result is not None:
                 return cached_result
 
+            agg_func_map = {
+                "count": Count,
+                "sum": Sum,
+                "avg": Avg,
+                "min": Min,
+                "max": Max,
+            }
+            agg_func = agg_func_map.get(op_type)
+            if not agg_func:
+                raise ValueError(f"Unknown aggregate operation: {op_type}")
+
+            raw = self.current_queryset.aggregate(result=agg_func(field))["result"]
             if op_type == "count":
-                result_val = self.engine.count(self.current_queryset, field)
-                result = {
-                    "data": result_val,
-                    "metadata": {
-                        "count": True,
-                        "response_type": ResponseType.NUMBER.value,
-                    },
-                }
-                cache_query_result(self.current_queryset, result, operation_context)
-                return result
-            elif op_type == "sum":
-                result_val = self.engine.sum(self.current_queryset, field)
-                result = {
-                    "data": result_val,
-                    "metadata": {
-                        "sum": True,
-                        "response_type": ResponseType.NUMBER.value,
-                    },
-                }
-                cache_query_result(self.current_queryset, result, operation_context)
-                return result
+                result_val = int(raw) if raw is not None else 0
             elif op_type == "avg":
-                result_val = self.engine.avg(self.current_queryset, field)
-                result = {
-                    "data": result_val,
-                    "metadata": {
-                        "avg": True,
-                        "response_type": ResponseType.NUMBER.value,
-                    },
-                }
-                cache_query_result(self.current_queryset, result, operation_context)
-                return result
-            elif op_type == "min":
-                result_val = self.engine.min(self.current_queryset, field)
-                result = {
-                    "data": result_val,
-                    "metadata": {
-                        "min": True,
-                        "response_type": ResponseType.NUMBER.value,
-                    },
-                }
-                cache_query_result(self.current_queryset, result, operation_context)
-                return result
-            elif op_type == "max":
-                result_val = self.engine.max(self.current_queryset, field)
-                result = {
-                    "data": result_val,
-                    "metadata": {
-                        "max": True,
-                        "response_type": ResponseType.NUMBER.value,
-                    },
-                }
-                cache_query_result(self.current_queryset, result, operation_context)
-                return result
+                result_val = float(raw) if raw is not None else None
+            else:
+                result_val = raw
+
+            result = {
+                "data": result_val,
+                "metadata": {
+                    op_type: True,
+                    "response_type": ResponseType.NUMBER.value,
+                },
+            }
+            cache_query_result(self.current_queryset, result, operation_context)
+            return result
 
     def _handle_read(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to fetch_list method."""
-        from statezero.core.query_cache import get_cached_query_result, cache_query_result
+        from statezero.adaptors.django.query_cache import get_cached_query_result, cache_query_result
 
         offset_raw = self.serializer_options.get("offset", 0)
         limit_raw = self.serializer_options.get("limit", self.config.default_limit)
         offset_val = int(offset_raw) if offset_raw is not None else None
         limit_val = int(limit_raw) if limit_raw is not None else None
-
-        # Retrieve permissions from configuration
-        permissions = self.registry.get_config(self.model).permissions
 
         # Apply LIMIT/OFFSET to queryset BEFORE checking cache
         # This ensures the cache key includes pagination in the SQL
@@ -1062,31 +1122,21 @@ class ASTParser:
         # If we can't acquire lock, another request is processing this query
         # and get_cached_query_result already waited for it. If we're still here,
         # either we got the lock or the wait timed out, so execute the query.
-        from statezero.core.query_cache import acquire_query_lock
+        from statezero.adaptors.django.query_cache import acquire_query_lock
         acquire_query_lock(paginated_qs, operation_context)
 
-        # Execute query with permission checks
-        # Pass UNSLICED queryset so permission checks can filter it,
-        # but with offset/limit so fetch_list can apply pagination after permission checks
-        rows = self.engine.fetch_list(
-            self.current_queryset,
-            offset=offset,
-            limit=limit_val,
-            req=self.request,
-            permissions=permissions,
-        )
+        # Execute query with permission checks, then apply pagination
+        from statezero.adaptors.django.permission_utils import check_bulk_permissions
+        if self.request is not None:
+            check_bulk_permissions(self.request, self.current_queryset, ActionType.READ, self.model)
 
-        # Serialize
-        serialized = self.serializer.serialize(
-            rows,
-            self.model,
-            many=True,
-            depth=self.depth,
-            fields_map=self.read_fields_map,
-        )
+        if limit_val is None:
+            rows = self.current_queryset[offset:]
+        else:
+            rows = self.current_queryset[offset : offset + limit_val]
 
         result = {
-            "data": serialized,
+            "data": self._serialize(rows, many=True),
             "metadata": {"read": True, "response_type": ResponseType.QUERYSET.value},
         }
 
@@ -1096,6 +1146,20 @@ class ASTParser:
         return result
 
     # --- Helper Methods ---
+
+    @staticmethod
+    def _do_aggregate(queryset, agg_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Perform aggregation operations directly on the queryset."""
+        agg_func_map = {"count": Count, "sum": Sum, "avg": Avg, "min": Min, "max": Max}
+        agg_expressions = {}
+        for agg in agg_list:
+            func_cls = agg_func_map.get(agg["function"])
+            if not func_cls:
+                from statezero.core.exceptions import ValidationError
+                raise ValidationError(f"Unknown aggregate function: {agg['function']}")
+            agg_expressions[agg["alias"]] = func_cls(agg["field"])
+        raw = queryset.aggregate(**agg_expressions)
+        return {"data": raw, "metadata": {"aggregated": True}}
 
     def _validate_and_split_lookup_defaults(
         self, ast: Dict[str, Any], partial: bool = False

@@ -4,8 +4,7 @@ from typing import Any, Dict, Optional, Set, Type
 from fastapi.encoders import jsonable_encoder
 
 from statezero.core import AppConfig, ModelConfig, Registry
-from statezero.core.ast_parser import ASTParser
-from statezero.core.ast_validator import ASTValidator
+from statezero.adaptors.django.ast_parser import ASTParser, _FILTER_MODIFIERS
 from statezero.core.config import EXTRA_FIELDS_ERROR
 from statezero.core.exceptions import PermissionDenied, ValidationError
 from statezero.core.interfaces import (AbstractDataSerializer,
@@ -16,18 +15,6 @@ from statezero.core.telemetry import create_telemetry_context, clear_telemetry_c
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-
-
-# Lookup operators and date parts that should be stripped when extracting filter field paths
-_FILTER_MODIFIERS = {
-    # Lookup operators
-    "contains", "icontains", "startswith", "istartswith", "endswith", "iendswith",
-    "lt", "gt", "lte", "gte", "in", "eq", "exact", "iexact", "isnull", "range",
-    "regex", "iregex",
-    # Date/time parts
-    "year", "month", "day", "hour", "minute", "second", "week", "week_day",
-    "iso_week_day", "quarter", "iso_year", "date", "time",
-}
 
 
 def _extract_base_field_path(field_path: str) -> str:
@@ -90,50 +77,10 @@ def _filter_writable_data(
     create: bool = False,
     extra_fields: str = "ignore",
 ) -> Dict[str, Any]:
-    """
-    Filter out keys for which the user does not have write permission.
-    When `create` is True, use the permission's `create_fields` method;
-    otherwise, use `editable_fields`.
-
-    Only includes fields from permissions that allow the corresponding action
-    (CREATE or UPDATE).
-
-    If the allowed fields set contains "__all__", return the original data.
-    """
+    """Filter out keys for which the user does not have write permission."""
+    from statezero.adaptors.django.permission_utils import filter_writable_data
     all_fields = orm_provider.get_fields(model)
-
-    if extra_fields == EXTRA_FIELDS_ERROR:
-        unknown_fields = set(data.keys()) - all_fields
-        if unknown_fields:
-            raise ValidationError(
-                f"Unknown field(s): {', '.join(sorted(unknown_fields))}. "
-                f"Valid fields are: {', '.join(sorted(all_fields))}"
-            )
-
-    allowed_fields: Set[str] = set()
-
-    # Determine which action we're checking for
-    required_action = ActionType.CREATE if create else ActionType.UPDATE
-
-    for permission_cls in model_config.permissions:
-        perm = permission_cls()
-
-        # Only include fields if this permission allows the required action
-        if required_action not in perm.allowed_actions(req, model):
-            continue
-
-        if create:
-            permission_fields = perm.create_fields(req, model)
-        else:
-            permission_fields = perm.editable_fields(req, model)
-        # handle the __all__ shorthand
-        if permission_fields == "__all__":
-            permission_fields = all_fields
-        else:
-            permission_fields &= all_fields
-        allowed_fields |= permission_fields
-
-    return {k: v for k, v in data.items() if k in allowed_fields}
+    return filter_writable_data(data, req, model_config, all_fields, create=create, extra_fields=extra_fields)
 
 
 class RequestProcessor:
@@ -163,9 +110,8 @@ class RequestProcessor:
             # Skip this check if the request was authenticated via sync token (for CLI schema generation)
             is_sync_token_access = getattr(req, '_statezero_sync_token_access', False)
             if not self.config.DEBUG and not is_sync_token_access:
-                allowed_actions: Set[ActionType] = set()
-                for permission_cls in config.permissions:
-                    allowed_actions |= permission_cls().allowed_actions(req, model)
+                from statezero.adaptors.django.permission_utils import resolve_allowed_actions
+                allowed_actions = resolve_allowed_actions(config, req)
                 required_actions = {
                     ActionType.CREATE,
                     ActionType.READ,
@@ -210,7 +156,6 @@ class RequestProcessor:
             req=req,
             model=model,
             initial_ast=initial_query_ast,
-            registered_permissions=model_config.permissions,
         )
 
         # Step 1: Apply filter_queryset with OR logic (additive permissions)
@@ -231,7 +176,7 @@ class RequestProcessor:
             # Record SQL after applying this permission
             if telemetry_ctx:
                 try:
-                    from statezero.core.query_cache import _get_sql_from_queryset
+                    from statezero.adaptors.django.query_cache import _get_sql_from_queryset
                     sql_data = _get_sql_from_queryset(filtered_qs)
                     if sql_data:
                         sql, _ = sql_data
@@ -256,9 +201,8 @@ class RequestProcessor:
             final_query_ast
         )
 
-        allowed_global_actions: Set[ActionType] = set()
-        for permission_cls in model_config.permissions:
-            allowed_global_actions |= permission_cls().allowed_actions(req, model)
+        from statezero.adaptors.django.permission_utils import resolve_allowed_actions
+        allowed_global_actions = resolve_allowed_actions(model_config, req)
         if "__all__" not in allowed_global_actions:
             if not requested_actions.issubset(allowed_global_actions):
                 missing = requested_actions - allowed_global_actions
@@ -267,41 +211,23 @@ class RequestProcessor:
                     f"Missing global permissions for actions: {missing_str}"
                 )
 
-        # For READ operations, delegate field permission checks to ASTValidator.
         serializer_options = ast_body.get("serializerOptions", {})
 
-        # Invoke the ASTValidator to check read field permissions.
+        # Build model graph once and reuse
         model_graph = self.orm_provider.build_model_graph(model)
-        validator = ASTValidator(
-            model_graph=model_graph,
-            get_model_name=self.orm_provider.get_model_name,
-            registry=self.registry,
-            request=req,
-            get_model_by_name=self.orm_provider.get_model_by_name,
-            is_nested_path_field=self.orm_provider.is_nested_path_field,
-        )
-        extra_fields = self.config.effective_extra_fields
-        error_on_extra = extra_fields == EXTRA_FIELDS_ERROR
-        validator.validate_ast(final_query_ast, model, error_on_extra=error_on_extra)
 
-        if error_on_extra and "orderBy" in final_query_ast:
-            validator.validate_ordering_fields(final_query_ast, model)
+        extra_fields = self.config.effective_extra_fields
 
         # ---- WRITE OPERATIONS: Filter incoming data to include only writable fields. ----
         op = final_query_ast.get("type")
         if op in ["create", "update"]:
             data = final_query_ast.get("data", {})
-            # For create operations, pass create=True so that create_fields are used.
             filtered_data = _filter_writable_data(
                 data, req, model, model_config, self.orm_provider,
                 create=(op == "create"), extra_fields=extra_fields,
             )
             final_query_ast["data"] = filtered_data
         elif op in ["get_or_create", "update_or_create"]:
-            if "lookup" in final_query_ast:
-                # Lookup fields are filter kwargs (support __ traversal) — validate like filters
-                for field_path in final_query_ast["lookup"].keys():
-                    validator.validate_filterable_field(model, field_path)
             if "defaults" in final_query_ast:
                 final_query_ast["defaults"] = _filter_writable_data(
                     final_query_ast["defaults"], req, model, model_config, self.orm_provider,
@@ -319,17 +245,31 @@ class RequestProcessor:
             serializer_options = serializer_options or {}
             serializer_options["_filter_fields"] = filter_fields
 
-        # Create and use the AST parser directly, instead of delegating to ORM provider
+        # Create the AST parser with model_graph for validation + execution
         parser = ASTParser(
             engine=self.orm_provider,
             serializer=self.data_serializer,
             model=model,
             config=self.config,
             registry=self.registry,
-            base_queryset=base_queryset,  # Pass the queryset here
+            base_queryset=base_queryset,
             serializer_options=serializer_options or {},
             request=req,
+            model_graph=model_graph,
         )
+
+        # Validate AST (field permissions, filter conditions, ordering)
+        error_on_extra = extra_fields == EXTRA_FIELDS_ERROR
+        parser.validate_ast(final_query_ast, model, error_on_extra=error_on_extra)
+
+        if error_on_extra and "orderBy" in final_query_ast:
+            parser.validate_ordering_fields(final_query_ast, model)
+
+        # Validate lookup fields for get_or_create / update_or_create
+        if op in ["get_or_create", "update_or_create"] and "lookup" in final_query_ast:
+            for field_path in final_query_ast["lookup"].keys():
+                parser.validate_filterable_field(model, field_path)
+
         result: Dict[str, Any] = parser.parse(final_query_ast)
 
         # Note: Telemetry data is added by the adaptor (views.py)

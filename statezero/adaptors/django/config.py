@@ -33,7 +33,7 @@ class DjangoLocalConfig(AppConfig):
         from statezero.adaptors.django.schemas import DjangoSchemaGenerator
         from statezero.adaptors.django.serializers import DRFDynamicSerializer
         from statezero.adaptors.django.search_providers.basic_search import BasicSearchProvider
-        from statezero.core.event_bus import EventBus
+        from statezero.adaptors.django.event_bus import EventBus
 
         # Initialize serializer, schema generator, and ORM adapter.
         self.serializer = DRFDynamicSerializer()

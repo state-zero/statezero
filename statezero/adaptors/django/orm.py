@@ -5,7 +5,7 @@ import networkx as nx
 from django.apps import apps
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models, transaction
-from django.db.models import Avg, Count, Max, Min, Q, Sum, QuerySet
+from django.db.models import Q, QuerySet
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from rest_framework import serializers
@@ -13,18 +13,13 @@ from rest_framework import serializers
 
 from statezero.adaptors.django.config import config, registry
 from statezero.core.classes import FieldNode, ModelNode
-from statezero.core.event_bus import EventBus
+from statezero.adaptors.django.event_bus import EventBus
 from statezero.core.exceptions import (
-    MultipleObjectsReturned,
     NotFound,
     PermissionDenied,
     ValidationError,
 )
-from statezero.core.interfaces import (
-    AbstractCustomQueryset,
-    AbstractORMProvider,
-    AbstractPermission,
-)
+from statezero.core.interfaces import AbstractORMProvider
 from statezero.core.types import ActionType, RequestType
 from statezero.adaptors.django.serializers import get_custom_serializer
 
@@ -36,23 +31,6 @@ logger.setLevel(logging.DEBUG)
 # AST Visitor for Django (builds Django Q objects)
 # -------------------------------------------------------------------
 class QueryASTVisitor:
-    SUPPORTED_OPERATORS: Set[str] = {
-        "contains",
-        "icontains",
-        "startswith",
-        "istartswith",
-        "endswith",
-        "iendswith",
-        "lt",
-        "gt",
-        "lte",
-        "gte",
-        "in",
-        "eq",
-        "exact",
-        "isnull",
-    }
-
     def __init__(self, model: Type[models.Model]) -> None:
         self.model = model
 
@@ -84,19 +62,6 @@ class QueryASTVisitor:
             q = combine_func(q, self.visit(child))
         return q
 
-    def _process_field_lookup(self, field: str, value: Any) -> Tuple[str, Any]:
-        """
-        This used to contain logic, right now it just passes through the field and value.
-
-        Args:
-            field: The field lookup string (e.g., 'datetime_field__hour__gt')
-            value: The value to filter by
-
-        Returns:
-            A tuple of (lookup, value)
-        """
-        return field, value
-
     def visit_filter(self, node: Dict[str, Any]) -> Q:
         """Process a filter node, handling both conditions and Q objects."""
         q = Q()
@@ -104,8 +69,7 @@ class QueryASTVisitor:
         # Process direct conditions
         conditions: Dict[str, Any] = node.get("conditions", {})
         for field, value in conditions.items():
-            lookup, processed_value = self._process_field_lookup(field, value)
-            q &= Q(**{lookup: processed_value})
+            q &= Q(**{field: value})
 
         # Handle Q list format for OR conditions
         q_objects = node.get("Q", [])
@@ -114,8 +78,7 @@ class QueryASTVisitor:
             for q_condition in q_objects:
                 q_part = Q()
                 for field, value in q_condition.items():
-                    lookup, processed_value = self._process_field_lookup(field, value)
-                    q_part &= Q(**{lookup: processed_value})
+                    q_part &= Q(**{field: value})
                 if q_combined is None:
                     q_combined = q_part
                 else:
@@ -142,68 +105,10 @@ class QueryASTVisitor:
         """Process an OR node by combining all children with OR."""
         return self._combine(node.get("children", []), lambda a, b: a | b)
 
-    def visit_search(self, node: Dict[str, Any]) -> Q:
-        """
-        Process a search node.
-        Since search is applied as a query modifier in the AST parser and via the ORM adapter,
-        simply return an empty Q object.
-        """
-        return Q()
-
 
 # -------------------------------------------------------------------
 # Django ORM Adapter (implements our generic engine/provider)
 # -------------------------------------------------------------------
-def check_object_permissions(
-    req: Any,
-    instance: Any,
-    action: ActionType,
-    permissions: List[Type[AbstractPermission]],
-    model: Type,
-) -> None:
-    """
-    Check if the given action is allowed on the instance using each permission class.
-    Raises PermissionDenied if none of the permissions grant access.
-    """
-    allowed_obj_actions = set()
-    for perm_cls in permissions:
-        perm = perm_cls()
-        allowed_obj_actions |= perm.allowed_object_actions(req, instance, model)
-    if action not in allowed_obj_actions:
-        raise PermissionDenied(
-            f"Object-level permission denied: Missing {action.value} on object {instance}"
-        )
-
-
-def check_bulk_permissions(
-    req: Any,
-    items: models.QuerySet,
-    action: ActionType,
-    permissions: List[Type[AbstractPermission]],
-    model: Type,
-) -> None:
-    """
-    If the queryset contains one or fewer items, perform individual permission checks.
-    Otherwise, loop over permission classes and call bulk_operation_allowed.
-    If none allow the bulk operation, raise PermissionDenied.
-    """
-    if items.count() <= 1:
-        for instance in items:
-            check_object_permissions(req, instance, action, permissions, model)
-    else:
-        allowed = False
-        for perm_cls in permissions:
-            perm = perm_cls()
-            # Assume bulk_operation_allowed is defined on all permission classes.
-            if perm.bulk_operation_allowed(req, items, action, model):
-                allowed = True
-                break
-        if not allowed:
-            raise PermissionDenied(
-                f"Bulk {action.value} operation not permitted on queryset"
-            )
-
-
 class DjangoORMAdapter(AbstractORMProvider):
     def __init__(self) -> None:
         # No instance state - completely stateless
@@ -256,121 +161,11 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         return queryset.exclude(q_object)
 
-    def create(
-        self,
-        model: Type[models.Model],
-        data: Dict[str, Any],
-        serializer,
-        req,
-        fields_map,
-    ) -> models.Model:
-        """Create a new model instance."""
-        # Use the provided serializer's save method
-        return serializer.save(
-            model=model,
-            data=data,
-            instance=None,
-            partial=False,
-            request=req,
-            fields_map=fields_map,
-        )
-
-    def bulk_create(
-        self,
-        model: Type[models.Model],
-        data_list: List[Dict[str, Any]],
-        serializer,
-        req,
-        fields_map,
-    ) -> List[models.Model]:
-        """Create multiple model instances using Django's bulk_create."""
-        # Create instances without saving to DB yet
-        instances = [model(**data) for data in data_list]
-
-        # Use Django's bulk_create for efficiency
-        created_instances = model.objects.bulk_create(instances)
-
-        # Emit bulk create event for cache invalidation and frontend notification
-        config.event_bus.emit_bulk_event(ActionType.BULK_CREATE, created_instances)
-
-        return created_instances
-
-    def update_instance(
-        self,
-        model: Type[models.Model],
-        ast: Dict[str, Any],
-        req: RequestType,
-        permissions: List[Type[AbstractPermission]],
-        serializer,
-        fields_map,
-    ) -> models.Model:
-        """Update a single model instance."""
-        data = ast.get("data", {})
-        filter_ast = ast.get("filter")
-        if not filter_ast:
-            raise ValueError("Filter is required for update_instance operation")
-
-        visitor = QueryASTVisitor(model)
-        q_obj = visitor.visit(filter_ast)
-        instance = model.objects.get(q_obj)
-
-        # Check object-level permissions for update.
-        check_object_permissions(req, instance, ActionType.UPDATE, permissions, model)
-
-        # Use the provided serializer's save method for the update
-        return serializer.save(
-            model=model,
-            data=data,
-            instance=instance,
-            partial=True,
-            request=req,
-            fields_map=fields_map,
-        )
-
-    def delete_instance(
-        self,
-        model: Type[models.Model],
-        ast: Dict[str, Any],
-        req: RequestType,
-        permissions: List[Type[AbstractPermission]],
-    ) -> int:
-        """Delete a single model instance."""
-        filter_ast = ast.get("filter")
-        if not filter_ast:
-            raise ValueError("Filter is required for delete_instance operation")
-
-        visitor = QueryASTVisitor(model)
-        q_obj = visitor.visit(filter_ast)
-        instance = model.objects.get(q_obj)
-
-        # Check object-level permissions.
-        check_object_permissions(req, instance, ActionType.DELETE, permissions, model)
-
-        instance.delete()
-        return 1
-
-    @staticmethod
-    def get_pk_list(queryset: QuerySet) -> List[Any]:
-        """
-        Gets a list of primary key values from a QuerySet, handling different PK field names.
-
-        Args:
-            queryset: The Django QuerySet.
-
-        Returns:
-            A list of primary key values.
-        """
-        model = queryset.model
-        pk_field_name = model._meta.pk.name  # Dynamically get the PK field name
-        pk_list = queryset.values_list(pk_field_name, flat=True)
-        return list(pk_list)
-
     def update(
         self,
         queryset: QuerySet,
         node: Dict[str, Any],
         req: RequestType,
-        permissions: List[Type[AbstractPermission]],
         readable_fields: Set[str] = None,
     ) -> Tuple[int, List[Dict[str, Union[int, str]]]]:
         """
@@ -389,7 +184,8 @@ class DjangoORMAdapter(AbstractORMProvider):
             qs = qs.filter(q_obj)
 
         # Check bulk update permissions
-        check_bulk_permissions(req, qs, ActionType.UPDATE, permissions, model)
+        from statezero.adaptors.django.permission_utils import check_bulk_permissions
+        check_bulk_permissions(req, qs, ActionType.UPDATE, model)
 
         # Get the fields to update (keys from data plus primary key)
         update_fields = list(data.keys())
@@ -500,7 +296,6 @@ class DjangoORMAdapter(AbstractORMProvider):
         queryset: QuerySet,
         node: Dict[str, Any],
         req: RequestType,
-        permissions: List[Type[AbstractPermission]],
     ) -> Tuple[int, Tuple[int]]:
         """Delete multiple model instances."""
         model = queryset.model
@@ -512,7 +307,8 @@ class DjangoORMAdapter(AbstractORMProvider):
             q_obj = visitor.visit(filter_ast)
             qs = qs.filter(q_obj)
 
-        check_bulk_permissions(req, qs, ActionType.DELETE, permissions, model)
+        from statezero.adaptors.django.permission_utils import check_bulk_permissions
+        check_bulk_permissions(req, qs, ActionType.DELETE, model)
 
         # TODO: this should be a values list, but we need to check the bulk event emitter code
         pk_field_name = model._meta.pk.name
@@ -544,300 +340,12 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         return deleted, serializer.data
 
-    def get(
-        self,
-        queryset: QuerySet,
-        node: Dict[str, Any],
-        req: RequestType,
-        permissions: List[Type[AbstractPermission]],
-    ) -> models.Model:
-        """
-        Retrieve a single model instance with permission checks.
-
-        Args:
-            queryset: The base queryset to search in
-            node: The query AST node
-            req: The request object
-            permissions: List of permission classes to check
-
-        Returns:
-            A single model instance
-
-        Raises:
-            NotFound: If no object matches the query
-            PermissionDenied: If the user doesn't have permission to read the object
-            MultipleObjectsReturned: If multiple objects match the query
-        """
-        model = queryset.model
-        filter_ast: Optional[Dict[str, Any]] = node.get("filter")
-
-        if filter_ast:
-            visitor = QueryASTVisitor(model)
-            q_obj = visitor.visit(filter_ast)
-            try:
-                instance = queryset.filter(q_obj).get()
-            except model.DoesNotExist:
-                raise NotFound(f"No {model.__name__} matches the given query.")
-            except model.MultipleObjectsReturned:
-                raise MultipleObjectsReturned(
-                    f"Multiple {model.__name__} instances match the given query."
-                )
-        else:
-            try:
-                instance = queryset.get()
-            except model.DoesNotExist:
-                raise NotFound(f"No {model.__name__} matches the given query.")
-            except model.MultipleObjectsReturned:
-                raise MultipleObjectsReturned(
-                    f"Multiple {model.__name__} instances match the given query."
-                )
-
-        # Check object-level permissions for reading
-        check_object_permissions(req, instance, ActionType.READ, permissions, model)
-
-        return instance
-
-    def _normalize_foreign_keys(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        For each key in data, if the value is a model instance, replace it with its primary key.
-        """
-        normalized = {}
-        for key, value in data.items():
-            # Check for model instance by looking for the _meta attribute.
-            if hasattr(value, "_meta"):
-                normalized[key] = value.pk
-            else:
-                normalized[key] = value
-        return normalized
-
-    def get_or_create(
-        self,
-        queryset: QuerySet,
-        node: Dict[str, Any],
-        serializer,
-        req: RequestType,
-        permissions: List[Type[AbstractPermission]],
-        create_fields_map,
-    ) -> Tuple[models.Model, bool]:
-        """
-        Get an existing object, or create it if it doesn't exist, with object-level permission checks.
-        """
-        model = queryset.model
-        lookup = node.get("lookup", {})
-        defaults = node.get("defaults", {})
-
-        # Merge lookup and defaults and normalize foreign key values
-        merged_data = self._normalize_foreign_keys({**lookup, **defaults})
-
-        # Check if an instance exists
-        try:
-            instance = queryset.get(**lookup)
-            created = False
-
-            # Check object-level permission to read the existing object
-            check_object_permissions(req, instance, ActionType.READ, permissions, model)
-        except model.DoesNotExist:
-            # Object doesn't exist, we'll create it
-            instance = None
-            created = True
-        except model.MultipleObjectsReturned as e:
-            raise MultipleObjectsReturned(
-                f"Multiple {model.__name__} instances match the given lookup parameters"
-            )
-
-        # If the instance exists, we don't need to update it, just return it
-        if not created:
-            return instance, created
-
-        # Only create a new instance if it doesn't exist
-        instance = serializer.save(
-            model=model,
-            data=merged_data,
-            instance=None,  # No instance for creation
-            partial=False,  # Not a partial update for creation
-            request=req,
-            fields_map=create_fields_map,
-        )
-
-        return instance, created
-
-    def update_or_create(
-        self,
-        queryset: QuerySet,
-        node: Dict[str, Any],
-        req: RequestType,
-        serializer,
-        permissions: List[Type[AbstractPermission]],
-        update_fields_map,
-        create_fields_map,
-    ) -> Tuple[models.Model, bool]:
-        """
-        Update an existing object, or create it if it doesn't exist, with object-level permission checks.
-        """
-        model = queryset.model
-        lookup = node.get("lookup", {})
-        defaults = node.get("defaults", {})
-
-        # Merge lookup and defaults and normalize foreign key values
-        merged_data = self._normalize_foreign_keys({**lookup, **defaults})
-
-        # Determine if the instance exists
-        try:
-            instance = queryset.get(**lookup)
-            created = False
-
-            # Perform object-level permission check before update
-            check_object_permissions(
-                req, instance, ActionType.UPDATE, permissions, model
-            )
-        except model.DoesNotExist:
-            # Object doesn't exist, we'll create it
-            instance = None
-            created = True
-        except model.MultipleObjectsReturned as e:
-            raise MultipleObjectsReturned(
-                f"Multiple {model.__name__} instances match the given lookup parameters"
-            )
-
-        fields_map_to_use = create_fields_map if created else update_fields_map
-
-        # Use the serializer's save method, which handles validation and saving
-        instance = serializer.save(
-            model=model,
-            data=merged_data,
-            instance=instance,
-            request=req,
-            fields_map=fields_map_to_use,
-        )
-
-        return instance, created
-
-    def first(self, queryset: QuerySet) -> Optional[models.Model]:
-        """Return the first record from the queryset."""
-        return queryset.first()
-
-    def last(self, queryset: QuerySet) -> Optional[models.Model]:
-        """Return the last record from the queryset."""
-        return queryset.last()
-
-    def exists(self, queryset: QuerySet) -> bool:
-        """Return True if the queryset has any results; otherwise False."""
-        return queryset.exists()
-
-    def aggregate(
-        self, queryset: QuerySet, agg_list: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Perform aggregation operations on the queryset."""
-        agg_expressions = {}
-        for agg in agg_list:
-            func = agg.get("function")
-            field = agg.get("field")
-            alias = agg.get("alias")
-            if func == "count":
-                agg_expressions[alias] = Count(field)
-            elif func == "sum":
-                agg_expressions[alias] = Sum(field)
-            elif func == "avg":
-                agg_expressions[alias] = Avg(field)
-            elif func == "min":
-                agg_expressions[alias] = Min(field)
-            elif func == "max":
-                agg_expressions[alias] = Max(field)
-            else:
-                raise ValidationError(f"Unknown aggregate function: {func}")
-        result = queryset.aggregate(**agg_expressions)
-        return {"data": result, "metadata": {"aggregated": True}}
-
-    def count(self, queryset: QuerySet, field: str) -> int:
-        """Count the number of records for the given field."""
-        result = queryset.aggregate(result=Count(field))["result"]
-        return int(result) if result is not None else 0
-
-    def sum(self, queryset: QuerySet, field: str) -> Optional[Union[int, float]]:
-        """Sum the values of the given field."""
-        return queryset.aggregate(result=Sum(field))["result"]
-
-    def avg(self, queryset: QuerySet, field: str) -> Optional[float]:
-        """Calculate the average of the given field."""
-        result = queryset.aggregate(result=Avg(field))["result"]
-        return float(result) if result is not None else None
-
-    def min(self, queryset: QuerySet, field: str) -> Optional[Union[int, float, str]]:
-        """Find the minimum value for the given field."""
-        return queryset.aggregate(result=Min(field))["result"]
-
-    def max(self, queryset: QuerySet, field: str) -> Optional[Union[int, float, str]]:
-        """Find the maximum value for the given field."""
-        return queryset.aggregate(result=Max(field))["result"]
-
-    def order_by(self, queryset: QuerySet, order_list: List[str]) -> QuerySet:
-        """Order the queryset based on a list of fields."""
-        return queryset.order_by(*order_list)
-
-    def select_related(self, queryset: QuerySet, related_fields: List[str]) -> QuerySet:
-        """Optimize the queryset by eager loading the given related fields."""
-        return queryset.select_related(*related_fields)
-
-    def prefetch_related(
-        self, queryset: QuerySet, related_fields: List[str]
-    ) -> QuerySet:
-        """Optimize the queryset by prefetching the given related fields."""
-        return queryset.prefetch_related(*related_fields)
-
-    def select_fields(self, queryset: QuerySet, fields: List[str]) -> QuerySet:
-        """Select only specific fields from the queryset."""
-        return queryset.values(*fields)
-
-    def fetch_list(
-        self,
-        queryset: QuerySet,
-        offset: Optional[int] = None,
-        limit: Optional[int] = None,
-        req: RequestType = None,
-        permissions: List[Type[AbstractPermission]] = None,
-    ) -> QuerySet:
-        """
-        Fetch a list of model instances with bulk permission checks.
-
-        Args:
-            queryset: The queryset to paginate
-            offset: The offset for pagination
-            limit: The limit for pagination
-            req: The request object
-            permissions: List of permission classes to check
-
-        Returns:
-            A sliced queryset after permission checks
-        """
-        model = queryset.model
-        offset = offset or 0
-
-        # FIXED: Perform bulk permission checks BEFORE slicing
-        if req is not None and permissions:
-            # Use the existing bulk permission check function on the unsliced queryset
-            check_bulk_permissions(req, queryset, ActionType.READ, permissions, model)
-
-        # THEN apply pagination/slicing
-        if limit is None:
-            qs = queryset[offset:]
-        else:
-            qs = queryset[offset : offset + limit]
-
-        return qs
-
-    def _build_conditions(self, model: Type[models.Model], conditions: dict) -> Q:
-        """Build Q conditions from a dictionary."""
-        visitor = QueryASTVisitor(model)
-        fake_ast = {"type": "filter", "conditions": conditions}
-        return visitor.visit(fake_ast)
-
     # --- AbstractORMProvider Methods ---
     def get_queryset(
         self,
         req: RequestType,
         model: Type,
         initial_ast: Dict[str, Any],
-        registered_permissions: List[Type[AbstractPermission]],
     ) -> Any:
         """Assemble and return the base QuerySet for the given model."""
         return model.objects.all()
@@ -1103,56 +611,29 @@ class DjangoORMAdapter(AbstractORMProvider):
         validate_type: str,
         partial: bool,
         request: RequestType,
-        permissions: List[Type[AbstractPermission]],
         serializer,
     ) -> bool:
         """
         Fast validation without database queries.
         Only checks model-level permissions and serializer validation.
-
-        Args:
-            model: Django model class
-            data: Data to validate
-            validate_type: 'create' or 'update'
-            partial: Whether to allow partial validation (only validate provided fields)
-            request: Request object
-            permissions: Permission classes
-            serializer: Serializer instance
-
-        Returns:
-            bool: True if validation passes
-
-        Raises:
-            ValidationError: For serializer validation failures
-            PermissionDenied: For permission failures
         """
+        from statezero.adaptors.django.permission_utils import has_operation_permission, resolve_permission_fields
+
         # Basic model-level permission check (no DB query)
-        required_action = (
-            ActionType.CREATE if validate_type == "create" else ActionType.UPDATE
-        )
-
-        has_permission = False
-        for permission_class in permissions:
-            perm_instance = permission_class()
-            allowed_actions = perm_instance.allowed_actions(request, model)
-            if required_action in allowed_actions:
-                has_permission = True
-                break
-
-        if not has_permission:
-            # Let StateZero exception handling deal with this
+        model_config = registry.get_config(model)
+        if not has_operation_permission(model_config, request, validate_type):
             raise PermissionDenied(f"{validate_type.title()} not allowed")
 
-        # Get field permissions
-        allowed_fields = self._get_allowed_fields(
-            model, permissions, request, validate_type
-        )
+        # Get field permissions (inlined from _get_allowed_fields)
+        all_fields = self.get_fields(model)
+        operation_type = "create" if validate_type == "create" else "update"
+        allowed_fields = resolve_permission_fields(model_config, request, operation_type, all_fields)
 
         # Filter data to only allowed fields
         filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
 
         # Create minimal fields map for serializer
-        model_name = config.orm_provider.get_model_name(model)
+        model_name = self.get_model_name(model)
         fields_map = {model_name: allowed_fields}
 
         # Validate using serializer with partial flag - let ValidationError bubble up naturally
@@ -1166,31 +647,3 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         # Only return success case - exceptions handle failures
         return True
-
-    def _get_allowed_fields(
-        self,
-        model: Type[models.Model],
-        permissions: List[Type[AbstractPermission]],
-        request: RequestType,
-        validate_type: str,
-    ) -> Set[str]:
-        """Helper to get allowed fields based on validate_type."""
-        allowed_fields = set()
-
-        for permission_class in permissions:
-            perm_instance = permission_class()
-
-            if validate_type == "create":
-                create_fields = perm_instance.create_fields(request, model)
-                if create_fields == "__all__":
-                    return config.orm_provider.get_fields(model)
-                elif isinstance(create_fields, set):
-                    allowed_fields.update(create_fields)
-            else:  # update
-                editable_fields = perm_instance.editable_fields(request, model)
-                if editable_fields == "__all__":
-                    return config.orm_provider.get_fields(model)
-                elif isinstance(editable_fields, set):
-                    allowed_fields.update(editable_fields)
-
-        return allowed_fields

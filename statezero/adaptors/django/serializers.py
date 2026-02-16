@@ -15,7 +15,7 @@ from statezero.adaptors.django.config import config, registry
 from statezero.core.interfaces import AbstractDataSerializer, AbstractQueryOptimizer
 from statezero.core.types import RequestType
 from statezero.adaptors.django.helpers import collect_from_queryset
-from statezero.core.hook_checks import _check_pre_hook_result, _check_post_hook_result
+from statezero.adaptors.django.hook_checks import _check_pre_hook_result, _check_post_hook_result
 
 logger = logging.getLogger(__name__)
 

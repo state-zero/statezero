@@ -9,7 +9,7 @@ from django.core.cache import cache
 from django.test import TestCase, RequestFactory
 
 from statezero.core.context_storage import current_canonical_id
-from statezero.core.query_cache import (
+from statezero.adaptors.django.query_cache import (
     _get_cache_key,
     _get_sql_from_queryset,
     cache_query_result,
@@ -1217,7 +1217,7 @@ class QueryCacheIntegrationTest(TransactionTestCase):
 
         # Log the actual SQL for first request
         from tests.django_app.models import DummyModel
-        from statezero.core.query_cache import _get_sql_from_queryset
+        from statezero.adaptors.django.query_cache import _get_sql_from_queryset
         qs1 = DummyModel.objects.all().order_by("name")
         sql1_data = _get_sql_from_queryset(qs1)
         print(f"\n=== First request (order_by name ASC) ===")

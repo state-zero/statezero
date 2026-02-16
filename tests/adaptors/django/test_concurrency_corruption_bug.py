@@ -1,7 +1,7 @@
 from django.test import TestCase, RequestFactory
 from unittest.mock import patch
 
-from statezero.core.process_request import RequestProcessor
+from statezero.adaptors.django.process_request import RequestProcessor
 from statezero.adaptors.django.config import config, registry
 from statezero.core.config import ModelConfig
 from statezero.adaptors.django.permissions import AllowAllPermission

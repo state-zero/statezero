@@ -3,9 +3,9 @@ import unittest
 import networkx as nx
 from django.test import TestCase
 
-from statezero.adaptors.django.config import registry
+from statezero.adaptors.django.config import config, registry
 from statezero.adaptors.django.orm import DjangoORMAdapter
-from statezero.core.ast_validator import ASTValidator
+from statezero.adaptors.django.ast_parser import ASTParser
 from statezero.core.config import ModelConfig
 from statezero.core.exceptions import PermissionDenied
 from statezero.core.interfaces import AbstractPermission
@@ -42,12 +42,12 @@ class DummyPermission(AbstractPermission):
         elif model == DeepModelLevel3:
             return {"name"}
         elif model == ComprehensiveModel:
-            return {"name", "value"}
+            return {"char_field", "int_field"}
         return set()
 
     def editable_fields(self, request, model):
         return self.visible_fields(request, model)
-    
+
     def create_fields(self, request, model):
         return self.editable_fields(request, model)
 
@@ -74,7 +74,7 @@ class DenyReadPermission(AbstractPermission):
 
     def editable_fields(self, request, model):
         return self.visible_fields(request, model)
-    
+
     def create_fields(self, request, model):
         return self.editable_fields(request, model)
 
@@ -106,7 +106,7 @@ class MixedPermission(AbstractPermission):
 
     def editable_fields(self, request, model):
         return self.visible_fields(request, model)
-    
+
     def create_fields(self, request, model):
         return self.editable_fields(request, model)
 
@@ -134,17 +134,33 @@ class PartialPermission(AbstractPermission):
 
     def editable_fields(self, request, model):
         return self.visible_fields(request, model)
-    
+
     def create_fields(self, request, model):
         return self.editable_fields(request, model)
 
 
+def _make_parser(model, model_graph=None):
+    """Helper to create an ASTParser instance for validation-only tests."""
+    adapter = DjangoORMAdapter()
+    graph = model_graph or adapter.build_model_graph(model)
+    return ASTParser(
+        engine=adapter,
+        serializer=config.serializer,
+        model=model,
+        config=config,
+        registry=registry,
+        base_queryset=model.objects.none(),
+        serializer_options={},
+        request={},
+        model_graph=graph,
+    )
+
+
 # -------------------------------------------------------------------------
-# Extended tests for ASTValidator.
+# Extended tests for ASTParser validation (formerly ASTValidator).
 # -------------------------------------------------------------------------
 class TestASTValidator(TestCase):
     def setUp(self):
-        # Create an instance of the DjangoORMAdapter.
         self.adapter = DjangoORMAdapter()
 
     def register_models(self, permission_class):
@@ -175,112 +191,61 @@ class TestASTValidator(TestCase):
         )
 
     def test_dummy_model_valid(self):
-        # Use DummyPermission.
         self.register_models(DummyPermission)
-        dummy_graph = self.adapter.build_model_graph(DummyModel)
-        validator = ASTValidator(
-            model_graph=dummy_graph,
-            get_model_name=self.adapter.get_model_name,
-            registry=registry,
-            request={},  # dummy request object
-            get_model_by_name=self.adapter.get_model_by_name,
-        )
-        # Valid AST for DummyModel:
-        # Requesting "name" (DummyModel.name) and nested "related__name" (DummyRelatedModel.name).
+        parser = _make_parser(DummyModel)
         ast = {"serializerOptions": {"fields": ["name", "related__name"]}}
         try:
-            validator.validate_fields(ast, DummyModel)
+            parser.validate_fields(ast, DummyModel)
         except PermissionDenied:
             self.fail(
                 "PermissionDenied was raised unexpectedly for valid DummyModel fields."
             )
 
     def test_dummy_model_invalid_field(self):
-        # Use DummyPermission.
         self.register_models(DummyPermission)
-        dummy_graph = self.adapter.build_model_graph(DummyModel)
-        validator = ASTValidator(
-            model_graph=dummy_graph,
-            get_model_name=self.adapter.get_model_name,
-            registry=registry,
-            request={},
-            get_model_by_name=self.adapter.get_model_by_name,
-        )
-        # Invalid AST: "related__nonexistent" is not allowed.
+        parser = _make_parser(DummyModel)
         ast = {"serializerOptions": {"fields": ["name", "related__nonexistent"]}}
         with self.assertRaises(PermissionDenied):
-            validator.validate_fields(ast, DummyModel)
+            parser.validate_fields(ast, DummyModel)
 
     def test_deep_model_valid(self):
-        # Use DummyPermission.
         self.register_models(DummyPermission)
-        deep_graph = self.adapter.build_model_graph(DeepModelLevel1)
-        validator = ASTValidator(
-            model_graph=deep_graph,
-            get_model_name=self.adapter.get_model_name,
-            registry=registry,
-            request={},
-            get_model_by_name=self.adapter.get_model_by_name,
-        )
-        # Valid AST for DeepModelLevel1:
-        # "level2__level3__name" should be allowed (DeepModelLevel1 -> DeepModelLevel2 -> DeepModelLevel3)
-        # and "comprehensive_models__name" should be allowed (comprehensive_models points to DummyModel).
+        parser = _make_parser(DeepModelLevel1)
         ast = {
             "serializerOptions": {
-                "fields": ["name", "level2__level3__name", "comprehensive_models__name"]
+                "fields": ["name", "level2__level3__name", "comprehensive_models__char_field"]
             }
         }
         try:
-            validator.validate_fields(ast, DeepModelLevel1)
+            parser.validate_fields(ast, DeepModelLevel1)
         except PermissionDenied:
             self.fail(
                 "PermissionDenied was raised unexpectedly for valid deep model fields."
             )
 
     def test_deep_model_invalid_intermediate_field(self):
-        # Use DummyPermission.
         self.register_models(DummyPermission)
-        deep_graph = self.adapter.build_model_graph(DeepModelLevel1)
-        validator = ASTValidator(
-            model_graph=deep_graph,
-            get_model_name=self.adapter.get_model_name,
-            registry=registry,
-            request={},
-            get_model_by_name=self.adapter.get_model_by_name,
-        )
-        # Invalid AST: "level2__nonexistent" should fail.
+        parser = _make_parser(DeepModelLevel1)
         ast = {"serializerOptions": {"fields": ["name", "level2__nonexistent"]}}
         with self.assertRaises(PermissionDenied):
-            validator.validate_fields(ast, DeepModelLevel1)
+            parser.validate_fields(ast, DeepModelLevel1)
 
-        # Also, requesting a non-permitted field from comprehensive_models.
         ast2 = {
             "serializerOptions": {
                 "fields": ["name", "comprehensive_models__nonexistent"]
             }
         }
         with self.assertRaises(PermissionDenied):
-            validator.validate_fields(ast2, DeepModelLevel1)
+            parser.validate_fields(ast2, DeepModelLevel1)
 
     def test_no_read_permission_root(self):
-        # Use DenyReadPermission so that READ is not allowed on the root model.
         self.register_models(DenyReadPermission)
-        dummy_graph = self.adapter.build_model_graph(DummyModel)
-        validator = ASTValidator(
-            model_graph=dummy_graph,
-            get_model_name=self.adapter.get_model_name,
-            registry=registry,
-            request={},
-            get_model_by_name=self.adapter.get_model_by_name,
-        )
-        # Even though visible_fields returns some fields, without READ the AST should be rejected.
+        parser = _make_parser(DummyModel)
         ast = {"serializerOptions": {"fields": ["name"]}}
         with self.assertRaises(PermissionDenied):
-            validator.validate_fields(ast, DummyModel)
+            parser.validate_fields(ast, DummyModel)
 
     def test_intermediate_no_read_permission(self):
-        # Use MixedPermission:
-        # DummyModel will have READ, but DummyRelatedModel will not.
         registry._models_config.clear()
         registry.register(
             DummyModel, ModelConfig(DummyModel, permissions=[MixedPermission])
@@ -289,7 +254,6 @@ class TestASTValidator(TestCase):
             DummyRelatedModel,
             ModelConfig(DummyRelatedModel, permissions=[MixedPermission]),
         )
-        # For the other models, we can register with DummyPermission.
         registry.register(
             DeepModelLevel1, ModelConfig(DeepModelLevel1, permissions=[DummyPermission])
         )
@@ -304,35 +268,17 @@ class TestASTValidator(TestCase):
             ModelConfig(ComprehensiveModel, permissions=[DummyPermission]),
         )
 
-        dummy_graph = self.adapter.build_model_graph(DummyModel)
-        validator = ASTValidator(
-            model_graph=dummy_graph,
-            get_model_name=self.adapter.get_model_name,
-            registry=registry,
-            request={},
-            get_model_by_name=self.adapter.get_model_by_name,
-        )
-        # Even though DummyModel has READ permission, its related model (DummyRelatedModel)
-        # does not. So "related__name" should raise a PermissionDenied.
+        parser = _make_parser(DummyModel)
         ast = {"serializerOptions": {"fields": ["name", "related__name"]}}
         with self.assertRaises(PermissionDenied):
-            validator.validate_fields(ast, DummyModel)
+            parser.validate_fields(ast, DummyModel)
 
     def test_nested_field_not_visible(self):
-        # Use PartialPermission so that even with READ permission, some fields are not visible.
         self.register_models(PartialPermission)
-        dummy_graph = self.adapter.build_model_graph(DummyModel)
-        validator = ASTValidator(
-            model_graph=dummy_graph,
-            get_model_name=self.adapter.get_model_name,
-            registry=registry,
-            request={},
-            get_model_by_name=self.adapter.get_model_by_name,
-        )
-        # "value" is not included in PartialPermission.visible_fields for DummyModel.
+        parser = _make_parser(DummyModel)
         ast = {"serializerOptions": {"fields": ["name", "value"]}}
         with self.assertRaises(PermissionDenied):
-            validator.validate_fields(ast, DummyModel)
+            parser.validate_fields(ast, DummyModel)
 
 
 if __name__ == "__main__":

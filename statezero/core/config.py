@@ -2,19 +2,29 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Literal
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Literal, TYPE_CHECKING
+import importlib
 import networkx as nx
 import warnings
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 
 from statezero.core.classes import AdditionalField
-from statezero.core.event_bus import EventBus
 from statezero.core.interfaces import (AbstractCustomQueryset,
                                        AbstractDataSerializer,
                                        AbstractORMProvider, AbstractPermission,
                                        AbstractSchemaGenerator, AbstractSearchProvider, AbstractQueryOptimizer)
 from statezero.core.types import ORMField, ORMQuerySet, ActionType
+
+if TYPE_CHECKING:
+    from statezero.adaptors.django.event_bus import EventBus
+
+
+def _import_string(dotted_path: str):
+    """Import a class/function from a dotted path string (stdlib replacement for django.utils.module_loading.import_string)."""
+    module_path, _, cls_name = dotted_path.rpartition('.')
+    module = importlib.import_module(module_path)
+    return getattr(module, cls_name)
 
 # Valid values for extra_fields behavior
 EXTRA_FIELDS_IGNORE = "ignore"
@@ -153,7 +163,7 @@ class AppConfig(ABC):
     custom_serializers: Dict[ORMField, Callable] = {}  # type:ignore
     schema_overrides: Dict[ORMField, dict] = {}  # type:ignore
 
-    event_bus: EventBus = None
+    event_bus: Optional["EventBus"] = None
     default_limit: Optional[int] = None
     orm_provider: AbstractORMProvider = None
     search_provider: AbstractSearchProvider = None
@@ -351,10 +361,9 @@ class ModelConfig:
         resolved = []
         for perm in self._permissions:
             if isinstance(perm, str):
-                from django.utils.module_loading import import_string
                 try:
-                    perm_class = import_string(perm)
-                except ImportError:
+                    perm_class = _import_string(perm)
+                except (ImportError, AttributeError):
                     raise ImportError(f"Could not import permission class: {perm}")
             else:
                 perm_class = perm
