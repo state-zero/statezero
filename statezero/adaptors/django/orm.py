@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import networkx as nx
 from django.apps import apps
+from django.core.exceptions import FieldDoesNotExist
 from django.db import models, transaction
 from django.db.models import Avg, Count, Max, Min, Q, Sum, QuerySet
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
@@ -399,7 +400,17 @@ class DjangoORMAdapter(AbstractORMProvider):
         from statezero.adaptors.django.f_handler import FExpressionHandler
 
         for key, value in data.items():
+            # Reject F expressions on M2M fields — they live in a join table, not a column
             if isinstance(value, dict) and value.get("__f_expr"):
+                try:
+                    field_obj = model._meta.get_field(key)
+                    if field_obj.many_to_many:
+                        raise ValidationError(
+                            f"F expressions cannot be used on ManyToMany field '{key}'"
+                        )
+                except FieldDoesNotExist:
+                    pass
+
                 # It's an F expression - check permissions and process it
                 try:
                     # Extract field names referenced in the F expression
@@ -425,13 +436,39 @@ class DjangoORMAdapter(AbstractORMProvider):
                 # Regular value, use as-is
                 processed_data[key] = value
 
-        # Execute the update with processed expressions
-        rows_updated = qs.update(**processed_data)
+        # Separate M2M fields from regular fields since qs.update() can't handle M2M
+        m2m_data = {}
+        regular_data = {}
+        for key, value in processed_data.items():
+            try:
+                field_obj = model._meta.get_field(key)
+                if field_obj.many_to_many:
+                    m2m_data[key] = value
+                else:
+                    regular_data[key] = value
+            except Exception:
+                regular_data[key] = value
+
+        # Execute the update with regular (non-M2M) fields
+        rows_updated = 0
+        if regular_data:
+            rows_updated = qs.update(**regular_data)
+
+        # Handle M2M fields by setting them on each instance
+        if m2m_data:
+            instances = list(qs)
+            if not rows_updated:
+                rows_updated = len(instances)
+            for instance in instances:
+                for field_name, value in m2m_data.items():
+                    getattr(instance, field_name).set(value)
 
         # Expand update_fields to include all DB fields for custom serializers (e.g., MoneyField)
         # This ensures .only() fetches companion fields like price_currency for MoneyField
+        # Remove M2M fields from update_fields since .only() doesn't support them
+        non_m2m_update_fields = [f for f in update_fields if f not in m2m_data]
         expanded_update_fields = set()
-        for field_name in update_fields:
+        for field_name in non_m2m_update_fields:
             try:
                 field_obj = model._meta.get_field(field_name)
                 if not field_obj.is_relation:
@@ -448,7 +485,10 @@ class DjangoORMAdapter(AbstractORMProvider):
                 expanded_update_fields.add(field_name)
 
         # After update, fetch the updated instances
-        updated_instances = list(qs.only(*expanded_update_fields))
+        if expanded_update_fields:
+            updated_instances = list(qs.only(*expanded_update_fields))
+        else:
+            updated_instances = list(qs)
 
         # Triggers cache invalidation and broadcast to the frontend
         config.event_bus.emit_bulk_event(ActionType.BULK_UPDATE, updated_instances)
