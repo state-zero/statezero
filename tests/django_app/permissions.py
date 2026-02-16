@@ -281,3 +281,35 @@ class FilterInBulkPermission(AbstractPermission):
 
     def get_permission_group_identifier(self, request: RequestType, model: ORMModel) -> str:
         return "filter_in_bulk"
+
+
+class HideSecretPermission(AbstractPermission):
+    """Non-admins cannot see or write the 'secret' field.
+    Used for testing nested filter field permission enforcement."""
+
+    def filter_queryset(self, request: RequestType, queryset: Any) -> Any:
+        return queryset
+
+    def allowed_actions(self, request: RequestType, model: Type[ORMModel]) -> Set[ActionType]:
+        return {
+            ActionType.CREATE, ActionType.READ, ActionType.UPDATE,
+            ActionType.DELETE, ActionType.BULK_CREATE,
+        }
+
+    def allowed_object_actions(self, request, obj, model: Type[ORMModel]) -> Set[ActionType]:
+        return self.allowed_actions(request, model)
+
+    def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
+        if hasattr(request, "user") and request.user.is_superuser:
+            return "__all__"
+        return {"id", "name", "public_info", "children"}
+
+    def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
+        if hasattr(request, "user") and request.user.is_superuser:
+            return "__all__"
+        return {"name", "public_info"}
+
+    def create_fields(self, request: RequestType, model: Type) -> Set[str]:
+        if hasattr(request, "user") and request.user.is_superuser:
+            return "__all__"
+        return {"name", "public_info"}

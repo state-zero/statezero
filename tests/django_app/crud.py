@@ -9,7 +9,8 @@ from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      ProductCategory, Order, OrderItem, FileTest,
                                      RatePlan, DailyRate,
                                      ModelWithRestrictedFields, RestrictedFieldRelatedModel,
-                                     M2MDepthTestLevel1, M2MDepthTestLevel2, M2MDepthTestLevel3)
+                                     M2MDepthTestLevel1, M2MDepthTestLevel2, M2MDepthTestLevel3,
+                                     SecretParent, SecretChild, SecretGrandchild)
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
 from statezero.core.classes import AdditionalField, DisplayMetadata, FieldGroup, FieldDisplayConfig
@@ -346,6 +347,48 @@ registry.register(
         filterable_fields="__all__",
         searchable_fields={"name"},
         ordering_fields={"name"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+# --- Models for testing nested filter field permission exploits ---
+
+registry.register(
+    SecretParent,
+    ModelConfig(
+        model=SecretParent,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["tests.django_app.permissions.HideSecretPermission"],
+        additional_fields=[
+            AdditionalField(
+                name="computed_info",
+                field=models.CharField(max_length=255),
+                title="Computed Info"
+            )
+        ],
+    ),
+)
+
+registry.register(
+    SecretChild,
+    ModelConfig(
+        model=SecretChild,
+        filterable_fields="__all__",
+        searchable_fields={"title"},
+        ordering_fields={"title"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    SecretGrandchild,
+    ModelConfig(
+        model=SecretGrandchild,
+        filterable_fields="__all__",
+        searchable_fields={"label"},
+        ordering_fields={"label"},
         permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )

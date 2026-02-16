@@ -408,6 +408,43 @@ class M2MDepthTestLevel1(models.Model):
         app_label = "django_app"
 
 
+class SecretParent(models.Model):
+    """Parent model with a secret field hidden from non-admins."""
+    name = models.CharField(max_length=100)
+    secret = models.CharField(max_length=100, default="classified")
+    public_info = models.CharField(max_length=100, default="")
+
+    @property
+    def computed_info(self):
+        """Computed field for testing additional-field permission enforcement."""
+        return f"{self.name}: {self.public_info}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class SecretChild(models.Model):
+    """Child that FKs to SecretParent — used to test nested filter exploits."""
+    title = models.CharField(max_length=100)
+    parent = models.ForeignKey(
+        SecretParent, on_delete=models.CASCADE, related_name="children"
+    )
+
+    class Meta:
+        app_label = "django_app"
+
+
+class SecretGrandchild(models.Model):
+    """Grandchild → Child → Parent, for deep nested filter exploit tests."""
+    label = models.CharField(max_length=100)
+    child = models.ForeignKey(
+        SecretChild, on_delete=models.CASCADE, related_name="grandchildren"
+    )
+
+    class Meta:
+        app_label = "django_app"
+
+
 class HistoryTestModel(models.Model):
     """Model for testing django-simple-history integration with StateZero."""
     name = models.CharField(max_length=100)
