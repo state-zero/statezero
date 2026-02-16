@@ -2,6 +2,7 @@ from collections import deque
 from typing import Any, Dict, Optional, Set, Type
 
 from statezero.core.exceptions import PermissionDenied
+from statezero.core.interfaces import AbstractDataSerializer, AbstractORMProvider
 from statezero.core.permission_resolver import PermissionResolver
 from statezero.core.types import ActionType
 
@@ -70,49 +71,33 @@ class SyntheticRequest:
 
 class PermissionBound:
     """
-    Permission-scoped model access API.
+    Permission-scoped model access API (ORM-agnostic core).
 
-    Usage::
-
-        bound = PermissionBound(MyModel, user)
-        bound.objects.filter(city="NYC")
-        bound.objects.create(address="123 Main")
-        instance = bound.objects.first()
-        instance.name              # allowed
-        instance.secret_field      # raises PermissionDenied
-        data = bound.objects.filter(city="NYC").serialize()
+    Requires ``registry``, ``orm_provider``, and ``serializer`` to be
+    provided explicitly.  For Django convenience defaults see
+    ``statezero.adaptors.django.permission_bound.DjangoPermissionBound``.
     """
 
     def __init__(
         self,
         model: Type,
         user,
-        registry=None,
-        orm_provider=None,
+        registry,
+        orm_provider: AbstractORMProvider,
+        serializer: AbstractDataSerializer,
         depth: int = 1,
     ):
-        # Accept either a raw Django User or a DRF Request
+        # Accept either a raw User or a framework Request
         if hasattr(user, "user"):
-            # It's a DRF Request — use as-is
             request = user
         else:
             request = SyntheticRequest(user)
-
-        # Lazy-import Django singletons when not explicitly provided
-        if registry is None or orm_provider is None:
-            from statezero.adaptors.django.config import (
-                config as _config,
-                registry as _registry,
-            )
-            if registry is None:
-                registry = _registry
-            if orm_provider is None:
-                orm_provider = _config.orm_provider
 
         self.model = model
         self.request = request
         self.registry = registry
         self.orm_provider = orm_provider
+        self.serializer = serializer
         self.depth = depth
 
         self.resolver = PermissionResolver(
@@ -146,13 +131,6 @@ class PermissionBound:
         """Return a :class:`PermissionBoundQuerySet` over the scoped queryset."""
         return PermissionBoundQuerySet(self.base_queryset, self)
 
-    @property
-    def serializer_class(self):
-        """Return a DynamicModelSerializer pre-configured for this model."""
-        from statezero.adaptors.django.serializers import DynamicModelSerializer
-
-        return DynamicModelSerializer.for_model(self.model)
-
 
 # ---------------------------------------------------------------------------
 # PermissionBoundQuerySet
@@ -177,7 +155,7 @@ _CHAINABLE = frozenset(
 
 class PermissionBoundQuerySet:
     """
-    Thin wrapper around a Django QuerySet that enforces permissions on
+    Thin wrapper around a QuerySet that enforces permissions on
     every CRUD operation and yields :class:`PermissionBoundInstance` objects.
     """
 
@@ -252,13 +230,13 @@ class PermissionBoundQuerySet:
 
     def serialize(self, many=True):
         """
-        Optimize, then serialize the queryset using the permission-scoped
+        Optimize and serialize the queryset using the permission-scoped
         fields map.  Returns the same format as the HTTP response path.
-        """
-        from statezero.adaptors.django.config import config as _config
 
-        serializer = _config.serializer
-        return serializer.serialize(
+        Optimization (select_related / prefetch_related) is handled
+        internally by the serializer implementation.
+        """
+        return self._bound.serializer.serialize(
             data=self._qs,
             model=self._bound.model,
             depth=self._bound.depth,
@@ -347,7 +325,7 @@ _INTERNAL_ATTRS = frozenset(
 
 class PermissionBoundInstance:
     """
-    Proxy around a Django model instance that gates attribute access by
+    Proxy around a model instance that gates attribute access by
     the resolved read/update field sets.
     """
 
@@ -432,10 +410,7 @@ class PermissionBoundInstance:
 
     def serialize(self):
         """Serialize this single instance using the permission-scoped fields map."""
-        from statezero.adaptors.django.config import config as _config
-
-        serializer = _config.serializer
-        return serializer.serialize(
+        return self._bound.serializer.serialize(
             data=self._instance,
             model=type(self._instance),
             depth=self._bound.depth,
@@ -445,7 +420,7 @@ class PermissionBoundInstance:
 
     @property
     def _unwrap(self):
-        """Escape hatch: return the raw Django model instance."""
+        """Escape hatch: return the raw model instance."""
         return self._instance
 
     def __repr__(self):

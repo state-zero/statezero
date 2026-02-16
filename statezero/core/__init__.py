@@ -31,10 +31,11 @@ __all__ = [
     "AbstractSchemaGenerator",
     "AbstractEventEmitter",
     "AbstractPermission",
-    # Permission API
+    # Permission API (ORM-agnostic base classes)
     "PermissionResolver",
     "PermissionBound",
     "SyntheticRequest",
+    # Django convenience: from statezero.adaptors.django.permission_bound import PermissionBound
 ]
 
 __version__ = "0.1.0"
