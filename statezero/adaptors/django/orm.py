@@ -303,6 +303,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         permissions: List[Type[AbstractPermission]],
         serializer,
         fields_map,
+        queryset: QuerySet = None,
     ) -> models.Model:
         """Update a single model instance."""
         data = ast.get("data", {})
@@ -312,7 +313,7 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         visitor = QueryASTVisitor(model)
         q_obj = visitor.visit(filter_ast)
-        instance = model.objects.get(q_obj)
+        instance = queryset.filter(q_obj).get()
 
         # Check object-level permissions for update.
         check_object_permissions(req, instance, ActionType.UPDATE, permissions, model)
@@ -333,6 +334,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         ast: Dict[str, Any],
         req: RequestType,
         permissions: List[Type[AbstractPermission]],
+        queryset: QuerySet = None,
     ) -> int:
         """Delete a single model instance."""
         filter_ast = ast.get("filter")
@@ -341,7 +343,7 @@ class DjangoORMAdapter(AbstractORMProvider):
 
         visitor = QueryASTVisitor(model)
         q_obj = visitor.visit(filter_ast)
-        instance = model.objects.get(q_obj)
+        instance = queryset.filter(q_obj).get()
 
         # Check object-level permissions.
         check_object_permissions(req, instance, ActionType.DELETE, permissions, model)

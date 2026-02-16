@@ -743,6 +743,7 @@ class ASTParser:
             permissions,
             self.serializer,
             fields_map=self.update_fields_map,
+            queryset=self.current_queryset,
         )
 
         # Serialize the updated instance for the response.
@@ -777,7 +778,8 @@ class ASTParser:
 
         # Delegate to the engine's instance-based delete method.
         deleted_count = self.engine.delete_instance(
-            self.model, ast, self.request, permissions
+            self.model, ast, self.request, permissions,
+            queryset=self.current_queryset,
         )
 
         return {
