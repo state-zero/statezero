@@ -29,7 +29,10 @@
       "Bash(DJANGO_SETTINGS_MODULE=tests.settings python -m django makemigrations:*)",
       "Bash(/Users/robertherring/code/statezero/venv/bin/python -m pytest:*)",
       "Bash(unset:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(git -C /Users/robertherring/code/statezero show 551c80d --stat)",
+      "Bash(git -C /Users/robertherring/code/statezero show 551c80d --no-patch)",
+      "Bash(git -C /Users/robertherring/code/statezero show 551c80d:statezero/core/permission_resolver.py)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"

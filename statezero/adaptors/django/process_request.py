@@ -158,51 +158,25 @@ class RequestProcessor:
             initial_ast=initial_query_ast,
         )
 
-        # Step 1: Apply filter_queryset with OR logic (additive permissions)
-        # Collect all filtered querysets from each permission
-        filtered_querysets = []
-        for permission_cls in model_config.permissions:
-            perm = permission_cls()
+        # Create a PermissionResolver for this request (caches permission lookups)
+        from statezero.adaptors.django.permission_resolver import PermissionResolver
+        resolver = PermissionResolver(req, self.registry, self.orm_provider)
 
-            # Record permission class being applied
-            if telemetry_ctx:
+        # Step 1+2: Apply filter_queryset (OR) + exclude_from_queryset (AND)
+        base_queryset = resolver.apply_queryset_permissions(model, base_queryset)
+
+        # Record telemetry for permission classes
+        if telemetry_ctx:
+            for permission_cls in model_config.permissions:
                 permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
                 telemetry_ctx.record_permission_class_applied(permission_class_name)
-
-            # Apply permission filter to a fresh base queryset
-            filtered_qs = perm.filter_queryset(req, base_queryset)
-            filtered_querysets.append(filtered_qs)
-
-            # Record SQL after applying this permission
-            if telemetry_ctx:
-                try:
-                    from statezero.adaptors.django.query_cache import _get_sql_from_queryset
-                    sql_data = _get_sql_from_queryset(filtered_qs)
-                    if sql_data:
-                        sql, _ = sql_data
-                        telemetry_ctx.record_queryset_after_permission(permission_class_name, sql)
-                except Exception:
-                    pass  # Don't fail if we can't get SQL
-
-        # Combine all filtered querysets with OR
-        if filtered_querysets:
-            combined_queryset = filtered_querysets[0]
-            for qs in filtered_querysets[1:]:
-                combined_queryset = combined_queryset | qs
-            base_queryset = combined_queryset
-
-        # Step 2: Apply exclude_from_queryset with AND logic (restrictive permissions)
-        for permission_cls in model_config.permissions:
-            perm = permission_cls()
-            base_queryset = perm.exclude_from_queryset(req, base_queryset)
 
         # ---- PERMISSION CHECKS: Global Level (Write operations remain here) ----
         requested_actions: Set[ActionType] = ASTParser.get_requested_action_types(
             final_query_ast
         )
 
-        from statezero.adaptors.django.permission_utils import resolve_allowed_actions
-        allowed_global_actions = resolve_allowed_actions(model_config, req)
+        allowed_global_actions = resolver.allowed_actions(model)
         if "__all__" not in allowed_global_actions:
             if not requested_actions.issubset(allowed_global_actions):
                 missing = requested_actions - allowed_global_actions
@@ -219,15 +193,14 @@ class RequestProcessor:
         op = final_query_ast.get("type")
         if op in ["create", "update"]:
             data = final_query_ast.get("data", {})
-            filtered_data = _filter_writable_data(
-                data, req, model, model_config, self.orm_provider,
-                create=(op == "create"), extra_fields=extra_fields,
+            filtered_data = resolver.filter_writable_data(
+                model, data, create=(op == "create"), extra_fields=extra_fields,
             )
             final_query_ast["data"] = filtered_data
         elif op in ["get_or_create", "update_or_create"]:
             if "defaults" in final_query_ast:
-                final_query_ast["defaults"] = _filter_writable_data(
-                    final_query_ast["defaults"], req, model, model_config, self.orm_provider,
+                final_query_ast["defaults"] = resolver.filter_writable_data(
+                    model, final_query_ast["defaults"],
                     create=True, extra_fields=extra_fields,
                 )
 
@@ -252,6 +225,7 @@ class RequestProcessor:
             base_queryset=base_queryset,
             serializer_options=serializer_options or {},
             request=req,
+            resolver=resolver,
         )
 
         # Validate AST (field permissions, filter conditions, ordering)

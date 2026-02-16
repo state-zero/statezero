@@ -59,6 +59,7 @@ class ASTParser:
         base_queryset: Any,  # ADD: Base queryset to manage state
         serializer_options: Optional[Dict[str, Any]] = None,
         request: Optional[RequestType] = None,
+        resolver=None,
     ):
         self.engine = engine
         self.serializer = serializer
@@ -69,6 +70,7 @@ class ASTParser:
         self._model_name = engine.get_model_name(model)
         self.serializer_options = serializer_options or {}
         self.request = request
+        self.resolver = resolver
 
         # Process field selection if present
         requested_fields = self.serializer_options.get("fields", [])
@@ -194,6 +196,24 @@ class ASTParser:
 
     def _permitted_fields(self, model, operation_type):
         """Permitted fields for an operation. Empty set = no permission."""
+        if self.resolver:
+            result = self.resolver.permitted_fields(model, operation_type)
+            # Record telemetry
+            telemetry_ctx = get_telemetry_context()
+            if telemetry_ctx and result:
+                try:
+                    model_config = self.registry.get_config(model)
+                    model_name = self.engine.get_model_name(model)
+                    for permission_cls in model_config.permissions:
+                        permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
+                        telemetry_ctx.record_permission_class_fields(
+                            permission_class_name, model_name, operation_type, list(result)
+                        )
+                except (ValueError, KeyError):
+                    pass
+            return result
+
+        # Fallback for standalone usage (tests, etc.)
         from statezero.adaptors.django.permission_utils import has_operation_permission, resolve_permission_fields
         try:
             model_config = self.registry.get_config(model)
