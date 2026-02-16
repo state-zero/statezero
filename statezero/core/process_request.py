@@ -11,6 +11,7 @@ from statezero.core.exceptions import PermissionDenied, ValidationError
 from statezero.core.interfaces import (AbstractDataSerializer,
                                        AbstractORMProvider,
                                        AbstractSchemaGenerator)
+from statezero.core.permission_resolver import PermissionResolver
 from statezero.core.types import ActionType
 from statezero.core.telemetry import create_telemetry_context, clear_telemetry_context
 
@@ -79,61 +80,6 @@ def _extract_filter_fields(ast_node: Dict[str, Any]) -> Set[str]:
         fields |= _extract_filter_fields(ast_node["child"])
 
     return fields
-
-
-def _filter_writable_data(
-    data: Dict[str, Any],
-    req: Any,
-    model: Type,
-    model_config: ModelConfig,
-    orm_provider: AbstractORMProvider,
-    create: bool = False,
-    extra_fields: str = "ignore",
-) -> Dict[str, Any]:
-    """
-    Filter out keys for which the user does not have write permission.
-    When `create` is True, use the permission's `create_fields` method;
-    otherwise, use `editable_fields`.
-
-    Only includes fields from permissions that allow the corresponding action
-    (CREATE or UPDATE).
-
-    If the allowed fields set contains "__all__", return the original data.
-    """
-    all_fields = orm_provider.get_fields(model)
-
-    if extra_fields == EXTRA_FIELDS_ERROR:
-        unknown_fields = set(data.keys()) - all_fields
-        if unknown_fields:
-            raise ValidationError(
-                f"Unknown field(s): {', '.join(sorted(unknown_fields))}. "
-                f"Valid fields are: {', '.join(sorted(all_fields))}"
-            )
-
-    allowed_fields: Set[str] = set()
-
-    # Determine which action we're checking for
-    required_action = ActionType.CREATE if create else ActionType.UPDATE
-
-    for permission_cls in model_config.permissions:
-        perm = permission_cls()
-
-        # Only include fields if this permission allows the required action
-        if required_action not in perm.allowed_actions(req, model):
-            continue
-
-        if create:
-            permission_fields = perm.create_fields(req, model)
-        else:
-            permission_fields = perm.editable_fields(req, model)
-        # handle the __all__ shorthand
-        if permission_fields == "__all__":
-            permission_fields = all_fields
-        else:
-            permission_fields &= all_fields
-        allowed_fields |= permission_fields
-
-    return {k: v for k, v in data.items() if k in allowed_fields}
 
 
 class RequestProcessor:
@@ -206,6 +152,9 @@ class RequestProcessor:
         model = self.orm_provider.get_model_by_name(model_name)
         model_config: ModelConfig = self.registry.get_config(model)
 
+        # Create a shared PermissionResolver for this request
+        resolver = PermissionResolver(req, self.registry, self.orm_provider)
+
         base_queryset = self.orm_provider.get_queryset(
             req=req,
             model=model,
@@ -213,23 +162,16 @@ class RequestProcessor:
             registered_permissions=model_config.permissions,
         )
 
-        # Step 1: Apply filter_queryset with OR logic (additive permissions)
-        # Collect all filtered querysets from each permission
-        filtered_querysets = []
-        for permission_cls in model_config.permissions:
-            perm = permission_cls()
-
-            # Record permission class being applied
-            if telemetry_ctx:
+        # Apply queryset-level permissions (filter OR, exclude AND)
+        # Wrap with telemetry recording at this call site
+        if telemetry_ctx:
+            # Record per-permission telemetry before delegating
+            for permission_cls in model_config.permissions:
+                perm = permission_cls()
                 permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
                 telemetry_ctx.record_permission_class_applied(permission_class_name)
 
-            # Apply permission filter to a fresh base queryset
-            filtered_qs = perm.filter_queryset(req, base_queryset)
-            filtered_querysets.append(filtered_qs)
-
-            # Record SQL after applying this permission
-            if telemetry_ctx:
+                filtered_qs = perm.filter_queryset(req, base_queryset)
                 try:
                     from statezero.core.query_cache import _get_sql_from_queryset
                     sql_data = _get_sql_from_queryset(filtered_qs)
@@ -237,35 +179,15 @@ class RequestProcessor:
                         sql, _ = sql_data
                         telemetry_ctx.record_queryset_after_permission(permission_class_name, sql)
                 except Exception:
-                    pass  # Don't fail if we can't get SQL
+                    pass
 
-        # Combine all filtered querysets with OR
-        if filtered_querysets:
-            combined_queryset = filtered_querysets[0]
-            for qs in filtered_querysets[1:]:
-                combined_queryset = combined_queryset | qs
-            base_queryset = combined_queryset
+        base_queryset = resolver.apply_queryset_permissions(model, base_queryset)
 
-        # Step 2: Apply exclude_from_queryset with AND logic (restrictive permissions)
-        for permission_cls in model_config.permissions:
-            perm = permission_cls()
-            base_queryset = perm.exclude_from_queryset(req, base_queryset)
-
-        # ---- PERMISSION CHECKS: Global Level (Write operations remain here) ----
+        # ---- PERMISSION CHECKS: Global Level ----
         requested_actions: Set[ActionType] = ASTParser.get_requested_action_types(
             final_query_ast
         )
-
-        allowed_global_actions: Set[ActionType] = set()
-        for permission_cls in model_config.permissions:
-            allowed_global_actions |= permission_cls().allowed_actions(req, model)
-        if "__all__" not in allowed_global_actions:
-            if not requested_actions.issubset(allowed_global_actions):
-                missing = requested_actions - allowed_global_actions
-                missing_str = ", ".join(action.value for action in missing)
-                raise PermissionDenied(
-                    f"Missing global permissions for actions: {missing_str}"
-                )
+        resolver.check_actions(model, requested_actions)
 
         # For READ operations, delegate field permission checks to ASTValidator.
         serializer_options = ast_body.get("serializerOptions", {})
@@ -291,20 +213,16 @@ class RequestProcessor:
         op = final_query_ast.get("type")
         if op in ["create", "update"]:
             data = final_query_ast.get("data", {})
-            # For create operations, pass create=True so that create_fields are used.
-            filtered_data = _filter_writable_data(
-                data, req, model, model_config, self.orm_provider,
-                create=(op == "create"), extra_fields=extra_fields,
+            final_query_ast["data"] = resolver.filter_writable_data(
+                model, data, create=(op == "create"), extra_fields=extra_fields,
             )
-            final_query_ast["data"] = filtered_data
         elif op in ["get_or_create", "update_or_create"]:
             if "lookup" in final_query_ast:
-                # Lookup fields are filter kwargs (support __ traversal) — validate like filters
                 for field_path in final_query_ast["lookup"].keys():
                     validator.validate_filterable_field(model, field_path)
             if "defaults" in final_query_ast:
-                final_query_ast["defaults"] = _filter_writable_data(
-                    final_query_ast["defaults"], req, model, model_config, self.orm_provider,
+                final_query_ast["defaults"] = resolver.filter_writable_data(
+                    model, final_query_ast["defaults"],
                     create=True, extra_fields=extra_fields,
                 )
 
@@ -319,16 +237,17 @@ class RequestProcessor:
             serializer_options = serializer_options or {}
             serializer_options["_filter_fields"] = filter_fields
 
-        # Create and use the AST parser directly, instead of delegating to ORM provider
+        # Create and use the AST parser directly, with shared permission resolver
         parser = ASTParser(
             engine=self.orm_provider,
             serializer=self.data_serializer,
             model=model,
             config=self.config,
             registry=self.registry,
-            base_queryset=base_queryset,  # Pass the queryset here
+            base_queryset=base_queryset,
             serializer_options=serializer_options or {},
             request=req,
+            permission_resolver=resolver,
         )
         result: Dict[str, Any] = parser.parse(final_query_ast)
 
