@@ -213,9 +213,6 @@ class RequestProcessor:
 
         serializer_options = ast_body.get("serializerOptions", {})
 
-        # Build model graph once and reuse
-        model_graph = self.orm_provider.build_model_graph(model)
-
         extra_fields = self.config.effective_extra_fields
 
         # ---- WRITE OPERATIONS: Filter incoming data to include only writable fields. ----
@@ -245,7 +242,7 @@ class RequestProcessor:
             serializer_options = serializer_options or {}
             serializer_options["_filter_fields"] = filter_fields
 
-        # Create the AST parser with model_graph for validation + execution
+        # Create the AST parser for validation + execution
         parser = ASTParser(
             engine=self.orm_provider,
             serializer=self.data_serializer,
@@ -255,7 +252,6 @@ class RequestProcessor:
             base_queryset=base_queryset,
             serializer_options=serializer_options or {},
             request=req,
-            model_graph=model_graph,
         )
 
         # Validate AST (field permissions, filter conditions, ordering)

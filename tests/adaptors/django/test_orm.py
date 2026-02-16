@@ -253,12 +253,6 @@ class DjangoORMAdapterTest(TestCase):
             self.assertIn("name", item)
             self.assertNotIn("value", item)
 
-    def test_build_model_graph(self):
-        graph = self.adapter.build_model_graph(DummyModel)
-        self.assertTrue(graph.has_node("django_app.dummymodel"))
-        self.assertTrue(graph.has_node("django_app.dummymodel::name"))
-        self.assertTrue(graph.has_node("django_app.dummyrelatedmodel"))
-
     def test_update_instance(self):
         # Create a new instance that we will update via instance-based operation.
         instance = DummyModel.objects.create(

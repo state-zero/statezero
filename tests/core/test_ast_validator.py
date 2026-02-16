@@ -1,6 +1,5 @@
 import unittest
 
-import networkx as nx
 from django.test import TestCase
 
 from statezero.adaptors.django.config import config, registry
@@ -139,10 +138,9 @@ class PartialPermission(AbstractPermission):
         return self.editable_fields(request, model)
 
 
-def _make_parser(model, model_graph=None):
+def _make_parser(model):
     """Helper to create an ASTParser instance for validation-only tests."""
     adapter = DjangoORMAdapter()
-    graph = model_graph or adapter.build_model_graph(model)
     return ASTParser(
         engine=adapter,
         serializer=config.serializer,
@@ -152,7 +150,6 @@ def _make_parser(model, model_graph=None):
         base_queryset=model.objects.none(),
         serializer_options={},
         request={},
-        model_graph=graph,
     )
 
 

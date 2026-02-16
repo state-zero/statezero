@@ -170,12 +170,6 @@ class AbstractORMProvider(ABC):
         """
         pass
 
-    @abstractmethod
-    def build_model_graph(self, model: ORMModel) -> Any:  # type:ignore
-        """
-        Construct a graph representation of model relationships.
-        """
-        pass
 
 
 # === Other Abstract Classes (Unchanged) ===

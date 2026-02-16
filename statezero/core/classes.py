@@ -157,22 +157,6 @@ class ModelSummaryRepresentation:
 
 
 @dataclass
-class ModelNode:
-    model_name: str
-    model: Optional[Type] = None  # The actual model class (if applicable)
-    type: str = "model"
-
-
-@dataclass
-class FieldNode:
-    model_name: str  # The parent model's name
-    field_name: str  # The name of the field
-    is_relation: bool
-    related_model: Optional[str] = None  # The object name of the related model, if any
-    type: str = "field"
-
-
-@dataclass
 class FieldDisplayConfig:
     """
     Configuration for customizing how a field is displayed in the frontend.

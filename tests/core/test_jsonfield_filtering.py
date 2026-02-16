@@ -82,7 +82,6 @@ class JSONFieldDeniedPermission(AbstractPermission):
 def _make_parser(model, permission_class):
     """Helper to set up an ASTParser with given permissions for validation tests."""
     adapter = DjangoORMAdapter()
-    model_graph = adapter.build_model_graph(model)
     return ASTParser(
         engine=adapter,
         serializer=config.serializer,
@@ -92,7 +91,6 @@ def _make_parser(model, permission_class):
         base_queryset=model.objects.none(),
         serializer_options={},
         request={},
-        model_graph=model_graph,
     )
 
 

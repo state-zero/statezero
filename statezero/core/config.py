@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Literal, TYPE_CHECKING
 import importlib
-import networkx as nx
 import warnings
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
@@ -219,65 +218,75 @@ class AppConfig(ABC):
 
     def validate_exposed_models(self, registry: Registry) -> bool:
         """
-        Validate that all registered models only expose fields 
+        Validate that all registered models only expose fields
         that reference other registered models.
-        
-        This implementation is ORM-agnostic, using the configured orm_provider
-        to access model relationships.
-        
+
+        Uses Django _meta API directly to inspect model relationships.
+
         Args:
             registry: The global registry containing registered models
-            
+
         Returns:
             bool: True if validation passes
-            
+
         Raises:
             ValueError: If a registered model exposes an unregistered model
         """
+        from django.db.models.fields.related import ForeignObjectRel
+
         if not self.orm_provider:
             raise ValueError("ORM provider must be initialized before validation")
-            
-        # Build complete model graph for all registered models
-        model_graph = nx.DiGraph()
-        for model in registry._models_config.keys():
-            model_graph = self.orm_provider.build_model_graph(model, model_graph)
-            
-        # Check each registered model
+
         for model, config in registry._models_config.items():
-            # Get model name for error messages and graph lookup
             model_name = self.orm_provider.get_model_name(model)
-            
-            # Get all field nodes from the graph for this model
-            all_model_fields = set()
-            for _, field_node in model_graph.out_edges(model_name):
-                if "::" in field_node:
-                    field_name = field_node.split("::")[-1]
-                    all_model_fields.add(field_name)
-                    
-            # Determine which fields to check based on config.fields
-            fields_to_check = config.fields if config.fields != "__all__" else all_model_fields
-            
-            # Check each field to see if it's a relation to an unregistered model
-            for field_name in fields_to_check:
-                field_node = f"{model_name}::{field_name}"
-                
-                if model_graph.has_node(field_node):
-                    node_data = model_graph.nodes[field_node].get("data")
-                    if node_data and node_data.is_relation:
-                        related_model_name = node_data.related_model
-                        if related_model_name:
-                            # Get the related model from its name
-                            related_model = self.orm_provider.get_model_by_name(related_model_name)
-                            
-                            # Check if related model is registered
-                            if related_model not in registry._models_config:
-                                raise ValueError(
-                                    f"Model '{model_name}' exposes relation '{field_name}' "
-                                    f"to unregistered model '{related_model_name}'. "
-                                    f"Please register '{related_model_name}' with StateZero "
-                                    f"or restrict access to this field by excluding it from the 'fields' parameter."
-                                )
-                                
+            configured_fields = config.fields
+
+            for field in model._meta.get_fields():
+                field_name = field.name
+
+                # Skip reverse relations unless explicitly in configured fields
+                if isinstance(field, ForeignObjectRel):
+                    if configured_fields == "__all__" or field_name not in configured_fields:
+                        continue
+
+                # Only check fields that are in the configured set
+                if configured_fields != "__all__" and field_name not in configured_fields:
+                    continue
+
+                # Check if this is a relation field pointing to an unregistered model
+                is_relation = False
+                related_model = None
+
+                if isinstance(field, ForeignObjectRel):
+                    is_relation = True
+                    related_model = getattr(field, 'related_model', None)
+                elif getattr(field, 'is_relation', False):
+                    is_relation = True
+                    related_model = getattr(field, 'related_model', None)
+
+                if is_relation and related_model:
+                    if related_model not in registry._models_config:
+                        related_model_name = self.orm_provider.get_model_name(related_model)
+                        raise ValueError(
+                            f"Model '{model_name}' exposes relation '{field_name}' "
+                            f"to unregistered model '{related_model_name}'. "
+                            f"Please register '{related_model_name}' with StateZero "
+                            f"or restrict access to this field by excluding it from the 'fields' parameter."
+                        )
+
+            # Also check additional_fields for relations
+            for af in config.additional_fields:
+                af_field = af.field
+                related = getattr(af_field, 'related_model', None)
+                if related and related not in registry._models_config:
+                    related_model_name = self.orm_provider.get_model_name(related)
+                    raise ValueError(
+                        f"Model '{model_name}' exposes relation '{af.name}' "
+                        f"to unregistered model '{related_model_name}'. "
+                        f"Please register '{related_model_name}' with StateZero "
+                        f"or restrict access to this field by excluding it from the 'fields' parameter."
+                    )
+
         return True
 
 

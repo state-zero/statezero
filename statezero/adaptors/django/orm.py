@@ -1,7 +1,6 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
-import networkx as nx
 from django.apps import apps
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models, transaction
@@ -12,7 +11,6 @@ from rest_framework import serializers
 
 
 from statezero.adaptors.django.config import config, registry
-from statezero.core.classes import FieldNode, ModelNode
 from statezero.adaptors.django.event_bus import EventBus
 from statezero.core.exceptions import (
     NotFound,
@@ -383,121 +381,6 @@ class DjangoORMAdapter(AbstractORMProvider):
             return isinstance(field, models.JSONField)
         except Exception:
             return False
-
-    def build_model_graph(
-        self, model: Type[models.Model], model_graph: nx.DiGraph = None
-    ) -> nx.DiGraph:
-        """
-        Build a directed graph of models and their fields, focusing on direct relationships.
-
-        Args:
-            model: The Django model to build the graph for
-            model_graph: An existing graph to add to (optional)
-
-        Returns:
-            nx.DiGraph: The model graph
-        """
-        from django.db.models.fields.related import RelatedField, ForeignObjectRel
-
-        if model_graph is None:
-            model_graph = nx.DiGraph()
-
-        # Use the adapter's get_model_name method.
-        model_name = self.get_model_name(model)
-
-        # Add the model node if it doesn't exist.
-        if not model_graph.has_node(model_name):
-            model_graph.add_node(
-                model_name, data=ModelNode(model_name=model_name, model=model)
-            )
-
-        # Iterate over all fields in the model.
-        for field in model._meta.get_fields():
-            field_name = field.name
-
-            # Handle reverse relations - only include if explicitly configured in fields
-            if isinstance(field, ForeignObjectRel):
-                # Check if this reverse relation is explicitly listed in the model's fields config
-                try:
-                    model_config = registry.get_config(model)
-                    configured_fields = model_config.fields
-                    # Skip if fields is "__all__" (we don't auto-include reverse relations)
-                    # or if the field is not explicitly in the configured fields set
-                    if configured_fields == "__all__" or field_name not in configured_fields:
-                        continue
-                except ValueError:
-                    # Model not registered, skip reverse relation
-                    continue
-
-                # For reverse relations, the related model is the model that defines the FK
-                related_model = field.related_model
-                related_model_name = self.get_model_name(related_model)
-
-                field_node = f"{model_name}::{field_name}"
-                field_node_data = FieldNode(
-                    model_name=model_name,
-                    field_name=field_name,
-                    is_relation=True,
-                    related_model=related_model_name,
-                )
-                model_graph.add_node(field_node, data=field_node_data)
-                model_graph.add_edge(model_name, field_node)
-
-                # Recursively build the related model if not already in the graph
-                if not model_graph.has_node(related_model_name):
-                    self.build_model_graph(related_model, model_graph)
-                model_graph.add_edge(field_node, related_model_name)
-                continue
-
-            field_node = f"{model_name}::{field_name}"
-            field_node_data = FieldNode(
-                model_name=model_name,
-                field_name=field_name,
-                is_relation=field.is_relation,
-                related_model=(
-                    self.get_model_name(field.related_model)
-                    if field.is_relation and field.related_model
-                    else None
-                ),
-            )
-            model_graph.add_node(field_node, data=field_node_data)
-            model_graph.add_edge(model_name, field_node)
-
-            if field.is_relation and field.related_model:
-                related_model = field.related_model
-                related_model_name = self.get_model_name(related_model)
-                if not model_graph.has_node(related_model_name):
-                    self.build_model_graph(related_model, model_graph)
-                model_graph.add_edge(field_node, related_model_name)
-
-        # Add additional (computed) fields from the model's configuration.
-        try:
-            config = registry.get_config(model)
-            for additional_field in config.additional_fields:
-                add_field_name = additional_field.name
-                add_field_node = f"{model_name}::{add_field_name}"
-                is_rel = False
-                related_model_name = None
-                if isinstance(
-                    additional_field.field,
-                    (models.ForeignKey, models.OneToOneField, models.ManyToManyField),
-                ):
-                    is_rel = True
-                    related = getattr(additional_field.field, "related_model", None)
-                    if related:
-                        related_model_name = self.get_model_name(related)
-                add_field_node_data = FieldNode(
-                    model_name=model_name,
-                    field_name=add_field_name,
-                    is_relation=is_rel,
-                    related_model=related_model_name,
-                )
-                model_graph.add_node(add_field_node, data=add_field_node_data)
-                model_graph.add_edge(model_name, add_field_node)
-        except ValueError:
-            pass
-
-        return model_graph
 
     def register_event_signals(self, event_bus: EventBus) -> None:
         """Register Django signals for model events."""

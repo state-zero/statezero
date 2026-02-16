@@ -1,10 +1,10 @@
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Tuple, Literal
 from collections import deque
-import networkx as nx
 
 
 from django.db.models import Avg, Count, Max, Min, Sum
+from django.db.models.fields.related import ForeignObjectRel
 
 from statezero.core.config import AppConfig, Registry, EXTRA_FIELDS_ERROR
 from statezero.core.exceptions import (
@@ -59,7 +59,6 @@ class ASTParser:
         base_queryset: Any,  # ADD: Base queryset to manage state
         serializer_options: Optional[Dict[str, Any]] = None,
         request: Optional[RequestType] = None,
-        model_graph: Optional[nx.DiGraph] = None,
     ):
         self.engine = engine
         self.serializer = serializer
@@ -67,7 +66,6 @@ class ASTParser:
         self.config = config
         self.registry = registry
         self.current_queryset = base_queryset  # ADD: Track current queryset state
-        self._model_graph = model_graph or engine.build_model_graph(model)
         self._model_name = engine.get_model_name(model)
         self.serializer_options = serializer_options or {}
         self.request = request
@@ -85,18 +83,18 @@ class ASTParser:
             )
 
         # Get the raw field map
-        self.read_fields_map = self._get_operation_field_map(
+        self.read_fields_map = self._build_permitted_fields_map(
             requested_fields=requested_fields, depth=self.depth, operation_type="read"
         )
 
         # Create/update operations should use depth 0 for performance
-        self.create_fields_map = self._get_operation_field_map(
+        self.create_fields_map = self._build_permitted_fields_map(
             requested_fields=requested_fields,
             depth=0,  # Nested writes are not supported
             operation_type="create",
         )
 
-        self.update_fields_map = self._get_operation_field_map(
+        self.update_fields_map = self._build_permitted_fields_map(
             requested_fields=requested_fields,
             depth=0,  # Nested writes are not supported
             operation_type="update",
@@ -164,14 +162,61 @@ class ASTParser:
             fields_map=self.read_fields_map,
         )
 
-    def _get_field_node(self, model_name: str, field_name: str):
-        """O(1) field node lookup using the graph's naming convention."""
-        node_id = f"{model_name}::{field_name}"
-        if self._model_graph.has_node(node_id):
-            return self._model_graph.nodes[node_id].get("data")
-        return None
+    def _resolve_field_relation(self, model, field_name):
+        """Check if field_name is a relation on model. Returns (is_relation, related_model_class)."""
+        try:
+            field = model._meta.get_field(field_name)
+            # For reverse relations (ForeignObjectRel), only include if explicitly in model config fields
+            if isinstance(field, ForeignObjectRel):
+                try:
+                    model_config = self.registry.get_config(model)
+                    configured_fields = model_config.fields
+                    if configured_fields == "__all__" or field_name not in configured_fields:
+                        return False, None
+                except (ValueError, KeyError):
+                    return False, None
+                # Reverse relation explicitly configured — treat as relation
+                if getattr(field, 'related_model', None):
+                    return True, field.related_model
+                return False, None
+            if field.is_relation and getattr(field, 'related_model', None):
+                return True, field.related_model
+            return False, None
+        except Exception:
+            # Check additional_fields (computed fields that might be relations)
+            try:
+                for af in self.registry.get_config(model).additional_fields:
+                    if af.name == field_name and getattr(af.field, 'related_model', None):
+                        return True, af.field.related_model
+            except (ValueError, KeyError):
+                pass
+            return False, None
 
-    def _process_nested_field_strings(
+    def _permitted_fields(self, model, operation_type):
+        """Permitted fields for an operation. Empty set = no permission."""
+        from statezero.adaptors.django.permission_utils import has_operation_permission, resolve_permission_fields
+        try:
+            model_config = self.registry.get_config(model)
+            if not has_operation_permission(model_config, self.request, operation_type):
+                return set()
+            result = resolve_permission_fields(model_config, self.request, operation_type,
+                                               self.engine.get_fields(model))
+
+            # Record telemetry for each permission class's contribution
+            telemetry_ctx = get_telemetry_context()
+            if telemetry_ctx:
+                model_name = self.engine.get_model_name(model)
+                for permission_cls in model_config.permissions:
+                    permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
+                    telemetry_ctx.record_permission_class_fields(
+                        permission_class_name, model_name, operation_type, list(result)
+                    )
+
+            return result
+        except (ValueError, KeyError):
+            return set()
+
+    def _resolve_explicit_field_paths(
         self, field_strings, available_fields_map,
         operation_type: Literal["read", "create", "update"] = "read",
     ):
@@ -192,7 +237,6 @@ class ASTParser:
             Dict[str, Set[str]]: Dictionary mapping model names to sets of field names
         """
         fields_map = {}
-        model_graph = self._model_graph
 
         # Start with the root model
         root_model_name = self._model_name
@@ -208,10 +252,9 @@ class ASTParser:
                 # If this model isn't in the available map yet (beyond depth limit),
                 # resolve its permissions now — explicit field paths override depth.
                 if current_model_name not in available_fields_map:
-                    if self._has_operation_permission(current_model, operation_type):
-                        available_fields_map[current_model_name] = self._get_operation_fields(
-                            current_model, operation_type
-                        )
+                    perm_fields = self._permitted_fields(current_model, operation_type)
+                    if perm_fields:
+                        available_fields_map[current_model_name] = perm_fields
 
                 # Check if this field is available for this model
                 if (
@@ -223,23 +266,17 @@ class ASTParser:
 
                 # If this is the last part, we might need to include all fields if it's a relation
                 if i == len(parts) - 1:
-                    field_data = self._get_field_node(current_model_name, part)
+                    is_relation, related_model_cls = self._resolve_field_relation(current_model, part)
 
                     # If this is a relation field, include all available fields of the related model
-                    if (
-                        field_data
-                        and field_data.is_relation
-                        and field_data.related_model
-                    ):
-                        related_model_name = field_data.related_model
+                    if is_relation and related_model_cls:
+                        related_model_name = self.engine.get_model_name(related_model_cls)
 
                         # Resolve permissions for the related model if needed
                         if related_model_name not in available_fields_map:
-                            related_model = self.engine.get_model_by_name(related_model_name)
-                            if self._has_operation_permission(related_model, operation_type):
-                                available_fields_map[related_model_name] = self._get_operation_fields(
-                                    related_model, operation_type
-                                )
+                            perm_fields = self._permitted_fields(related_model_cls, operation_type)
+                            if perm_fields:
+                                available_fields_map[related_model_name] = perm_fields
 
                         # Include all available fields for this related model
                         if related_model_name in available_fields_map:
@@ -261,31 +298,25 @@ class ASTParser:
                     # The relation field is not available, stop traversing
                     break
 
-                # Find the field node in the graph
-                field_data = self._get_field_node(current_model_name, part)
+                # Check if this field is a relation using _meta
+                is_relation, related_model_cls = self._resolve_field_relation(current_model, part)
 
-                if not field_data:
+                if not is_relation or not related_model_cls:
                     if self.config.effective_extra_fields == EXTRA_FIELDS_ERROR:
-                        raise ValidationError(
-                            f"Field '{part}' does not exist on model '{current_model_name}'."
-                        )
-                    # Field not found, skip to next field string
-                    break
-
-                # If this is a relation field, move to the related model
-                if field_data.is_relation and field_data.related_model:
-                    related_model = self.engine.get_model_by_name(
-                        field_data.related_model
-                    )
-                    current_model = related_model
-                    current_model_name = field_data.related_model
-                else:
+                        if not is_relation:
+                            raise ValidationError(
+                                f"Field '{part}' does not exist on model '{current_model_name}'."
+                            )
                     # Not a relation field, stop traversing
                     break
 
+                # Move to the related model
+                current_model = related_model_cls
+                current_model_name = self.engine.get_model_name(related_model_cls)
+
         return fields_map
 
-    def _get_operation_field_map(
+    def _build_permitted_fields_map(
         self,
         requested_fields: Optional[Set[str]] = None,
         depth=0,
@@ -303,18 +334,18 @@ class ASTParser:
             Dict[str, Set[str]]: Fields map with model names as keys and sets of field names as values
         """
         # Build a fields map specific to this operation type
-        fields_map = self._get_depth_based_fields(
+        fields_map = self._expand_fields_to_depth(
             depth=depth, operation_type=operation_type
         )
 
         # Merge filter fields into requested_fields so they go through permission validation
-        # This must happen AFTER _get_depth_based_fields resolves __all__ to actual field names
+        # This must happen AFTER _expand_fields_to_depth resolves __all__ to actual field names
         filter_fields = self.serializer_options.get("_filter_fields", set())
         if filter_fields and requested_fields:
             requested_fields = set(requested_fields) | filter_fields
 
         if requested_fields:
-            fields_map = self._process_nested_field_strings(
+            fields_map = self._resolve_explicit_field_paths(
                 field_strings=requested_fields,
                 available_fields_map=fields_map,
                 operation_type=operation_type,
@@ -322,21 +353,12 @@ class ASTParser:
 
         return fields_map
 
-    def _has_operation_permission(self, model, operation_type):
-        """Check if the current request has permission for the specified operation on the model."""
-        from statezero.adaptors.django.permission_utils import has_operation_permission
-        try:
-            model_config = self.registry.get_config(model)
-            return has_operation_permission(model_config, self.request, operation_type)
-        except (ValueError, KeyError):
-            return False
-
-    def _get_depth_based_fields(
+    def _expand_fields_to_depth(
         self, depth=0, operation_type="read"
     ):
         """
-        Build a fields map by traversing the model graph up to the specified depth.
-        Uses operation-specific field permissions.
+        Build a fields map by traversing model relationships up to the specified depth.
+        Uses operation-specific field permissions and Django _meta API directly.
 
         Args:
             depth: Maximum depth to traverse in relationship graph
@@ -347,7 +369,6 @@ class ASTParser:
         """
         fields_map = {}
         visited = set()
-        model_graph = self._model_graph
 
         # Start BFS from the root model
         queue = deque([(self.model, 0)])
@@ -361,70 +382,64 @@ class ASTParser:
                 continue
             visited.add((model_name, current_depth))
 
-            # Check if we have permission to read this model
-            if not self._has_operation_permission(
-                current_model, operation_type=operation_type
-            ):
+            # Get permitted fields for this operation type (includes permission check)
+            allowed_fields = self._permitted_fields(current_model, operation_type)
+            if not allowed_fields:
                 continue
-
-            # Get fields allowed for this operation type
-            allowed_fields = self._get_operation_fields(current_model, operation_type)
 
             # Initialize fields set for this model
             fields_map.setdefault(model_name, set())
 
-            # Collect all directly accessible fields from the model
-            for node in model_graph.successors(model_name):
-                # Each successor of the model node is a field node
-                field_data = model_graph.nodes[node].get("data")
-                if field_data:
-                    field_name = field_data.field_name
-                    # Add this field to the fields map if it's in allowed_fields
-                    if field_name in allowed_fields:
-                        fields_map[model_name].add(field_name)
+            # Get model config to check configured fields for reverse relation filtering
+            try:
+                model_config = self.registry.get_config(current_model)
+                configured_fields = model_config.fields
+            except (ValueError, KeyError):
+                configured_fields = "__all__"
+
+            # Iterate over all fields using Django _meta
+            for field in current_model._meta.get_fields():
+                field_name = field.name
+
+                # Skip reverse relations unless explicitly configured
+                if isinstance(field, ForeignObjectRel):
+                    if configured_fields == "__all__" or field_name not in configured_fields:
+                        continue
+
+                # Add this field if it's in allowed_fields
+                if field_name in allowed_fields:
+                    fields_map[model_name].add(field_name)
+
+            # Also check additional_fields (computed fields)
+            try:
+                for af in self.registry.get_config(current_model).additional_fields:
+                    if af.name in allowed_fields:
+                        fields_map[model_name].add(af.name)
+            except (ValueError, KeyError):
+                pass
 
             # Stop traversing if we've reached max depth
             if current_depth >= depth:
                 continue
 
-            # Now, traverse relation fields to add related models
-            for node in model_graph.successors(model_name):
-                field_data = model_graph.nodes[node].get("data")
-                if field_data and field_data.is_relation and field_data.related_model:
-                    field_name = field_data.field_name
-                    # Only traverse relations we have permission to access
+            # Traverse relation fields to add related models
+            for field in current_model._meta.get_fields():
+                field_name = field.name
+
+                # Skip reverse relations unless explicitly configured
+                if isinstance(field, ForeignObjectRel):
+                    if configured_fields == "__all__" or field_name not in configured_fields:
+                        continue
+                    # Reverse relation explicitly configured
+                    if field_name in allowed_fields and getattr(field, 'related_model', None):
+                        queue.append((field.related_model, current_depth + 1))
+                    continue
+
+                if field.is_relation and getattr(field, 'related_model', None):
                     if field_name in allowed_fields:
-                        # Get the related model and add it to the queue
-                        related_model = self.engine.get_model_by_name(
-                            field_data.related_model
-                        )
-                        queue.append((related_model, current_depth + 1))
+                        queue.append((field.related_model, current_depth + 1))
 
         return fields_map
-
-    def _get_operation_fields(
-        self, model: ORMModel, operation_type: Literal["read", "create", "update"]
-    ):
-        """Get the appropriate field set for a specific operation."""
-        from statezero.adaptors.django.permission_utils import resolve_permission_fields
-        try:
-            model_config = self.registry.get_config(model)
-            all_fields = self.engine.get_fields(model)
-            result = resolve_permission_fields(model_config, self.request, operation_type, all_fields)
-
-            # Record telemetry for each permission class's contribution
-            telemetry_ctx = get_telemetry_context()
-            if telemetry_ctx:
-                model_name = self.engine.get_model_name(model)
-                for permission_cls in model_config.permissions:
-                    permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
-                    telemetry_ctx.record_permission_class_fields(
-                        permission_class_name, model_name, operation_type, list(result)
-                    )
-
-            return result
-        except (ValueError, KeyError):
-            return set()
 
     # --- Validation Methods (merged from ASTValidator) ---
 
@@ -470,12 +485,11 @@ class ASTParser:
         """
         parts = field_path.split("__")
         current_model = model
-        current_model_name = self.engine.get_model_name(current_model)
 
-        if not self._has_operation_permission(current_model, "read"):
+        allowed = self._permitted_fields(current_model, "read")
+        if not allowed:
             return False
 
-        allowed = self._get_operation_fields(current_model, "read")
         for part in parts:
             if part in _FILTER_MODIFIERS:
                 break
@@ -489,27 +503,25 @@ class ASTParser:
             if self.engine.is_nested_path_field(current_model, part):
                 return True
 
-            field_node = f"{current_model_name}::{part}"
-            if self._model_graph.has_node(field_node):
-                node_data = self._model_graph.nodes[field_node].get("data")
-                if not node_data:
+            # Use _meta to check if this is a relation field
+            is_relation, related_model_cls = self._resolve_field_relation(current_model, part)
+            if is_relation and related_model_cls:
+                allowed = self._permitted_fields(related_model_cls, "read")
+                if not allowed:
                     return False
-                if node_data.is_relation:
-                    related_model_name = node_data.related_model
-                    if related_model_name:
-                        related_model = self.engine.get_model_by_name(related_model_name)
-                        if not self._has_operation_permission(related_model, "read"):
-                            return False
-                        current_model = related_model
-                        current_model_name = related_model_name
-                        allowed = self._get_operation_fields(current_model, "read")
-                        continue
-                    else:
-                        return False
-                else:
-                    break
+                current_model = related_model_cls
+                continue
             else:
-                return False
+                # Check if the field exists at all (non-relation field)
+                try:
+                    current_model._meta.get_field(part)
+                    # It's a non-relation field, stop traversing
+                    break
+                except Exception:
+                    # Check if it's an additional field
+                    if self._is_additional_field(current_model, part):
+                        break
+                    return False
 
         return True
 
@@ -721,7 +733,12 @@ class ASTParser:
         data_list = ast.get("data", [])
 
         # Check model-level CREATE permission
-        if not self._has_operation_permission(self.model, operation_type="create"):
+        from statezero.adaptors.django.permission_utils import has_operation_permission
+        try:
+            model_config = self.registry.get_config(self.model)
+            if not has_operation_permission(model_config, self.request, "create"):
+                raise PermissionDenied("Create not allowed")
+        except (ValueError, KeyError):
             raise PermissionDenied("Create not allowed")
 
         # Validate all data items using many=True
@@ -757,7 +774,7 @@ class ASTParser:
         ast["data"] = validated_data
 
         # Get the readable fields for this model using our existing method
-        readable_fields = self._get_operation_fields(self.model, "read")
+        readable_fields = self._permitted_fields(self.model, "read")
 
         # Update records and get the count and affected instance IDs
         updated_count, updated_instances = self.engine.update(
@@ -885,58 +902,22 @@ class ASTParser:
             "metadata": {"get": True, "response_type": ResponseType.INSTANCE.value},
         }
 
-    def _handle_get_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """Get an existing object, or create it if it doesn't exist."""
-        from statezero.adaptors.django.permission_utils import check_object_permissions
-
-        validated_lookup, validated_defaults = self._validate_and_split_lookup_defaults(
-            ast, partial=True
-        )
-        ast["lookup"] = validated_lookup
-        ast["defaults"] = validated_defaults
-
-        lookup = ast.get("lookup", {})
-        defaults = ast.get("defaults", {})
-
-        # Normalize foreign keys: replace model instances with their PKs
-        merged_data = {
-            k: (v.pk if hasattr(v, "_meta") else v)
-            for k, v in {**lookup, **defaults}.items()
-        }
-
-        # Check if instance exists
-        try:
-            record = self.current_queryset.get(**lookup)
-            created = False
-            check_object_permissions(self.request, record, ActionType.READ, self.model)
-        except self.model.DoesNotExist:
-            record = None
-            created = True
-        except self.model.MultipleObjectsReturned:
-            raise MultipleObjectsReturned(
-                f"Multiple {self.model.__name__} instances match the given lookup parameters"
-            )
-
-        if created:
-            record = self.serializer.save(
-                model=self.model,
-                data=merged_data,
-                instance=None,
-                partial=False,
-                request=self.request,
-                fields_map=self.create_fields_map,
-            )
-
+    def _handle_queryset_single(self, ast: Dict[str, Any], method: str) -> Dict[str, Any]:
+        """Return a single record from the queryset using the given method (first/last)."""
+        record = getattr(self.current_queryset, method)()
         return {
             "data": self._serialize(record),
-            "metadata": {
-                "created": created,
-                "response_type": ResponseType.INSTANCE.value,
-            },
+            "metadata": {method: True, "response_type": ResponseType.INSTANCE.value},
         }
 
-    def _handle_update_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """Update an existing object, or create it if it doesn't exist."""
+    def _handle_first(self, ast: Dict[str, Any]) -> Dict[str, Any]:
+        return self._handle_queryset_single(ast, "first")
+
+    def _handle_last(self, ast: Dict[str, Any]) -> Dict[str, Any]:
+        return self._handle_queryset_single(ast, "last")
+
+    def _lookup_or_mutate(self, ast: Dict[str, Any], existing_action: ActionType, save_on_existing: bool) -> Dict[str, Any]:
+        """Shared logic for get_or_create and update_or_create."""
         from statezero.adaptors.django.permission_utils import check_object_permissions
 
         validated_lookup, validated_defaults = self._validate_and_split_lookup_defaults(
@@ -958,7 +939,7 @@ class ASTParser:
         try:
             instance = self.current_queryset.get(**lookup)
             created = False
-            check_object_permissions(self.request, instance, ActionType.UPDATE, self.model)
+            check_object_permissions(self.request, instance, existing_action, self.model)
         except self.model.DoesNotExist:
             instance = None
             created = True
@@ -967,15 +948,17 @@ class ASTParser:
                 f"Multiple {self.model.__name__} instances match the given lookup parameters"
             )
 
-        fields_map_to_use = self.create_fields_map if created else self.update_fields_map
-
-        record = self.serializer.save(
-            model=self.model,
-            data=merged_data,
-            instance=instance,
-            request=self.request,
-            fields_map=fields_map_to_use,
-        )
+        if created or save_on_existing:
+            fields_map_to_use = self.create_fields_map if created else self.update_fields_map
+            record = self.serializer.save(
+                model=self.model,
+                data=merged_data,
+                instance=instance,
+                request=self.request,
+                fields_map=fields_map_to_use,
+            )
+        else:
+            record = instance
 
         return {
             "data": self._serialize(record),
@@ -985,21 +968,13 @@ class ASTParser:
             },
         }
 
-    def _handle_first(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Return the first record from the queryset."""
-        record = self.current_queryset.first()
-        return {
-            "data": self._serialize(record),
-            "metadata": {"first": True, "response_type": ResponseType.INSTANCE.value},
-        }
+    def _handle_get_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
+        """Get an existing object, or create it if it doesn't exist."""
+        return self._lookup_or_mutate(ast, existing_action=ActionType.READ, save_on_existing=False)
 
-    def _handle_last(self, ast: Dict[str, Any]) -> Dict[str, Any]:
-        """ Return the last record from the queryset."""
-        record = self.current_queryset.last()
-        return {
-            "data": self._serialize(record),
-            "metadata": {"last": True, "response_type": ResponseType.INSTANCE.value},
-        }
+    def _handle_update_or_create(self, ast: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing object, or create it if it doesn't exist."""
+        return self._lookup_or_mutate(ast, existing_action=ActionType.UPDATE, save_on_existing=True)
 
     def _handle_exists(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Check if the queryset has any results."""
