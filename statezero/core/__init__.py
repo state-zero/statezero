@@ -8,6 +8,8 @@ from statezero.core.interfaces import (AbstractCustomQueryset,
                                        AbstractEventEmitter,
                                        AbstractORMProvider, AbstractPermission,
                                        AbstractSchemaGenerator)
+from statezero.core.permission_resolver import PermissionResolver
+from statezero.core.permission_bound import PermissionBound, SyntheticRequest
 from statezero.core.types import ActionType, ORMField, ORMModel, RequestType
 
 __all__ = [
@@ -28,7 +30,11 @@ __all__ = [
     "AbstractDataSerializer",
     "AbstractSchemaGenerator",
     "AbstractEventEmitter",
-    "AbstractPermission"
+    "AbstractPermission",
+    # Permission API
+    "PermissionResolver",
+    "PermissionBound",
+    "SyntheticRequest",
 ]
 
 __version__ = "0.1.0"
