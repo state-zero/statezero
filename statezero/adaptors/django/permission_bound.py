@@ -69,12 +69,18 @@ class PermissionBound:
         self.update_fields = resolver.permitted_fields(model, "update")
         self.create_fields = resolver.permitted_fields(model, "create")
 
-        # Build nested fields map for serialization
+        # Build nested fields maps for serialization/deserialization
         self.read_fields_map = self._build_fields_map(depth, "read")
+        self.create_fields_map = self._build_fields_map(0, "create")
+        self.update_fields_map = self._build_fields_map(0, "update")
 
         # Apply queryset-level permissions
         raw_qs = model.objects.all()
         self.base_queryset = resolver.apply_queryset_permissions(model, raw_qs)
+
+    def permitted_fields(self, model, operation_type):
+        """Resolve permitted fields for any model (used by ASTParser for nested field validation)."""
+        return self.resolver.permitted_fields(model, operation_type)
 
     @property
     def objects(self):

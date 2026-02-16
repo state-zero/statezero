@@ -68,21 +68,6 @@ def _extract_filter_fields(ast_node: Dict[str, Any]) -> Set[str]:
     return fields
 
 
-def _filter_writable_data(
-    data: Dict[str, Any],
-    req: Any,
-    model: Type,
-    model_config: ModelConfig,
-    orm_provider: AbstractORMProvider,
-    create: bool = False,
-    extra_fields: str = "ignore",
-) -> Dict[str, Any]:
-    """Filter out keys for which the user does not have write permission."""
-    from statezero.adaptors.django.permission_utils import filter_writable_data
-    all_fields = orm_provider.get_fields(model)
-    return filter_writable_data(data, req, model_config, all_fields, create=create, extra_fields=extra_fields)
-
-
 class RequestProcessor:
     def __init__(
         self,
@@ -110,15 +95,17 @@ class RequestProcessor:
             # Skip this check if the request was authenticated via sync token (for CLI schema generation)
             is_sync_token_access = getattr(req, '_statezero_sync_token_access', False)
             if not self.config.DEBUG and not is_sync_token_access:
-                from statezero.adaptors.django.permission_utils import resolve_allowed_actions
-                allowed_actions = resolve_allowed_actions(config, req)
+                from statezero.adaptors.django.permission_bound import PermissionBound
+                from statezero.adaptors.django.permission_resolver import PermissionResolver
+                resolver = PermissionResolver(req, self.registry, self.orm_provider)
+                bound = PermissionBound(model, req, resolver, self.orm_provider, self.data_serializer, depth=0)
                 required_actions = {
                     ActionType.CREATE,
                     ActionType.READ,
                     ActionType.UPDATE,
                     ActionType.DELETE,
                 }
-                if allowed_actions.isdisjoint(required_actions):
+                if bound.allowed_actions.isdisjoint(required_actions):
                     raise PermissionDenied(
                         "User does not have any permissions required to access the schema."
                     )
@@ -152,18 +139,17 @@ class RequestProcessor:
         model = self.orm_provider.get_model_by_name(model_name)
         model_config: ModelConfig = self.registry.get_config(model)
 
-        base_queryset = self.orm_provider.get_queryset(
-            req=req,
-            model=model,
-            initial_ast=initial_query_ast,
-        )
+        # ---- Build PermissionBound: single entry point for all permission logic ----
+        serializer_options = ast_body.get("serializerOptions", {})
+        requested_fields = (serializer_options or {}).get("fields", [])
+        depth = int((serializer_options or {}).get("depth", 0))
+        if requested_fields:
+            depth = max((field.count("__") for field in requested_fields), default=0) + 1
 
-        # Create a PermissionResolver for this request (caches permission lookups)
+        from statezero.adaptors.django.permission_bound import PermissionBound
         from statezero.adaptors.django.permission_resolver import PermissionResolver
         resolver = PermissionResolver(req, self.registry, self.orm_provider)
-
-        # Step 1+2: Apply filter_queryset (OR) + exclude_from_queryset (AND)
-        base_queryset = resolver.apply_queryset_permissions(model, base_queryset)
+        bound = PermissionBound(model, req, resolver, self.orm_provider, self.data_serializer, depth=depth)
 
         # Record telemetry for permission classes
         if telemetry_ctx:
@@ -171,35 +157,30 @@ class RequestProcessor:
                 permission_class_name = f"{permission_cls.__module__}.{permission_cls.__name__}"
                 telemetry_ctx.record_permission_class_applied(permission_class_name)
 
-        # ---- PERMISSION CHECKS: Global Level (Write operations remain here) ----
+        # ---- PERMISSION CHECKS: Global Level ----
         requested_actions: Set[ActionType] = ASTParser.get_requested_action_types(
             final_query_ast
         )
-
-        allowed_global_actions = resolver.allowed_actions(model)
-        if "__all__" not in allowed_global_actions:
-            if not requested_actions.issubset(allowed_global_actions):
-                missing = requested_actions - allowed_global_actions
+        if "__all__" not in bound.allowed_actions:
+            if not requested_actions.issubset(bound.allowed_actions):
+                missing = requested_actions - bound.allowed_actions
                 missing_str = ", ".join(action.value for action in missing)
                 raise PermissionDenied(
                     f"Missing global permissions for actions: {missing_str}"
                 )
 
-        serializer_options = ast_body.get("serializerOptions", {})
-
         extra_fields = self.config.effective_extra_fields
 
-        # ---- WRITE OPERATIONS: Filter incoming data to include only writable fields. ----
+        # ---- WRITE OPERATIONS: Filter incoming data to only writable fields ----
         op = final_query_ast.get("type")
         if op in ["create", "update"]:
             data = final_query_ast.get("data", {})
-            filtered_data = resolver.filter_writable_data(
+            final_query_ast["data"] = bound.resolver.filter_writable_data(
                 model, data, create=(op == "create"), extra_fields=extra_fields,
             )
-            final_query_ast["data"] = filtered_data
         elif op in ["get_or_create", "update_or_create"]:
             if "defaults" in final_query_ast:
-                final_query_ast["defaults"] = resolver.filter_writable_data(
+                final_query_ast["defaults"] = bound.resolver.filter_writable_data(
                     model, final_query_ast["defaults"],
                     create=True, extra_fields=extra_fields,
                 )
@@ -222,10 +203,10 @@ class RequestProcessor:
             model=model,
             config=self.config,
             registry=self.registry,
-            base_queryset=base_queryset,
+            base_queryset=bound.base_queryset,
             serializer_options=serializer_options or {},
             request=req,
-            resolver=resolver,
+            bound=bound,
         )
 
         # Validate AST (field permissions, filter conditions, ordering)

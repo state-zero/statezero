@@ -181,10 +181,6 @@ class DjangoORMAdapter(AbstractORMProvider):
             q_obj = visitor.visit(filter_ast)
             qs = qs.filter(q_obj)
 
-        # Check bulk update permissions
-        from statezero.adaptors.django.permission_utils import check_bulk_permissions
-        check_bulk_permissions(req, qs, ActionType.UPDATE, model)
-
         # Get the fields to update (keys from data plus primary key)
         update_fields = list(data.keys())
         update_fields.append(model._meta.pk.name)
@@ -304,9 +300,6 @@ class DjangoORMAdapter(AbstractORMProvider):
             visitor = QueryASTVisitor(model)
             q_obj = visitor.visit(filter_ast)
             qs = qs.filter(q_obj)
-
-        from statezero.adaptors.django.permission_utils import check_bulk_permissions
-        check_bulk_permissions(req, qs, ActionType.DELETE, model)
 
         # TODO: this should be a values list, but we need to check the bulk event emitter code
         pk_field_name = model._meta.pk.name
@@ -498,19 +491,18 @@ class DjangoORMAdapter(AbstractORMProvider):
     ) -> bool:
         """
         Fast validation without database queries.
-        Only checks model-level permissions and serializer validation.
+        Uses PermissionBound for permission checks and serializer validation.
         """
-        from statezero.adaptors.django.permission_utils import has_operation_permission, resolve_permission_fields
+        from statezero.adaptors.django.permission_bound import PermissionBound
+        from statezero.adaptors.django.permission_resolver import PermissionResolver
 
-        # Basic model-level permission check (no DB query)
-        model_config = registry.get_config(model)
-        if not has_operation_permission(model_config, request, validate_type):
-            raise PermissionDenied(f"{validate_type.title()} not allowed")
+        resolver = PermissionResolver(request, registry, self)
+        bound = PermissionBound(model, request, resolver, self, serializer, depth=0)
 
-        # Get field permissions (inlined from _get_allowed_fields)
-        all_fields = self.get_fields(model)
         operation_type = "create" if validate_type == "create" else "update"
-        allowed_fields = resolve_permission_fields(model_config, request, operation_type, all_fields)
+        allowed_fields = bound.permitted_fields(model, operation_type)
+        if not allowed_fields:
+            raise PermissionDenied(f"{validate_type.title()} not allowed")
 
         # Filter data to only allowed fields
         filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
