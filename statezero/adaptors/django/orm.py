@@ -164,11 +164,10 @@ class DjangoORMAdapter(AbstractORMProvider):
         queryset: QuerySet,
         node: Dict[str, Any],
         req: RequestType,
-        readable_fields: Set[str] = None,
     ) -> Tuple[int, List[Dict[str, Union[int, str]]]]:
         """
         Update operations with support for F expressions.
-        Includes permission checks for fields referenced in F expressions.
+        Permission checks are handled by PermissionBound before this is called.
         """
         model = queryset.model
         data: Dict[str, Any] = node.get("data", {})
@@ -201,21 +200,7 @@ class DjangoORMAdapter(AbstractORMProvider):
                 except FieldDoesNotExist:
                     pass
 
-                # It's an F expression - check permissions and process it
                 try:
-                    # Extract field names referenced in the F expression
-                    referenced_fields = FExpressionHandler.extract_referenced_fields(
-                        value
-                    )
-
-                    # Check that user has READ permissions for all referenced fields
-                    for field in referenced_fields:
-                        if field not in readable_fields:
-                            raise PermissionDenied(
-                                f"No permission to read field '{field}' referenced in F expression"
-                            )
-
-                    # Process the F expression now that permissions are verified
                     processed_data[key] = FExpressionHandler.process_expression(value)
                 except ValueError as e:
                     logger.error(f"Error processing F expression for field {key}: {e}")

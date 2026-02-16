@@ -161,29 +161,9 @@ class RequestProcessor:
         requested_actions: Set[ActionType] = ASTParser.get_requested_action_types(
             final_query_ast
         )
-        if "__all__" not in bound.allowed_actions:
-            if not requested_actions.issubset(bound.allowed_actions):
-                missing = requested_actions - bound.allowed_actions
-                missing_str = ", ".join(action.value for action in missing)
-                raise PermissionDenied(
-                    f"Missing global permissions for actions: {missing_str}"
-                )
+        bound.require_actions(requested_actions)
 
         extra_fields = self.config.effective_extra_fields
-
-        # ---- WRITE OPERATIONS: Filter incoming data to only writable fields ----
-        op = final_query_ast.get("type")
-        if op in ["create", "update"]:
-            data = final_query_ast.get("data", {})
-            final_query_ast["data"] = bound.resolver.filter_writable_data(
-                model, data, create=(op == "create"), extra_fields=extra_fields,
-            )
-        elif op in ["get_or_create", "update_or_create"]:
-            if "defaults" in final_query_ast:
-                final_query_ast["defaults"] = bound.resolver.filter_writable_data(
-                    model, final_query_ast["defaults"],
-                    create=True, extra_fields=extra_fields,
-                )
 
         # Extract filter/exclude fields and pass them separately for merging after __all__ resolution
         filter_fields = set()

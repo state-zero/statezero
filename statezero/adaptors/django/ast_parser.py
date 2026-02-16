@@ -328,51 +328,8 @@ class ASTParser:
             return False
 
     def is_field_allowed(self, model: Type, field_path: str) -> bool:
-        """
-        Validates a nested field path by checking permission settings for each model
-        encountered along the path.
-        """
-        parts = field_path.split("__")
-        current_model = model
-
-        allowed = self._permitted_fields(current_model, "read")
-        if not allowed:
-            return False
-
-        for part in parts:
-            if part in _FILTER_MODIFIERS:
-                break
-
-            if part == "pk" or part == current_model._meta.pk.name:
-                break
-
-            if part not in allowed and "__all__" not in str(allowed):
-                return False
-
-            if self.engine.is_nested_path_field(current_model, part):
-                return True
-
-            # Use _meta to check if this is a relation field
-            is_relation, related_model_cls = self._resolve_field_relation(current_model, part)
-            if is_relation and related_model_cls:
-                allowed = self._permitted_fields(related_model_cls, "read")
-                if not allowed:
-                    return False
-                current_model = related_model_cls
-                continue
-            else:
-                # Check if the field exists at all (non-relation field)
-                try:
-                    current_model._meta.get_field(part)
-                    # It's a non-relation field, stop traversing
-                    break
-                except Exception:
-                    # Check if it's an additional field
-                    if self._is_additional_field(current_model, part):
-                        break
-                    return False
-
-        return True
+        """Delegates to PermissionBound for field-path permission checks."""
+        return self.bound.is_field_allowed(model, field_path)
 
     def validate_filterable_field(self, model: Type, field_path: str) -> None:
         """
@@ -613,13 +570,14 @@ class ASTParser:
         )
         ast["data"] = validated_data
 
+        # Check F-expression field permissions via PermissionBound
+        self.bound.check_f_expression_fields(validated_data)
+
         # Update records and get the count and affected instance IDs
-        readable_fields = self.bound.read_fields if self.bound else set()
         updated_count, updated_instances = self.engine.update(
             self.current_queryset,
             ast,
             self.request,
-            readable_fields=readable_fields,
         )
 
         return {
