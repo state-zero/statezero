@@ -69,12 +69,122 @@ class PermissionBound:
         self.update_fields = resolver.permitted_fields(model, "update")
         self.create_fields = resolver.permitted_fields(model, "create")
 
-        # Build nested fields map for serialization
+        # Build nested fields maps for serialization/deserialization
         self.read_fields_map = self._build_fields_map(depth, "read")
+        self.create_fields_map = self._build_fields_map(0, "create")
+        self.update_fields_map = self._build_fields_map(0, "update")
 
         # Apply queryset-level permissions
         raw_qs = model.objects.all()
         self.base_queryset = resolver.apply_queryset_permissions(model, raw_qs)
+
+    def require_actions(self, requested_actions):
+        """Raise PermissionDenied if any requested actions are not allowed."""
+        if "__all__" in self.allowed_actions:
+            return
+        if not requested_actions.issubset(self.allowed_actions):
+            missing = requested_actions - self.allowed_actions
+            missing_str = ", ".join(action.value for action in missing)
+            raise PermissionDenied(
+                f"Missing global permissions for actions: {missing_str}"
+            )
+
+    def permitted_fields(self, model, operation_type):
+        """Resolve permitted fields for any model (used by ASTParser for nested field validation)."""
+        return self.resolver.permitted_fields(model, operation_type)
+
+    def is_field_allowed(self, model, field_path):
+        """
+        Check if a user has read permission along a nested field path.
+        e.g. "user__profile__status" checks read permission at each hop.
+        """
+        from statezero.adaptors.django.ast_parser import _FILTER_MODIFIERS
+        from statezero.adaptors.django.config import registry
+
+        parts = field_path.split("__")
+        current_model = model
+
+        allowed = self.resolver.permitted_fields(current_model, "read")
+        if not allowed:
+            return False
+
+        for part in parts:
+            if part in _FILTER_MODIFIERS:
+                break
+
+            if part == "pk" or part == current_model._meta.pk.name:
+                break
+
+            if part not in allowed and "__all__" not in str(allowed):
+                return False
+
+            if self.orm_provider.is_nested_path_field(current_model, part):
+                return True
+
+            is_relation, related_model_cls = self._resolve_field_relation(
+                current_model, part, registry,
+            )
+            if is_relation and related_model_cls:
+                allowed = self.resolver.permitted_fields(related_model_cls, "read")
+                if not allowed:
+                    return False
+                current_model = related_model_cls
+                continue
+            else:
+                try:
+                    current_model._meta.get_field(part)
+                    break
+                except Exception:
+                    try:
+                        model_config = registry.get_config(current_model)
+                        if part in {f.name for f in model_config.additional_fields}:
+                            break
+                    except (ValueError, AttributeError):
+                        pass
+                    return False
+
+        return True
+
+    def check_f_expression_fields(self, data):
+        """Raise PermissionDenied if any F-expression references fields the user can't read."""
+        from statezero.adaptors.django.f_handler import FExpressionHandler
+
+        for key, value in data.items():
+            if isinstance(value, dict) and value.get("__f_expr"):
+                referenced_fields = FExpressionHandler.extract_referenced_fields(value)
+                for field in referenced_fields:
+                    if field not in self.read_fields:
+                        raise PermissionDenied(
+                            f"No permission to read field '{field}' referenced in F expression"
+                        )
+
+    @staticmethod
+    def _resolve_field_relation(model, field_name, registry):
+        """Check if field_name is a relation on model. Returns (is_relation, related_model_class)."""
+        try:
+            field = model._meta.get_field(field_name)
+            if isinstance(field, ForeignObjectRel):
+                try:
+                    model_config = registry.get_config(model)
+                    configured_fields = model_config.fields
+                    if configured_fields == "__all__" or field_name not in configured_fields:
+                        return False, None
+                except (ValueError, KeyError):
+                    return False, None
+                if getattr(field, 'related_model', None):
+                    return True, field.related_model
+                return False, None
+            if field.is_relation and getattr(field, 'related_model', None):
+                return True, field.related_model
+            return False, None
+        except Exception:
+            try:
+                for af in registry.get_config(model).additional_fields:
+                    if af.name == field_name and getattr(af.field, 'related_model', None):
+                        return True, af.field.related_model
+            except (ValueError, KeyError):
+                pass
+            return False, None
 
     @property
     def objects(self):

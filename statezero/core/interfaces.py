@@ -110,7 +110,6 @@ class AbstractORMProvider(ABC):
         queryset: ORMQuerySet,
         node: Dict[str, Any],
         req: RequestType,
-        readable_fields: Optional[Set[str]] = None,
     ) -> Tuple[int, List[Any]]:
         """
         Update records in the queryset.
