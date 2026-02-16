@@ -622,15 +622,13 @@ class FieldPermissionsView(APIView):
                     {"error": f"Model {model_name} not registered"}, status=404
                 )
 
-            # Use PermissionBound to resolve field permissions
-            from statezero.adaptors.django.permission_bound import PermissionBound
-            from statezero.adaptors.django.permission_resolver import PermissionResolver
-            resolver = PermissionResolver(request, registry, processor.orm_provider)
-            bound = PermissionBound(model, request, resolver, processor.orm_provider, processor.data_serializer, depth=0)
+            # Compute field permissions using the same logic as ASTParser._get_operation_fields
+            all_fields = processor.orm_provider.get_fields(model)
 
-            visible_fields = bound.read_fields
-            creatable_fields = bound.create_fields
-            editable_fields = bound.update_fields
+            from statezero.adaptors.django.permission_utils import resolve_permission_fields
+            visible_fields = resolve_permission_fields(model_config, request, "read", all_fields)
+            creatable_fields = resolve_permission_fields(model_config, request, "create", all_fields)
+            editable_fields = resolve_permission_fields(model_config, request, "update", all_fields)
 
             return Response(
                 {

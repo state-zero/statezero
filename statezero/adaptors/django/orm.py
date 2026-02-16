@@ -164,10 +164,11 @@ class DjangoORMAdapter(AbstractORMProvider):
         queryset: QuerySet,
         node: Dict[str, Any],
         req: RequestType,
+        readable_fields: Set[str] = None,
     ) -> Tuple[int, List[Dict[str, Union[int, str]]]]:
         """
         Update operations with support for F expressions.
-        Permission checks are handled by PermissionBound before this is called.
+        Includes permission checks for fields referenced in F expressions.
         """
         model = queryset.model
         data: Dict[str, Any] = node.get("data", {})
@@ -179,6 +180,10 @@ class DjangoORMAdapter(AbstractORMProvider):
             visitor = QueryASTVisitor(model)
             q_obj = visitor.visit(filter_ast)
             qs = qs.filter(q_obj)
+
+        # Check bulk update permissions
+        from statezero.adaptors.django.permission_utils import check_bulk_permissions
+        check_bulk_permissions(req, qs, ActionType.UPDATE, model)
 
         # Get the fields to update (keys from data plus primary key)
         update_fields = list(data.keys())
@@ -200,7 +205,21 @@ class DjangoORMAdapter(AbstractORMProvider):
                 except FieldDoesNotExist:
                     pass
 
+                # It's an F expression - check permissions and process it
                 try:
+                    # Extract field names referenced in the F expression
+                    referenced_fields = FExpressionHandler.extract_referenced_fields(
+                        value
+                    )
+
+                    # Check that user has READ permissions for all referenced fields
+                    for field in referenced_fields:
+                        if field not in readable_fields:
+                            raise PermissionDenied(
+                                f"No permission to read field '{field}' referenced in F expression"
+                            )
+
+                    # Process the F expression now that permissions are verified
                     processed_data[key] = FExpressionHandler.process_expression(value)
                 except ValueError as e:
                     logger.error(f"Error processing F expression for field {key}: {e}")
@@ -285,6 +304,9 @@ class DjangoORMAdapter(AbstractORMProvider):
             visitor = QueryASTVisitor(model)
             q_obj = visitor.visit(filter_ast)
             qs = qs.filter(q_obj)
+
+        from statezero.adaptors.django.permission_utils import check_bulk_permissions
+        check_bulk_permissions(req, qs, ActionType.DELETE, model)
 
         # TODO: this should be a values list, but we need to check the bulk event emitter code
         pk_field_name = model._meta.pk.name
@@ -476,18 +498,19 @@ class DjangoORMAdapter(AbstractORMProvider):
     ) -> bool:
         """
         Fast validation without database queries.
-        Uses PermissionBound for permission checks and serializer validation.
+        Only checks model-level permissions and serializer validation.
         """
-        from statezero.adaptors.django.permission_bound import PermissionBound
-        from statezero.adaptors.django.permission_resolver import PermissionResolver
+        from statezero.adaptors.django.permission_utils import has_operation_permission, resolve_permission_fields
 
-        resolver = PermissionResolver(request, registry, self)
-        bound = PermissionBound(model, request, resolver, self, serializer, depth=0)
-
-        operation_type = "create" if validate_type == "create" else "update"
-        allowed_fields = bound.permitted_fields(model, operation_type)
-        if not allowed_fields:
+        # Basic model-level permission check (no DB query)
+        model_config = registry.get_config(model)
+        if not has_operation_permission(model_config, request, validate_type):
             raise PermissionDenied(f"{validate_type.title()} not allowed")
+
+        # Get field permissions (inlined from _get_allowed_fields)
+        all_fields = self.get_fields(model)
+        operation_type = "create" if validate_type == "create" else "update"
+        allowed_fields = resolve_permission_fields(model_config, request, operation_type, all_fields)
 
         # Filter data to only allowed fields
         filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
