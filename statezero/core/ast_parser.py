@@ -1,4 +1,6 @@
 from enum import Enum
+import hashlib
+import json
 from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Tuple, Literal
 from collections import deque
 import networkx as nx
@@ -1048,11 +1050,9 @@ class ASTParser:
         else:
             paginated_qs = self.current_queryset[offset : offset + limit_val]
 
-        # Create operation context that includes fields
-        # since serialization happens after SQL execution
-        # Note: depth is implicit in fields_map (which includes nested model fields)
-        fields_str = str(sorted(str(self.read_fields_map))) if self.read_fields_map else "default"
-        operation_context = f"read:fields={fields_str}"
+        # Create operation context that includes a stable visible_fields fingerprint.
+        # This isolates cached read responses by response shape.
+        operation_context = f"read:fields_hash={self._visible_fields_fingerprint()}"
 
         # Try cache with the paginated queryset and operation context
         # This also handles waiting for other requests processing the same query (request coalescing)
@@ -1096,6 +1096,17 @@ class ASTParser:
         cache_query_result(paginated_qs, result, operation_context)
 
         return result
+
+    def _visible_fields_fingerprint(self) -> str:
+        """
+        Return a stable hash of read_fields_map for cache-key isolation.
+        """
+        normalized: Dict[str, List[str]] = {}
+        for model_name, fields in (self.read_fields_map or {}).items():
+            normalized[model_name] = sorted(list(fields))
+
+        payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     # --- Helper Methods ---
 

@@ -594,9 +594,6 @@ class DjangoORMAdapter(AbstractORMProvider):
                     f"Multiple {model.__name__} instances match the given query."
                 )
 
-        # Check object-level permissions for reading
-        check_object_permissions(req, instance, ActionType.READ, permissions, model)
-
         return instance
 
     def _normalize_foreign_keys(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -636,8 +633,6 @@ class DjangoORMAdapter(AbstractORMProvider):
             instance = queryset.get(**lookup)
             created = False
 
-            # Check object-level permission to read the existing object
-            check_object_permissions(req, instance, ActionType.READ, permissions, model)
         except model.DoesNotExist:
             # Object doesn't exist, we'll create it
             instance = None
@@ -799,7 +794,7 @@ class DjangoORMAdapter(AbstractORMProvider):
         permissions: List[Type[AbstractPermission]] = None,
     ) -> QuerySet:
         """
-        Fetch a list of model instances with bulk permission checks.
+        Fetch a list of model instances for read operations.
 
         Args:
             queryset: The queryset to paginate
@@ -809,17 +804,12 @@ class DjangoORMAdapter(AbstractORMProvider):
             permissions: List of permission classes to check
 
         Returns:
-            A sliced queryset after permission checks
+            A sliced queryset
         """
-        model = queryset.model
         offset = offset or 0
 
-        # FIXED: Perform bulk permission checks BEFORE slicing
-        if req is not None and permissions:
-            # Use the existing bulk permission check function on the unsliced queryset
-            check_bulk_permissions(req, queryset, ActionType.READ, permissions, model)
-
-        # THEN apply pagination/slicing
+        # NOTE: Read authorization is enforced via filter_queryset/exclude_from_queryset.
+        # bulk_operation_allowed is write-path only.
         if limit is None:
             qs = queryset[offset:]
         else:

@@ -2,6 +2,7 @@
 Tests for query-level caching (reads and aggregates).
 """
 import hashlib
+from typing import Any, Set, Type
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -1267,14 +1268,10 @@ class QueryCacheIntegrationTest(TransactionTestCase):
 
     def test_pagination_with_permission_filter_queryset(self):
         """
-        Test that pagination works with permission classes that filter the queryset
-        in bulk_operation_allowed.
+        Test that pagination works with permission classes that filter via filter_queryset.
 
-        This test reproduces the original bug where passing a sliced queryset to
-        check_bulk_permissions would cause:
-        "TypeError: Cannot filter a query once a slice has been taken"
-
-        The fix was to call check_bulk_permissions BEFORE slicing the queryset.
+        Read operations should not call bulk_operation_allowed; authorization for reads
+        comes from queryset filtering and field visibility.
         """
         from tests.django_app.models import NameFilterCustomPKModel
         from statezero.adaptors.django.config import registry
@@ -1309,9 +1306,6 @@ class QueryCacheIntegrationTest(TransactionTestCase):
                 NameFilterCustomPKModel.objects.create(name=f"Denied{i:02d}")
 
             # Request with pagination (limit 3, offset 0)
-            # This would have failed before the fix with:
-            # "TypeError: Cannot filter a query once a slice has been taken"
-            # Because the permission's bulk_operation_allowed would receive a sliced queryset
             payload = {
                 "ast": {
                     "query": {
@@ -1366,6 +1360,102 @@ class QueryCacheIntegrationTest(TransactionTestCase):
                 registry._models_config[NameFilterCustomPKModel] = original_config
             else:
                 # If it wasn't registered before, remove it
+                registry._models_config.pop(NameFilterCustomPKModel, None)
+
+    def test_read_does_not_use_bulk_or_object_level_permissions(self):
+        """
+        Read path must rely on queryset/field permissions only.
+        bulk_operation_allowed and allowed_object_actions are write-path checks.
+        """
+        from tests.django_app.models import NameFilterCustomPKModel
+        from statezero.adaptors.django.config import registry
+        from statezero.core.config import ModelConfig
+        from statezero.core.interfaces import AbstractPermission
+        from statezero.core.types import ActionType, ORMModel, RequestType
+        from rest_framework.test import APIClient
+
+        class ReadOnlyFilterPermission(AbstractPermission):
+            def filter_queryset(self, request: RequestType, queryset: Any) -> Any:
+                # Keep SQL identical across users so cache/coalescing can be shared.
+                return queryset
+
+            def allowed_actions(
+                self, request: RequestType, model: Type[ORMModel]
+            ) -> Set[ActionType]:
+                return {ActionType.READ}
+
+            def allowed_object_actions(
+                self, request: RequestType, obj: Any, model: Type[ORMModel]
+            ) -> Set[ActionType]:
+                raise AssertionError("allowed_object_actions should not be called for read list")
+
+            def bulk_operation_allowed(
+                self, request: RequestType, items: Any, action_type: ActionType, model: type
+            ) -> bool:
+                raise AssertionError("bulk_operation_allowed should not be called for read list")
+
+            def visible_fields(self, request: RequestType, model: Type) -> Set[str]:
+                return "__all__"
+
+            def editable_fields(self, request: RequestType, model: Type) -> Set[str]:
+                return set()
+
+            def create_fields(self, request: RequestType, model: Type) -> Set[str]:
+                return set()
+
+        original_config = registry._models_config.get(NameFilterCustomPKModel)
+        registry._models_config[NameFilterCustomPKModel] = ModelConfig(
+            model=NameFilterCustomPKModel,
+            filterable_fields={"name", "custom_pk"},
+            searchable_fields={"name"},
+            ordering_fields={"name", "custom_pk"},
+            permissions=[ReadOnlyFilterPermission],
+        )
+
+        try:
+            url = reverse("statezero:model_view", args=["django_app.NameFilterCustomPKModel"])
+            NameFilterCustomPKModel.objects.all().delete()
+            NameFilterCustomPKModel.objects.create(name="ItemA")
+            NameFilterCustomPKModel.objects.create(name="ItemB")
+
+            staff_user = User.objects.create_user(
+                username="staff_cache_user",
+                password="password",
+                is_staff=True,
+            )
+            non_staff_user = User.objects.create_user(
+                username="nonstaff_cache_user",
+                password="password",
+                is_staff=False,
+            )
+
+            staff_client = APIClient()
+            staff_client.force_authenticate(user=staff_user)
+            nonstaff_client = APIClient()
+            nonstaff_client.force_authenticate(user=non_staff_user)
+
+            payload = {"ast": {"query": {"type": "read"}}}
+            canonical_id = "txn-read-filter-only-001"
+
+            staff_response = staff_client.post(
+                url,
+                data=payload,
+                format="json",
+                HTTP_X_CANONICAL_ID=canonical_id,
+            )
+            self.assertEqual(staff_response.status_code, 200)
+
+            nonstaff_response = nonstaff_client.post(
+                url,
+                data=payload,
+                format="json",
+                HTTP_X_CANONICAL_ID=canonical_id,
+            )
+            self.assertEqual(nonstaff_response.status_code, 200)
+        finally:
+            if original_config:
+                registry._models_config[NameFilterCustomPKModel] = original_config
+            else:
                 registry._models_config.pop(NameFilterCustomPKModel, None)
 
     def test_request_coalescing_thundering_herd(self):
