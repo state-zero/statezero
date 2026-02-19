@@ -50,6 +50,26 @@ def _make_validated_action_permission_class(perm_class: Type[AbstractActionPermi
     return ValidatedActionPermissionClass
 
 
+def _make_validated_action_permission_instance(perm_instance: AbstractActionPermission):
+    """
+    Wraps an existing permission instance (e.g. AnyOf/AllOf) so it can be
+    used in the same slot as a permission class.  The views layer calls
+    ``permission_class()`` — this wrapper returns the ValidatedActionPermission
+    when called.
+    """
+    cls_name = type(perm_instance).__name__
+    validated = ValidatedActionPermission(perm_instance, cls_name)
+
+    class ValidatedInstanceWrapper:
+        def __new__(cls, *args, **kwargs):
+            return validated
+
+    ValidatedInstanceWrapper.__name__ = f"Validated{cls_name}"
+    ValidatedInstanceWrapper.__qualname__ = f"Validated{cls_name}"
+
+    return ValidatedInstanceWrapper
+
+
 class ActionRegistry:
     """Framework-agnostic action registry"""
 
@@ -84,10 +104,16 @@ class ActionRegistry:
                 permission_list = []
             elif isinstance(permissions, list):
                 permission_list = [
-                    _make_validated_action_permission_class(p) for p in permissions
+                    _make_validated_action_permission_instance(p)
+                    if isinstance(p, AbstractActionPermission)
+                    else _make_validated_action_permission_class(p)
+                    for p in permissions
                 ]
             else:
-                permission_list = [_make_validated_action_permission_class(permissions)]
+                if isinstance(permissions, AbstractActionPermission):
+                    permission_list = [_make_validated_action_permission_instance(permissions)]
+                else:
+                    permission_list = [_make_validated_action_permission_class(permissions)]
 
             self._actions[action_name] = {
                 "function": func,
