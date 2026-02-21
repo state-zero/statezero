@@ -29,7 +29,8 @@
       "Bash(DJANGO_SETTINGS_MODULE=tests.settings python -m django makemigrations:*)",
       "Bash(/Users/robertherring/code/statezero/venv/bin/python -m pytest:*)",
       "Bash(unset:*)",
-      "Bash(source:*)"
+      "Bash(source:*)",
+      "Bash(DJANGO_SETTINGS_MODULE=tests.settings python:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"

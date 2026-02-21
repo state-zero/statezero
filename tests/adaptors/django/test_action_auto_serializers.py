@@ -257,3 +257,4 @@ class ActionAutoSerializerTests(SimpleTestCase):
         field = serializer.fields["models"]
         self.assertIsInstance(field, serializers.ManyRelatedField)
         self.assertIsInstance(field.child_relation, serializers.PrimaryKeyRelatedField)
+
