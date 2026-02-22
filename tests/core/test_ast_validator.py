@@ -42,7 +42,7 @@ class DummyPermission(AbstractPermission):
         elif model == DeepModelLevel3:
             return {"name"}
         elif model == ComprehensiveModel:
-            return {"name", "value"}
+            return {"char_field", "int_field"}
         return set()
 
     def editable_fields(self, request, model):
@@ -231,10 +231,10 @@ class TestASTValidator(TestCase):
         )
         # Valid AST for DeepModelLevel1:
         # "level2__level3__name" should be allowed (DeepModelLevel1 -> DeepModelLevel2 -> DeepModelLevel3)
-        # and "comprehensive_models__name" should be allowed (comprehensive_models points to DummyModel).
+        # and "comprehensive_models__char_field" should be allowed (comprehensive_models points to ComprehensiveModel).
         ast = {
             "serializerOptions": {
-                "fields": ["name", "level2__level3__name", "comprehensive_models__name"]
+                "fields": ["name", "level2__level3__name", "comprehensive_models__char_field"]
             }
         }
         try:

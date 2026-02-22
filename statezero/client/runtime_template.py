@@ -77,6 +77,7 @@ def configure(url=None, token=None, headers=None, transport=None, upload_mode="s
     if upload_mode not in ("server", "s3"):
         raise ValueError(f"upload_mode must be 'server' or 's3', got {upload_mode!r}")
     _upload_mode = upload_mode
+    _field_permissions_cache.clear()
     if transport:
         _transport = transport
     else:
@@ -413,9 +414,10 @@ class Model:
 
     @classmethod
     def get_field_permissions(cls):
-        if cls._model_name not in _field_permissions_cache:
-            _field_permissions_cache[cls._model_name] = _transport.get_field_permissions(cls._model_name)
-        return _field_permissions_cache[cls._model_name]
+        cache_key = (id(_transport), cls._model_name)
+        if cache_key not in _field_permissions_cache:
+            _field_permissions_cache[cache_key] = _transport.get_field_permissions(cls._model_name)
+        return _field_permissions_cache[cache_key]
 
     def to_dict(self):
         return dict(self._raw)

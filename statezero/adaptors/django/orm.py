@@ -36,23 +36,6 @@ logger.setLevel(logging.DEBUG)
 # AST Visitor for Django (builds Django Q objects)
 # -------------------------------------------------------------------
 class QueryASTVisitor:
-    SUPPORTED_OPERATORS: Set[str] = {
-        "contains",
-        "icontains",
-        "startswith",
-        "istartswith",
-        "endswith",
-        "iendswith",
-        "lt",
-        "gt",
-        "lte",
-        "gte",
-        "in",
-        "eq",
-        "exact",
-        "isnull",
-    }
-
     def __init__(self, model: Type[models.Model]) -> None:
         self.model = model
 
