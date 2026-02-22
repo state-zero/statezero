@@ -171,7 +171,7 @@ def check_object_permissions(
         allowed_obj_actions |= perm.allowed_object_actions(req, instance, model)
     if action not in allowed_obj_actions:
         raise PermissionDenied(
-            f"Object-level permission denied: Missing {action.value} on object {instance}"
+            f"Object-level permission denied: Missing {action.value} on {model.__name__} instance."
         )
 
 

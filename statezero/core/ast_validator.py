@@ -296,6 +296,12 @@ class ASTValidator:
         """
         Complete AST validation including both field permissions and filter validation.
         """
+        # Reject unsupported AST keys — queries are auto-optimized based on the requested fields
+        if "selectRelated" in ast:
+            raise ValidationError("selectRelated is not supported. Queries are automatically optimized based on the requested fields.")
+        if "prefetchRelated" in ast:
+            raise ValidationError("prefetchRelated is not supported. Queries are automatically optimized based on the requested fields.")
+
         # Validate field access permissions
         self.validate_fields(ast, root_model, error_on_extra=error_on_extra)
 

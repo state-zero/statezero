@@ -248,16 +248,8 @@ class TestRowFilteredPermissions(SecurityTestBase):
         count = RowFilteredItemClient.objects.count()
         self.assertEqual(count, 2)
 
-    @unittest.expectedFailure
     def test_get_invisible_raises_not_found(self):
-        """Trying to get a filtered-out row by id should raise NotFound.
-
-        BUG: client get(id=X) sends conditions as a separate key in the AST,
-        but the server-side engine.get() only looks at node["filter"] and
-        ignores node["conditions"]. So the conditions are never applied and
-        the get() operates on the entire permission-filtered queryset, which
-        returns 2 visible rows → MultipleObjectsReturned instead of NotFound.
-        """
+        """Trying to get a filtered-out row by id should raise NotFound."""
         hidden = RowFilteredItem.objects.get(name="hidden_item")
         self.configure_as_user()
         with self.assertRaises(NotFound):

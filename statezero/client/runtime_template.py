@@ -770,9 +770,8 @@ class QuerySet:
         return self._unwrap_list(self._execute(query))
 
     def get(self, depth=None, fields=None, **conditions):
-        query = {**self._build(), "type": "get"}
-        if conditions:
-            query["conditions"] = conditions
+        qs = self.filter(**conditions) if conditions else self
+        query = {**qs._build(), "type": "get"}
         serializer_options = {}
         if depth is not None:
             serializer_options["depth"] = depth

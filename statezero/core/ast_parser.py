@@ -498,7 +498,6 @@ class ASTParser:
         Applies common query modifiers (related fetching, filtering,
         ordering, field selection) then delegates the operation to a handler.
         """
-        self._apply_related(ast)
         self._apply_filter(ast)
         self._apply_search(ast)
         self._apply_exclude(ast)
@@ -509,16 +508,6 @@ class ASTParser:
         handler = self.handlers.get(op_type, self.default_handler)
         return handler(ast)
 
-    def _apply_related(self, ast: Dict[str, Any]) -> None:
-        """ Apply select_related and prefetch_related, updating current queryset."""
-        if "selectRelated" in ast and isinstance(ast["selectRelated"], list):
-            self.current_queryset = self.engine.select_related(
-                self.current_queryset, ast["selectRelated"]
-            )
-        if "prefetchRelated" in ast and isinstance(ast["prefetchRelated"], list):
-            self.current_queryset = self.engine.prefetch_related(
-                self.current_queryset, ast["prefetchRelated"]
-            )
 
     def _apply_filter(self, ast: Dict[str, Any]) -> None:
         """ Apply filter from AST to the queryset, updating current queryset."""
