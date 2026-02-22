@@ -1,6 +1,8 @@
 import json
+import os
 import requests
 import tempfile
+import unittest
 from django.test import TestCase, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
@@ -9,7 +11,10 @@ from rest_framework import status
 from django.core.files.storage import default_storage
 from tests.django_app.models import FileTest
 
+_has_s3 = bool(os.getenv('SPACES_ACCESS_KEY') and os.getenv('SPACES_SECRET_KEY'))
 
+
+@unittest.skipUnless(_has_s3, "S3 credentials not configured (SPACES_ACCESS_KEY / SPACES_SECRET_KEY)")
 class FastUploadViewTests(APITestCase):
     
     def setUp(self):
@@ -319,6 +324,7 @@ class FastUploadViewTests(APITestCase):
         default_storage.delete(file_path)
 
 
+@unittest.skipUnless(_has_s3, "S3 credentials not configured (SPACES_ACCESS_KEY / SPACES_SECRET_KEY)")
 class FastUploadIntegrationWithModelTests(APITestCase):
     """Integration tests with FileTest model using real S3 uploads"""
     
