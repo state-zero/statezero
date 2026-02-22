@@ -203,16 +203,18 @@ class ModelView(APIView):
                     result = processor.process_request(req=request)
 
             # Log telemetry data if enabled
+            telemetry_headers = {}
             if config.enable_telemetry and telemetry_ctx:
                 telemetry_data = telemetry_ctx.get_telemetry_data()
                 logger.warning(f"[StateZero Telemetry] {json.dumps(telemetry_data)}")
+                telemetry_headers['X-StateZero-Telemetry'] = json.dumps(telemetry_data)
 
         except Exception as original_exception:
             return explicit_exception_handler(original_exception)
         finally:
             clear_telemetry_context()
 
-        return Response(result, status=status.HTTP_200_OK)
+        return Response(result, status=status.HTTP_200_OK, headers=telemetry_headers)
 
 class SchemaView(APIView):
     permission_classes = [ORMBridgeViewAccessGate]

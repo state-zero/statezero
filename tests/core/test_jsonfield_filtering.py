@@ -84,6 +84,11 @@ class TestJSONFieldFiltering(TestCase):
 
     def setUp(self):
         self.adapter = DjangoORMAdapter()
+        self._saved_registry = dict(registry._models_config)
+
+    def tearDown(self):
+        registry._models_config.clear()
+        registry._models_config.update(self._saved_registry)
 
     def _setup_validator(self, permission_class):
         """Helper to set up the validator with given permissions."""
@@ -232,6 +237,11 @@ class TestJSONFieldInFilterConditions(TestCase):
 
     def setUp(self):
         self.adapter = DjangoORMAdapter()
+        self._saved_registry = dict(registry._models_config)
+
+    def tearDown(self):
+        registry._models_config.clear()
+        registry._models_config.update(self._saved_registry)
 
     def _setup_validator(self, permission_class):
         """Helper to set up the validator with given permissions."""

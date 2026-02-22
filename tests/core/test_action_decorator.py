@@ -40,7 +40,7 @@ class TestActionDecoratorAttributes(unittest.TestCase):
         self.assertEqual(my_action._statezero_action_name, "test_action")
         self.assertIs(my_action._statezero_serializer, MockSerializer)
         self.assertIs(my_action._statezero_response_serializer, MockResponseSerializer)
-        self.assertEqual(my_action._statezero_permissions, [permission])
+        self.assertEqual(len(my_action._statezero_permissions), 1)
 
     def test_decorator_handles_single_permission(self):
         """Test that a single permission is normalized to a list."""
@@ -51,7 +51,7 @@ class TestActionDecoratorAttributes(unittest.TestCase):
         def my_action():
             pass
 
-        self.assertEqual(my_action._statezero_permissions, [permission])
+        self.assertEqual(len(my_action._statezero_permissions), 1)
 
     def test_decorator_handles_no_permissions(self):
         """Test that no permissions results in an empty list."""

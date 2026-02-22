@@ -389,6 +389,7 @@ class QueryCacheIntegrationTest(TransactionTestCase):
     def tearDown(self):
         """Clean up after tests."""
         cache.clear()
+        current_canonical_id.set(None)
         DummyModel.objects.all().delete()
         DummyRelatedModel.objects.all().delete()
         User.objects.all().delete()

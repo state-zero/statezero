@@ -282,109 +282,74 @@ class SimpleValidateExposedModelsTests(TestCase):
         self.assertTrue(result)
 
     def test_deep_unregistered_relation_validation(self):
-        """Test validation with deep nested relationships to unregistered user model"""
-        # Create a fresh registry for this test
+        """Test validation with deep nested relationships where an intermediate model is unregistered.
+
+        Uses real test models: DeepModelLevel1 -> DeepModelLevel2 -> DeepModelLevel3
+        """
+        from tests.django_app.models import DeepModelLevel1, DeepModelLevel2, DeepModelLevel3
+
+        # Register only Level1 with level2 exposed — Level2 is unregistered
         registry._models_config.clear()
-        
-        # Define models with nested relations leading to User model
-        class UserProfile(models.Model):
-            """Profile directly connected to the User model"""
-            user = models.OneToOneField(
-                'auth.User',  # Django's built-in User model
-                on_delete=models.CASCADE,
-                related_name="profile"
-            )
-            bio = models.TextField()
-            
-            class Meta:
-                app_label = "django_app"
-                managed = False
-        
-        class UserContent(models.Model):
-            """Content created by a user, second level relation"""
-            profile = models.ForeignKey(
-                UserProfile,
-                on_delete=models.CASCADE,
-                related_name="contents"
-            )
-            title = models.CharField(max_length=100)
-            
-            class Meta:
-                app_label = "django_app"
-                managed = False
-        
-        class ContentComment(models.Model):
-            """Comments on content, third level relation to user"""
-            content = models.ForeignKey(
-                UserContent,
-                on_delete=models.CASCADE,
-                related_name="comments"
-            )
-            text = models.TextField()
-            
-            class Meta:
-                app_label = "django_app"
-                managed = False
-        
-        # Register only the ContentComment model with all fields exposed
         registry.register(
-            ContentComment,
+            DeepModelLevel1,
             ModelConfig(
-                model=ContentComment,
+                model=DeepModelLevel1,
                 permissions=[AllowAllPermission],
-                fields={"content", "text"},  # Explicitly include all fields
+                fields={"name", "level2"},
             )
         )
-        
-        # Validation should fail because of the deep relation path to unregistered User model
+
         with self.assertRaises(ValueError) as context:
             config.validate_exposed_models(registry)
-            
+
         error_msg = str(context.exception)
         self.assertIn("unregistered model", error_msg)
-        self.assertIn("content", error_msg)  # First level relation
-        
-        # Now register the middle models but not the User model
+        self.assertIn("level2", error_msg)
+
+        # Register Level2 but not Level3 — Level3 is still unregistered
         registry.register(
-            UserContent,
+            DeepModelLevel2,
             ModelConfig(
-                model=UserContent,
+                model=DeepModelLevel2,
                 permissions=[AllowAllPermission],
-                fields={"profile", "title"},  # Explicitly include all fields
+                fields={"name", "level3"},
             )
         )
-        
-        registry.register(
-            UserProfile,
-            ModelConfig(
-                model=UserProfile,
-                permissions=[AllowAllPermission],
-                fields={"user", "bio"},  # Explicitly include the user relation
-            )
-        )
-        
-        # Validation should still fail - now specifically because of the User model
+
         with self.assertRaises(ValueError) as context:
             config.validate_exposed_models(registry)
-            
+
         error_msg = str(context.exception)
         self.assertIn("unregistered model", error_msg)
-        self.assertIn("user", error_msg)  # The direct relation to User
-        self.assertIn("auth.user", error_msg.lower())  # The User model identifier
-        
-        # Finally, let's test with restricted fields
-        registry._models_config.clear()
-        
-        # Register with only the text field exposed
+        self.assertIn("level3", error_msg)
+
+        # Register all three — validation should pass
         registry.register(
-            ContentComment,
+            DeepModelLevel3,
             ModelConfig(
-                model=ContentComment,
-                permissions=[AllowAllPermission],  # Permission doesn't matter for field validation now
-                fields={"text"},  # Only expose the text field, not the relation
+                model=DeepModelLevel3,
+                permissions=[AllowAllPermission],
+                fields={"name"},
             )
         )
-        
-        # Validation should pass as the path to User is not exposed
+
+        result = config.validate_exposed_models(registry)
+        self.assertTrue(result)
+
+    def test_restricted_fields_skip_unregistered_relation(self):
+        """Excluding a relation field from 'fields' means validation ignores that path."""
+        from tests.django_app.models import DeepModelLevel1
+
+        registry._models_config.clear()
+        # Only expose 'name', not 'level2' — so Level2 being unregistered is fine
+        registry.register(
+            DeepModelLevel1,
+            ModelConfig(
+                model=DeepModelLevel1,
+                permissions=[AllowAllPermission],
+                fields={"name"},
+            )
+        )
+
         result = config.validate_exposed_models(registry)
         self.assertTrue(result)
