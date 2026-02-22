@@ -98,6 +98,13 @@ class ExposesRelationPermission(AllowAllPermission):
 class SimpleValidateExposedModelsTests(TestCase):
     """Tests for the validate_exposed_models functionality using basic approach"""
 
+    def setUp(self):
+        self._original_models_config = dict(registry._models_config)
+
+    def tearDown(self):
+        registry._models_config.clear()
+        registry._models_config.update(self._original_models_config)
+
     def test_valid_related_models_pass(self):
         """Test that models with relations to other registered models pass validation"""
         # Create a fresh registry for this test

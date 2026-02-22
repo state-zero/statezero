@@ -14,7 +14,7 @@ from statezero.client.runtime_template import (
 )
 from statezero.client.testing import DjangoTestTransport
 from tests.django_app.models import (
-    DummyModel, DummyRelatedModel, ProductCategory, Product,
+    DummyModel, DummyRelatedModel,
 )
 
 User = get_user_model()
@@ -40,18 +40,6 @@ class FileTestClient(Model):
     _model_name = "django_app.filetest"
     _pk_field = "id"
     _relations = {}
-
-
-class ProductCategoryClient(Model):
-    _model_name = "django_app.productcategory"
-    _pk_field = "id"
-    _relations = {}
-
-
-class ProductClient(Model):
-    _model_name = "django_app.product"
-    _pk_field = "id"
-    _relations = {"category": "django_app.productcategory"}
 
 
 # ---------------------------------------------------------------------------

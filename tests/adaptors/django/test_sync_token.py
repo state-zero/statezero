@@ -172,10 +172,20 @@ class SyncTokenPermissionTest(APITestCase):
 
 
 class EventsAuthSyncTokenTest(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        cls.user = User.objects.create_user(
+            username="events_sync_user", password="password"
+        )
+
     @override_settings(DEBUG=True, STATEZERO_SYNC_TOKEN="server-token")
     def test_events_auth_rejects_mismatched_sync_token(self):
         from statezero.adaptors.django.config import config as global_config
 
+        self.client.force_authenticate(user=self.user)
         url = reverse("statezero:events_auth")
         with patch.object(global_config, "event_bus") as event_bus:
             event_bus.broadcast_emitter = MagicMock()
@@ -198,6 +208,7 @@ class EventsAuthSyncTokenTest(APITestCase):
     def test_events_auth_accepts_matching_sync_token(self):
         from statezero.adaptors.django.config import config as global_config
 
+        self.client.force_authenticate(user=self.user)
         url = reverse("statezero:events_auth")
         with patch.object(global_config, "event_bus") as event_bus:
             event_bus.broadcast_emitter = MagicMock()
