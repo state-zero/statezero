@@ -303,10 +303,21 @@ class RequestProcessor:
                 for field_path in final_query_ast["lookup"].keys():
                     validator.validate_filterable_field(model, field_path)
             if "defaults" in final_query_ast:
-                final_query_ast["defaults"] = _filter_writable_data(
+                # Allow defaults through if permitted by either create_fields or
+                # editable_fields, since we don't know which path (create vs update)
+                # will be taken.  The ORM layer applies the correct fields_map per path.
+                create_filtered = _filter_writable_data(
                     final_query_ast["defaults"], req, model, model_config, self.orm_provider,
                     create=True, extra_fields=extra_fields,
                 )
+                update_filtered = _filter_writable_data(
+                    final_query_ast["defaults"], req, model, model_config, self.orm_provider,
+                    create=False, extra_fields=extra_fields,
+                )
+                final_query_ast["defaults"] = {
+                    k: v for k, v in final_query_ast["defaults"].items()
+                    if k in create_filtered or k in update_filtered
+                }
 
         # Extract filter/exclude fields and pass them separately for merging after __all__ resolution
         filter_fields = set()

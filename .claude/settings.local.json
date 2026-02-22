@@ -35,7 +35,8 @@
       "Bash(sort:*)",
       "Bash(for f in test_additive_permissions test_f_handler test_hook_fields test_money_field_integration test_nested_serializers test_partial_update test_permissions test_pydantic_field_integration test_repr_field test_signals test_validate test_validate_exposed_models test_walk_queryset test_reverse_relationships test_utils test_query_optimizer test_simple_history test_action_auto_serializers_api test_actions test_testing_middleware test_me_endpoint test_bulk_create test_concurrency_corruption_bug test_action_permissions test_action_auto_serializers test_generated_client test_exception_handling test_sync_token)",
       "Bash(do echo -n \"$f: \")",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(git stash:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rjher\\OneDrive\\Desktop\\Work\\statezero-client"

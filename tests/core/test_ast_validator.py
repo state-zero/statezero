@@ -146,6 +146,13 @@ class TestASTValidator(TestCase):
     def setUp(self):
         # Create an instance of the DjangoORMAdapter.
         self.adapter = DjangoORMAdapter()
+        # Save registry state so we can restore it after each test.
+        self._saved_registry = dict(registry._models_config)
+
+    def tearDown(self):
+        # Restore the original registry to avoid polluting other test suites.
+        registry._models_config.clear()
+        registry._models_config.update(self._saved_registry)
 
     def register_models(self, permission_class):
         """Helper to clear and register models with a given permission class."""

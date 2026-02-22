@@ -537,6 +537,17 @@ class ASTParser:
     def _apply_ordering(self, ast: Dict[str, Any]) -> None:
         """ Apply ordering, updating current queryset."""
         if "orderBy" in ast:
+            model_name = self.engine.get_model_name(self.model)
+            allowed = self.read_fields_map.get(model_name, set())
+            for field_path in ast["orderBy"]:
+                clean = field_path.lstrip("-")
+                # Only validate the root field segment; relation traversals
+                # (e.g. "related__name") are checked at the first hop.
+                root_field = clean.split("__")[0]
+                if root_field not in allowed:
+                    raise PermissionDenied(
+                        f"You do not have permission to order by field '{clean}'."
+                    )
             self.current_queryset = self.engine.order_by(
                 self.current_queryset, ast["orderBy"]
             )
@@ -926,6 +937,17 @@ class ASTParser:
             },
         }
 
+    def _validate_aggregate_field(self, field: str) -> None:
+        """Validate that an aggregate field is within the user's visible fields."""
+        if field == "*":
+            return  # count("*") is always allowed
+        model_name = self.engine.get_model_name(self.model)
+        allowed = self.read_fields_map.get(model_name, set())
+        if field not in allowed:
+            raise PermissionDenied(
+                f"You do not have permission to aggregate on field '{field}'."
+            )
+
     def _handle_aggregate(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """ Pass current queryset to all aggregate methods."""
         from statezero.core.query_cache import get_cached_query_result, cache_query_result
@@ -939,6 +961,7 @@ class ASTParser:
             aggs = ast.get("aggregates", {})
             agg_list = []
             for func, field in aggs.items():
+                self._validate_aggregate_field(field)
                 agg_list.append(
                     {"function": func, "field": field, "alias": f"{field}_{func}"}
                 )
@@ -965,6 +988,8 @@ class ASTParser:
             field = ast.get("field")
             if not field:
                 raise ValueError("Field must be provided for aggregate operations.")
+
+            self._validate_aggregate_field(field)
 
             # Create operation context: "operation_type:field"
             operation_context = f"{op_type}:{field}"
@@ -1159,23 +1184,26 @@ class ASTParser:
     @staticmethod
     def get_requested_action_types(ast: Dict[str, Any]) -> Set[ActionType]:
         all_ops = ASTParser._extract_all_operations(ast)
-        OPERATION_MAPPING = {
-            "create": ActionType.CREATE,
-            "bulk_create": ActionType.BULK_CREATE,
-            "update": ActionType.UPDATE,
-            "update_or_create": ActionType.UPDATE,
-            "delete": ActionType.DELETE,
-            "get": ActionType.READ,
-            "get_or_create": ActionType.READ,
-            "first": ActionType.READ,
-            "last": ActionType.READ,
-            "read": ActionType.READ,
-            "exists": ActionType.READ,
-            "count": ActionType.READ,
-            "sum": ActionType.READ,
-            "avg": ActionType.READ,
-            "min": ActionType.READ,
-            "max": ActionType.READ,
-            "aggregate": ActionType.READ,
+        OPERATION_MAPPING: Dict[str, Set[ActionType]] = {
+            "create": {ActionType.CREATE},
+            "bulk_create": {ActionType.BULK_CREATE},
+            "update": {ActionType.UPDATE},
+            "update_or_create": {ActionType.UPDATE, ActionType.CREATE},
+            "delete": {ActionType.DELETE},
+            "get": {ActionType.READ},
+            "get_or_create": {ActionType.READ, ActionType.CREATE},
+            "first": {ActionType.READ},
+            "last": {ActionType.READ},
+            "read": {ActionType.READ},
+            "exists": {ActionType.READ},
+            "count": {ActionType.READ},
+            "sum": {ActionType.READ},
+            "avg": {ActionType.READ},
+            "min": {ActionType.READ},
+            "max": {ActionType.READ},
+            "aggregate": {ActionType.READ},
         }
-        return {OPERATION_MAPPING.get(op, ActionType.READ) for op in all_ops}
+        result: Set[ActionType] = set()
+        for op in all_ops:
+            result |= OPERATION_MAPPING.get(op, {ActionType.READ})
+        return result

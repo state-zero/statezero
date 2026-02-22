@@ -687,3 +687,16 @@ class ErrorTestCompoundUnique(models.Model):
                 name="unique_group_rank"
             )
         ]
+
+
+class UpdateOnlyItem(models.Model):
+    """Model for testing update_or_create permission gap.
+    Uses a permission that grants READ+UPDATE but NOT CREATE."""
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"UpdateOnlyItem: {self.name}"
+
+    class Meta:
+        app_label = "django_app"

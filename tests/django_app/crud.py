@@ -16,7 +16,7 @@ from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      ExcludedItem, ObjectLevelItem, ComposedItem,
                                      ErrorTestParent, ErrorTestProtectedChild,
                                      ErrorTestUniqueModel, ErrorTestOneToOneModel,
-                                     ErrorTestCompoundUnique)
+                                     ErrorTestCompoundUnique, UpdateOnlyItem)
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
 from statezero.core.classes import AdditionalField, DisplayMetadata, FieldGroup, FieldDisplayConfig
@@ -570,5 +570,16 @@ registry.register(
         searchable_fields={"group", "label"},
         ordering_fields={"group", "rank"},
         permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    UpdateOnlyItem,
+    ModelConfig(
+        model=UpdateOnlyItem,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=["tests.django_app.permissions.UpdateOnlyPermission"],
     ),
 )

@@ -539,6 +539,34 @@ class OwnerFilterPerm(AbstractPermission):
         return {"name", "value", "owner"}
 
 
+class UpdateOnlyPermission(AbstractPermission):
+    """Non-admin: READ+UPDATE only (no CREATE, no DELETE)."""
+
+    def filter_queryset(self, request, queryset):
+        return queryset
+
+    def allowed_actions(self, request, model):
+        if _is_admin(request):
+            return ALL_ACTIONS
+        return {ActionType.READ, ActionType.UPDATE}
+
+    def allowed_object_actions(self, request, obj, model):
+        if _is_admin(request):
+            return ALL_ACTIONS
+        return {ActionType.READ, ActionType.UPDATE}
+
+    def visible_fields(self, request, model):
+        return "__all__"
+
+    def editable_fields(self, request, model):
+        return "__all__"
+
+    def create_fields(self, request, model):
+        if _is_admin(request):
+            return "__all__"
+        return set()
+
+
 class PublicReadPerm(AbstractPermission):
     """Filter queryset to value__gte=100. Actions=READ only."""
 
