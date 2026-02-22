@@ -1,8 +1,16 @@
-from typing import Any, Set, Type
+from typing import Any, Set, Type, Union, Literal
 
 
 from statezero.core.interfaces import AbstractPermission
 from statezero.core.types import ActionType, ORMModel, RequestType
+
+ALL_ACTIONS = {
+    ActionType.CREATE,
+    ActionType.READ,
+    ActionType.UPDATE,
+    ActionType.DELETE,
+    ActionType.BULK_CREATE,
+}
 
 
 # A permission class that only allows read operations unless the user is an admin.
@@ -281,3 +289,283 @@ class FilterInBulkPermission(AbstractPermission):
 
     def get_permission_group_identifier(self, request: RequestType, model: ORMModel) -> str:
         return "filter_in_bulk"
+
+
+# =============================================================================
+# Permission classes for comprehensive client test suite
+# =============================================================================
+
+def _is_admin(request):
+    return hasattr(request, "user") and request.user.is_superuser
+
+
+class ReadOnlyItemPermission(AbstractPermission):
+    """Non-admin: READ only, no editable/creatable fields."""
+
+    def filter_queryset(self, request, queryset):
+        return queryset
+
+    def allowed_actions(self, request, model):
+        if _is_admin(request):
+            return ALL_ACTIONS
+        return {ActionType.READ}
+
+    def allowed_object_actions(self, request, obj, model):
+        if _is_admin(request):
+            return ALL_ACTIONS
+        return {ActionType.READ}
+
+    def visible_fields(self, request, model):
+        return "__all__"
+
+    def editable_fields(self, request, model):
+        if _is_admin(request):
+            return "__all__"
+        return set()
+
+    def create_fields(self, request, model):
+        if _is_admin(request):
+            return "__all__"
+        return set()
+
+
+class NoDeletePermission(AbstractPermission):
+    """Non-admin: CREATE+READ+UPDATE+BULK_CREATE (no DELETE)."""
+
+    def filter_queryset(self, request, queryset):
+        return queryset
+
+    def allowed_actions(self, request, model):
+        if _is_admin(request):
+            return ALL_ACTIONS
+        return {ActionType.CREATE, ActionType.READ, ActionType.UPDATE, ActionType.BULK_CREATE}
+
+    def allowed_object_actions(self, request, obj, model):
+        if _is_admin(request):
+            return ALL_ACTIONS
+        return {ActionType.CREATE, ActionType.READ, ActionType.UPDATE, ActionType.BULK_CREATE}
+
+    def visible_fields(self, request, model):
+        return "__all__"
+
+    def editable_fields(self, request, model):
+        return "__all__"
+
+    def create_fields(self, request, model):
+        return "__all__"
+
+
+class HiddenFieldPermission(AbstractPermission):
+    """Non-admin: visible_fields excludes 'secret'."""
+
+    def filter_queryset(self, request, queryset):
+        return queryset
+
+    def allowed_actions(self, request, model):
+        return ALL_ACTIONS
+
+    def allowed_object_actions(self, request, obj, model):
+        return ALL_ACTIONS
+
+    def visible_fields(self, request, model):
+        if _is_admin(request):
+            return "__all__"
+        # Return all fields except 'secret'
+        from statezero.adaptors.django.config import registry
+        config = registry.get_config(model)
+        all_fields = config.fields if config.fields else set()
+        if not all_fields or all_fields == "__all__":
+            # Get fields from model
+            all_fields = {f.name for f in model._meta.get_fields() if hasattr(f, 'column') or f.name == 'id'}
+        return all_fields - {"secret"}
+
+    def editable_fields(self, request, model):
+        if _is_admin(request):
+            return "__all__"
+        return "__all__"
+
+    def create_fields(self, request, model):
+        if _is_admin(request):
+            return "__all__"
+        return "__all__"
+
+
+class RowFilterPermission(AbstractPermission):
+    """Non-admin: filter_queryset to name__startswith='visible'."""
+
+    def filter_queryset(self, request, queryset):
+        if _is_admin(request):
+            return queryset
+        return queryset.filter(name__startswith="visible")
+
+    def allowed_actions(self, request, model):
+        return ALL_ACTIONS
+
+    def allowed_object_actions(self, request, obj, model):
+        return ALL_ACTIONS
+
+    def visible_fields(self, request, model):
+        return "__all__"
+
+    def editable_fields(self, request, model):
+        return "__all__"
+
+    def create_fields(self, request, model):
+        return "__all__"
+
+
+class RestrictedCreatePermission(AbstractPermission):
+    """Non-admin: create_fields={'name'} only."""
+
+    def filter_queryset(self, request, queryset):
+        return queryset
+
+    def allowed_actions(self, request, model):
+        return ALL_ACTIONS
+
+    def allowed_object_actions(self, request, obj, model):
+        return ALL_ACTIONS
+
+    def visible_fields(self, request, model):
+        return "__all__"
+
+    def editable_fields(self, request, model):
+        return "__all__"
+
+    def create_fields(self, request, model):
+        if _is_admin(request):
+            return "__all__"
+        return {"name"}
+
+
+class RestrictedEditPermission(AbstractPermission):
+    """Non-admin: editable_fields={'name'} only."""
+
+    def filter_queryset(self, request, queryset):
+        return queryset
+
+    def allowed_actions(self, request, model):
+        return ALL_ACTIONS
+
+    def allowed_object_actions(self, request, obj, model):
+        return ALL_ACTIONS
+
+    def visible_fields(self, request, model):
+        return "__all__"
+
+    def editable_fields(self, request, model):
+        if _is_admin(request):
+            return "__all__"
+        return {"name"}
+
+    def create_fields(self, request, model):
+        return "__all__"
+
+
+class ExcludeArchivedPermission(AbstractPermission):
+    """exclude_from_queryset removes name__startswith='archived'. Applies to ALL users."""
+
+    def filter_queryset(self, request, queryset):
+        return queryset
+
+    def exclude_from_queryset(self, request, queryset):
+        return queryset.exclude(name__startswith="archived")
+
+    def allowed_actions(self, request, model):
+        return ALL_ACTIONS
+
+    def allowed_object_actions(self, request, obj, model):
+        return ALL_ACTIONS
+
+    def visible_fields(self, request, model):
+        return "__all__"
+
+    def editable_fields(self, request, model):
+        return "__all__"
+
+    def create_fields(self, request, model):
+        return "__all__"
+
+
+class ObjectOwnerPermission(AbstractPermission):
+    """Object-level: can only update/delete own items (owner == request.user.username)."""
+
+    def filter_queryset(self, request, queryset):
+        return queryset
+
+    def allowed_actions(self, request, model):
+        return ALL_ACTIONS
+
+    def allowed_object_actions(self, request, obj, model):
+        if _is_admin(request):
+            return ALL_ACTIONS
+        if hasattr(obj, 'owner') and hasattr(request, 'user') and obj.owner == request.user.username:
+            return ALL_ACTIONS
+        return {ActionType.READ}
+
+    def visible_fields(self, request, model):
+        return "__all__"
+
+    def editable_fields(self, request, model):
+        return "__all__"
+
+    def create_fields(self, request, model):
+        return "__all__"
+
+
+class OwnerFilterPerm(AbstractPermission):
+    """Filter queryset to owner=request.user.username. Full CRUD on own items."""
+
+    def filter_queryset(self, request, queryset):
+        if _is_admin(request):
+            return queryset
+        if hasattr(request, 'user') and request.user.is_authenticated:
+            return queryset.filter(owner=request.user.username)
+        return queryset.none()
+
+    def allowed_actions(self, request, model):
+        return ALL_ACTIONS
+
+    def allowed_object_actions(self, request, obj, model):
+        return ALL_ACTIONS
+
+    def visible_fields(self, request, model):
+        return {"id", "name", "value", "owner"}
+
+    def editable_fields(self, request, model):
+        return {"name", "value", "owner"}
+
+    def create_fields(self, request, model):
+        return {"name", "value", "owner"}
+
+
+class PublicReadPerm(AbstractPermission):
+    """Filter queryset to value__gte=100. Actions=READ only."""
+
+    def filter_queryset(self, request, queryset):
+        if _is_admin(request):
+            return queryset
+        return queryset.filter(value__gte=100)
+
+    def allowed_actions(self, request, model):
+        if _is_admin(request):
+            return ALL_ACTIONS
+        return {ActionType.READ}
+
+    def allowed_object_actions(self, request, obj, model):
+        if _is_admin(request):
+            return ALL_ACTIONS
+        return {ActionType.READ}
+
+    def visible_fields(self, request, model):
+        return {"id", "name", "value", "secret"}
+
+    def editable_fields(self, request, model):
+        if _is_admin(request):
+            return "__all__"
+        return set()
+
+    def create_fields(self, request, model):
+        if _is_admin(request):
+            return "__all__"
+        return set()

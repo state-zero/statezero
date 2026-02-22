@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.postgres.fields import JSONField
 from django.db import models
 from django.utils import timezone
@@ -416,6 +418,198 @@ class HistoryTestModel(models.Model):
 
     def __str__(self):
         return f"HistoryTestModel: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+# =============================================================================
+# Parity Test Models (AllowAll, exhaustive field types)
+# =============================================================================
+
+class Author(models.Model):
+    name = models.CharField(max_length=100)
+    bio = models.TextField(blank=True, default="")
+    age = models.IntegerField(null=True, blank=True)
+    rating = models.FloatField(default=0.0)
+    salary = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    birth_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(null=True, blank=True)
+    email = models.EmailField(blank=True, default="")
+    website = models.URLField(blank=True, default="")
+    slug = models.SlugField(blank=True, default="")
+    uuid = models.UUIDField(default=uuid.uuid4, editable=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    def __str__(self):
+        return f"Author: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    pages = models.IntegerField(null=True, blank=True)
+    weight = models.FloatField(null=True, blank=True)
+    is_published = models.BooleanField(default=False)
+    publish_date = models.DateField(null=True, blank=True)
+    last_updated = models.DateTimeField(null=True, blank=True)
+    isbn = models.CharField(max_length=13, blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    author = models.ForeignKey(
+        Author, null=True, blank=True, on_delete=models.CASCADE, related_name="books"
+    )
+
+    def __str__(self):
+        return f"Book: {self.title}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class Tag(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+    slug = models.SlugField(blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    priority = models.IntegerField(default=0)
+    created_at = models.DateTimeField(null=True, blank=True)
+    is_featured = models.BooleanField(default=False)
+    metadata = models.JSONField(default=dict, blank=True)
+    cost = MoneyField(max_digits=10, decimal_places=2, default_currency="USD", default=0)
+    books = models.ManyToManyField(Book, blank=True, related_name="tags")
+
+    def __str__(self):
+        return f"Tag: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+# =============================================================================
+# Security Test Models (one model per permission scenario)
+# =============================================================================
+
+class ReadOnlyItem(models.Model):
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    secret = models.CharField(max_length=100, blank=True, default="")
+
+    def __str__(self):
+        return f"ReadOnlyItem: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class NoDeleteItem(models.Model):
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    secret = models.CharField(max_length=100, blank=True, default="")
+
+    def __str__(self):
+        return f"NoDeleteItem: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class HFParent(models.Model):
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    secret = models.CharField(max_length=100, blank=True, default="")
+
+    def __str__(self):
+        return f"HFParent: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class HFChild(models.Model):
+    name = models.CharField(max_length=100)
+    parent = models.ForeignKey(
+        HFParent, on_delete=models.CASCADE, related_name="children"
+    )
+
+    def __str__(self):
+        return f"HFChild: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class RowFilteredItem(models.Model):
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    secret = models.CharField(max_length=100, blank=True, default="")
+
+    def __str__(self):
+        return f"RowFilteredItem: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class RestrictedCreateItem(models.Model):
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    secret = models.CharField(max_length=100, blank=True, default="")
+
+    def __str__(self):
+        return f"RestrictedCreateItem: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class RestrictedEditItem(models.Model):
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    secret = models.CharField(max_length=100, blank=True, default="")
+
+    def __str__(self):
+        return f"RestrictedEditItem: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class ExcludedItem(models.Model):
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    secret = models.CharField(max_length=100, blank=True, default="")
+
+    def __str__(self):
+        return f"ExcludedItem: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class ObjectLevelItem(models.Model):
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    owner = models.CharField(max_length=100)
+
+    def __str__(self):
+        return f"ObjectLevelItem: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class ComposedItem(models.Model):
+    name = models.CharField(max_length=100)
+    value = models.IntegerField(default=0)
+    secret = models.CharField(max_length=100, blank=True, default="")
+    owner = models.CharField(max_length=100, blank=True, default="")
+
+    def __str__(self):
+        return f"ComposedItem: {self.name}"
 
     class Meta:
         app_label = "django_app"

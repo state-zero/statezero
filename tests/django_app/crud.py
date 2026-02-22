@@ -9,7 +9,11 @@ from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      ProductCategory, Order, OrderItem, FileTest,
                                      RatePlan, DailyRate,
                                      ModelWithRestrictedFields, RestrictedFieldRelatedModel,
-                                     M2MDepthTestLevel1, M2MDepthTestLevel2, M2MDepthTestLevel3)
+                                     M2MDepthTestLevel1, M2MDepthTestLevel2, M2MDepthTestLevel3,
+                                     Author, Book, Tag,
+                                     ReadOnlyItem, NoDeleteItem, HFParent, HFChild,
+                                     RowFilteredItem, RestrictedCreateItem, RestrictedEditItem,
+                                     ExcludedItem, ObjectLevelItem, ComposedItem)
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
 from statezero.core.classes import AdditionalField, DisplayMetadata, FieldGroup, FieldDisplayConfig
@@ -347,5 +351,161 @@ registry.register(
         searchable_fields={"name"},
         ordering_fields={"name"},
         permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+
+# =============================================================================
+# Parity Test Models (AllowAll)
+# =============================================================================
+
+registry.register(
+    Author,
+    ModelConfig(
+        model=Author,
+        filterable_fields="__all__",
+        searchable_fields={"name", "bio", "email"},
+        ordering_fields={"name", "age", "rating", "salary", "birth_date", "created_at"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    Book,
+    ModelConfig(
+        model=Book,
+        filterable_fields="__all__",
+        searchable_fields={"title", "description", "isbn"},
+        ordering_fields={"title", "price", "pages", "weight", "publish_date", "last_updated"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    Tag,
+    ModelConfig(
+        model=Tag,
+        filterable_fields="__all__",
+        searchable_fields={"name", "description"},
+        ordering_fields={"name", "priority", "created_at"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+
+# =============================================================================
+# Security Test Models (one model per permission scenario)
+# =============================================================================
+
+registry.register(
+    ReadOnlyItem,
+    ModelConfig(
+        model=ReadOnlyItem,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=["tests.django_app.permissions.ReadOnlyItemPermission"],
+    ),
+)
+
+registry.register(
+    NoDeleteItem,
+    ModelConfig(
+        model=NoDeleteItem,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=["tests.django_app.permissions.NoDeletePermission"],
+    ),
+)
+
+registry.register(
+    HFParent,
+    ModelConfig(
+        model=HFParent,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=["tests.django_app.permissions.HiddenFieldPermission"],
+    ),
+)
+
+registry.register(
+    HFChild,
+    ModelConfig(
+        model=HFChild,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    RowFilteredItem,
+    ModelConfig(
+        model=RowFilteredItem,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=["tests.django_app.permissions.RowFilterPermission"],
+    ),
+)
+
+registry.register(
+    RestrictedCreateItem,
+    ModelConfig(
+        model=RestrictedCreateItem,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=["tests.django_app.permissions.RestrictedCreatePermission"],
+    ),
+)
+
+registry.register(
+    RestrictedEditItem,
+    ModelConfig(
+        model=RestrictedEditItem,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=["tests.django_app.permissions.RestrictedEditPermission"],
+    ),
+)
+
+registry.register(
+    ExcludedItem,
+    ModelConfig(
+        model=ExcludedItem,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=["tests.django_app.permissions.ExcludeArchivedPermission"],
+    ),
+)
+
+registry.register(
+    ObjectLevelItem,
+    ModelConfig(
+        model=ObjectLevelItem,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=["tests.django_app.permissions.ObjectOwnerPermission"],
+    ),
+)
+
+registry.register(
+    ComposedItem,
+    ModelConfig(
+        model=ComposedItem,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name", "value"},
+        permissions=[
+            "tests.django_app.permissions.OwnerFilterPerm",
+            "tests.django_app.permissions.PublicReadPerm",
+        ],
     ),
 )
