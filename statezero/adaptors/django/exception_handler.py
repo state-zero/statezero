@@ -8,7 +8,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 # Import Django/DRF exceptions.
-from django.db.models import Model
+from django.db import DataError, IntegrityError
+from django.db.models import Model, ProtectedError, RestrictedError
 from django.http import Http404
 from fastapi.encoders import jsonable_encoder  # Requires fastapi dependency
 from rest_framework import status
@@ -19,6 +20,7 @@ from rest_framework.response import Response
 
 # Import your custom StateZero exception types.
 from statezero.core.exceptions import (ErrorDetail, StateZeroError,
+                                       ConflictError,
                                        MultipleObjectsReturned, NotFound,
                                        PermissionDenied, ValidationError)
 
@@ -56,6 +58,23 @@ def map_exception(exc):
     if isinstance(exc, DRFPermissionDenied):
         return PermissionDenied(detail=str(exc))
 
+    # Django DB exceptions — full detail kept for debug, safe_detail used in production
+    if isinstance(exc, (ProtectedError, RestrictedError)):
+        mapped = ConflictError(detail=str(exc))
+        mapped.safe_detail = "Cannot delete this object because other objects depend on it."
+        return mapped
+    if isinstance(exc, IntegrityError):
+        raw = str(exc)
+        mapped = ConflictError(detail=raw)
+        # PostgreSQL appends "DETAIL: Key (field)=(value) already exists."
+        # which leaks the conflicting value. Strip it for production.
+        mapped.safe_detail = raw.split("DETAIL:")[0].strip()
+        return mapped
+    if isinstance(exc, DataError):
+        mapped = ValidationError(detail=str(exc))
+        mapped.safe_detail = "Invalid data for the given field."
+        return mapped
+
     return exc
 
 
@@ -75,16 +94,20 @@ def explicit_exception_handler(exc):
         status_code = status.HTTP_403_FORBIDDEN
     elif isinstance(exc, ValidationError):
         status_code = status.HTTP_400_BAD_REQUEST
+    elif isinstance(exc, ConflictError):
+        status_code = status.HTTP_409_CONFLICT
     else:
         status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     # Only show detailed errors for 400 and 404 in production
-    # For 403 and 500 errors, only show details in debug mode
-    if status_code in [status.HTTP_403_FORBIDDEN, status.HTTP_500_INTERNAL_SERVER_ERROR] and not settings.DEBUG:
-        if status_code == status.HTTP_403_FORBIDDEN:
-            detail = "Permission denied"
-        else:
-            detail = "Internal server error"
+    # For 403, 409, and 500 errors, only show details in debug mode
+    _SENSITIVE_CODES = {
+        status.HTTP_403_FORBIDDEN: "Permission denied",
+        status.HTTP_409_CONFLICT: "A database conflict occurred.",
+        status.HTTP_500_INTERNAL_SERVER_ERROR: "Internal server error",
+    }
+    if status_code in _SENSITIVE_CODES and not settings.DEBUG:
+        detail = getattr(exc, "safe_detail", _SENSITIVE_CODES[status_code])
     else:
         detail = jsonable_encoder(exc.detail) if hasattr(exc, "detail") else str(exc)
     

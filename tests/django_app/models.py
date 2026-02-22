@@ -613,3 +613,77 @@ class ComposedItem(models.Model):
 
     class Meta:
         app_label = "django_app"
+
+
+# =============================================================================
+# Error Handling Test Models
+# =============================================================================
+
+class ErrorTestParent(models.Model):
+    """Parent model with a PROTECT FK child to test ProtectedError on delete."""
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return f"ErrorTestParent: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class ErrorTestProtectedChild(models.Model):
+    """Child with PROTECT FK — deleting the parent should raise ProtectedError."""
+    name = models.CharField(max_length=100)
+    parent = models.ForeignKey(
+        ErrorTestParent, on_delete=models.PROTECT, related_name="protected_children"
+    )
+
+    def __str__(self):
+        return f"ErrorTestProtectedChild: {self.name}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class ErrorTestUniqueModel(models.Model):
+    """Model with a unique field to test IntegrityError on duplicate."""
+    code = models.CharField(max_length=50, unique=True)
+    label = models.CharField(max_length=100)
+
+    def __str__(self):
+        return f"ErrorTestUniqueModel: {self.code}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class ErrorTestOneToOneModel(models.Model):
+    """OneToOne to ErrorTestParent — assigning the same parent twice should raise IntegrityError."""
+    parent = models.OneToOneField(
+        ErrorTestParent, on_delete=models.CASCADE, related_name="one_to_one_child"
+    )
+    note = models.CharField(max_length=200, blank=True, default="")
+
+    def __str__(self):
+        return f"ErrorTestOneToOne for {self.parent}"
+
+    class Meta:
+        app_label = "django_app"
+
+
+class ErrorTestCompoundUnique(models.Model):
+    """Model with a compound unique constraint."""
+    group = models.CharField(max_length=50)
+    rank = models.IntegerField()
+    label = models.CharField(max_length=100, blank=True, default="")
+
+    def __str__(self):
+        return f"ErrorTestCompoundUnique: {self.group}/{self.rank}"
+
+    class Meta:
+        app_label = "django_app"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "rank"],
+                name="unique_group_rank"
+            )
+        ]

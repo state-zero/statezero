@@ -90,6 +90,17 @@ class MultipleObjectsReturned(StateZeroError):
         super().__init__(detail, self.default_code)
 
 
+class ConflictError(StateZeroError):
+    """Error raised for database integrity/constraint violations. Corresponds to HTTP 409."""
+
+    status_code = 409
+    default_detail = "Conflict: constraint violation."
+    default_code = "conflict"
+
+    def __init__(self, detail: Optional[Union[str, Dict, List]] = None):
+        super().__init__(detail, self.default_code)
+
+
 class ASTValidationError(StateZeroError):
     """Error raised for invalid query syntax (AST issues)."""
 

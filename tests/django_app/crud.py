@@ -13,7 +13,10 @@ from tests.django_app.models import (ComprehensiveModel, CustomPKModel,
                                      Author, Book, Tag,
                                      ReadOnlyItem, NoDeleteItem, HFParent, HFChild,
                                      RowFilteredItem, RestrictedCreateItem, RestrictedEditItem,
-                                     ExcludedItem, ObjectLevelItem, ComposedItem)
+                                     ExcludedItem, ObjectLevelItem, ComposedItem,
+                                     ErrorTestParent, ErrorTestProtectedChild,
+                                     ErrorTestUniqueModel, ErrorTestOneToOneModel,
+                                     ErrorTestCompoundUnique)
 
 from tests.django_app.hooks import set_created_by, normalize_email, generate_order_number
 from statezero.core.classes import AdditionalField, DisplayMetadata, FieldGroup, FieldDisplayConfig
@@ -507,5 +510,65 @@ registry.register(
             "tests.django_app.permissions.OwnerFilterPerm",
             "tests.django_app.permissions.PublicReadPerm",
         ],
+    ),
+)
+
+
+# =============================================================================
+# Error Handling Test Models (AllowAll — errors come from DB constraints)
+# =============================================================================
+
+registry.register(
+    ErrorTestParent,
+    ModelConfig(
+        model=ErrorTestParent,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    ErrorTestProtectedChild,
+    ModelConfig(
+        model=ErrorTestProtectedChild,
+        filterable_fields="__all__",
+        searchable_fields={"name"},
+        ordering_fields={"name"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    ErrorTestUniqueModel,
+    ModelConfig(
+        model=ErrorTestUniqueModel,
+        filterable_fields="__all__",
+        searchable_fields={"code", "label"},
+        ordering_fields={"code"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    ErrorTestOneToOneModel,
+    ModelConfig(
+        model=ErrorTestOneToOneModel,
+        filterable_fields="__all__",
+        searchable_fields={},
+        ordering_fields={},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
+    ),
+)
+
+registry.register(
+    ErrorTestCompoundUnique,
+    ModelConfig(
+        model=ErrorTestCompoundUnique,
+        filterable_fields="__all__",
+        searchable_fields={"group", "label"},
+        ordering_fields={"group", "rank"},
+        permissions=["statezero.adaptors.django.permissions.AllowAllPermission"],
     ),
 )

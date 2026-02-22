@@ -36,11 +36,16 @@ class MultipleObjectsReturned(StateZeroError):
     status_code = 400
 
 
+class ConflictError(StateZeroError):
+    status_code = 409
+
+
 _ERROR_MAP = {
     "ValidationError": ValidationError,
     "NotFound": NotFound,
     "PermissionDenied": PermissionDenied,
     "MultipleObjectsReturned": MultipleObjectsReturned,
+    "ConflictError": ConflictError,
 }
 
 
