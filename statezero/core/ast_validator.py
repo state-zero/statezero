@@ -14,7 +14,6 @@ _FILTER_MODIFIERS = {
     "contains", "icontains", "startswith", "istartswith",
     "endswith", "iendswith", "lt", "gt", "lte", "gte",
     "in", "eq", "exact", "iexact", "isnull", "range",
-    "regex", "iregex",
     # Date/time transforms
     "year", "month", "day", "hour", "minute", "second",
     "week", "week_day", "iso_week_day", "quarter",

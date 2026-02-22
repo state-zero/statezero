@@ -23,7 +23,6 @@ _FILTER_MODIFIERS = {
     # Lookup operators
     "contains", "icontains", "startswith", "istartswith", "endswith", "iendswith",
     "lt", "gt", "lte", "gte", "in", "eq", "exact", "iexact", "isnull", "range",
-    "regex", "iregex",
     # Date/time parts
     "year", "month", "day", "hour", "minute", "second", "week", "week_day",
     "iso_week_day", "quarter", "iso_year", "date", "time",

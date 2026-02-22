@@ -304,15 +304,6 @@ class TestFilterLookupsParity(ParityTestBase):
             results, Author.objects.filter(age__isnull=False).order_by("id"), ["id", "name"]
         )
 
-    def test_filter_regex(self):
-        results = AuthorClient.objects.filter(name__regex=r"^A").fetch()
-        self.assert_parity(results, Author.objects.filter(name__regex=r"^A"), ["id", "name"])
-
-    def test_filter_iregex(self):
-        results = AuthorClient.objects.filter(name__iregex=r"^a").fetch()
-        self.assert_parity(
-            results, Author.objects.filter(name__iregex=r"^a"), ["id", "name"]
-        )
 
 
 # ===========================================================================
